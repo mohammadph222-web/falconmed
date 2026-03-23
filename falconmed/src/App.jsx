@@ -1,10 +1,24 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import "./App.css";
 import DrugSearch from "./DrugSearch";
 import ShortageTracker from "./ShortageTracker";
 import ExpiryTracker from "./ExpiryTracker";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
 const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
 
@@ -17,6 +31,9 @@ function App() {
     nearExpiryMedicines: 0,
     upcomingRefills: 0
   });
+  const [shortages, setShortages] = useState([]);
+  const [expiries, setExpiries] = useState([]);
+  const [refills, setRefills] = useState([]);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -32,15 +49,21 @@ function App() {
 
         // Load shortages
         const shortagesData = localStorage.getItem('falconmed_shortages');
-        const totalShortages = shortagesData ? JSON.parse(shortagesData).length : 0;
+        const parsedShortages = shortagesData ? JSON.parse(shortagesData) : [];
+        setShortages(parsedShortages);
+        const totalShortages = parsedShortages.length;
 
         // Load near expiry medicines
         const expiriesData = localStorage.getItem('falconmed_expiries');
-        const nearExpiryMedicines = expiriesData ? JSON.parse(expiriesData).filter(e => e.status === 'Near Expiry').length : 0;
+        const parsedExpiries = expiriesData ? JSON.parse(expiriesData) : [];
+        setExpiries(parsedExpiries);
+        const nearExpiryMedicines = parsedExpiries.filter(e => e.status === 'Near Expiry').length;
 
         // Load upcoming refills
         const refillsData = localStorage.getItem('falconmed_refills');
-        const upcomingRefills = refillsData ? JSON.parse(refillsData).filter(r => r.status === 'Upcoming').length : 0;
+        const parsedRefills = refillsData ? JSON.parse(refillsData) : [];
+        setRefills(parsedRefills);
+        const upcomingRefills = parsedRefills.filter(r => r.status === 'Upcoming').length;
 
         setStats(prev => ({
           ...prev,
@@ -55,6 +78,59 @@ function App() {
 
     loadStats();
   }, []);
+
+  const shortageTrendData = useMemo(() => {
+    const dateMap = {};
+    shortages.forEach((item) => {
+      const date = new Date(item.requested_at || item.created_at).toLocaleDateString();
+      dateMap[date] = (dateMap[date] || 0) + 1;
+    });
+    return Object.entries(dateMap).map(([date, count]) => ({ date, count })).slice(-7);
+  }, [shortages]);
+
+  const expiryTimelineData = useMemo(() => {
+    const dateMap = {};
+    expiries.filter((item) => item.status === 'Near Expiry').forEach((item) => {
+      const date = new Date(item.expiry_date).toLocaleDateString();
+      dateMap[date] = (dateMap[date] || 0) + 1;
+    });
+    return Object.entries(dateMap).map(([date, count]) => ({ date, count })).slice(0, 7);
+  }, [expiries]);
+
+  const refillActivityData = useMemo(() => {
+    const upcoming = refills.filter((r) => r.status === 'Upcoming').length;
+    const completed = refills.filter((r) => r.status === 'Completed').length;
+    return [
+      { name: 'Upcoming', value: upcoming },
+      { name: 'Completed', value: completed },
+    ];
+  }, [refills]);
+
+  const alerts = useMemo(() => {
+    const nearExpiry = expiries.filter((e) => e.status === 'Near Expiry').slice(0, 3);
+    const recentShortages = shortages.slice(-3);
+    const upcomingRefills = refills.filter((r) => r.status === 'Upcoming').slice(0, 3);
+    return { nearExpiry, recentShortages, upcomingRefills };
+  }, [expiries, shortages, refills]);
+
+  const mostRequested = useMemo(() => {
+    const drugMap = {};
+    [...shortages, ...expiries, ...refills].forEach((item) => {
+      const drug = item.drug_name;
+      if (drug) {
+        if (!drugMap[drug]) drugMap[drug] = { count: 0, lastDate: null };
+        drugMap[drug].count += 1;
+        const date = new Date(item.requested_at || item.created_at || item.expiry_date || item.next_refill_date);
+        if (!drugMap[drug].lastDate || date > drugMap[drug].lastDate) {
+          drugMap[drug].lastDate = date;
+        }
+      }
+    });
+    return Object.entries(drugMap)
+      .map(([drug, data]) => ({ drug, count: data.count, lastDate: data.lastDate }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [shortages, expiries, refills]);
 
   const renderContent = () => {
     switch (currentPage) {
@@ -108,6 +184,124 @@ function App() {
                   <p>Upcoming Refills</p>
                 </div>
               </div>
+            </div>
+
+            {/* Analytics Charts */}
+            <div className="charts-section">
+              <h2>Analytics Overview</h2>
+              <div className="charts-grid">
+                <div className="chart-card">
+                  <h3>Shortage Trend (Last 7 Days)</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={shortageTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Line type="monotone" dataKey="count" stroke="#3b82f6" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="chart-card">
+                  <h3>Expiry Timeline (Next 7 Days)</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <BarChart data={expiryTimelineData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" />
+                      <YAxis />
+                      <Tooltip />
+                      <Bar dataKey="count" fill="#10b981" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="chart-card">
+                  <h3>Refill Activity</h3>
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie
+                        data={refillActivityData}
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={60}
+                        fill="#8884d8"
+                        dataKey="value"
+                        label
+                      >
+                        {refillActivityData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={index === 0 ? '#3b82f6' : '#10b981'} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+
+            {/* Smart Alerts Panel */}
+            <div className="alerts-panel">
+              <h2>Smart Alerts</h2>
+              <div className="alerts-grid">
+                <div className="alert-card">
+                  <h3>Near Expiry Medicines</h3>
+                  {alerts.nearExpiry.length > 0 ? (
+                    alerts.nearExpiry.map((item) => (
+                      <p key={item.id}>{item.drug_name} - {new Date(item.expiry_date).toLocaleDateString()}</p>
+                    ))
+                  ) : (
+                    <p>No near expiry items.</p>
+                  )}
+                </div>
+                <div className="alert-card">
+                  <h3>Recent Shortage Reports</h3>
+                  {alerts.recentShortages.length > 0 ? (
+                    alerts.recentShortages.map((item) => (
+                      <p key={item.id}>{item.drug_name} - {item.patient_name}</p>
+                    ))
+                  ) : (
+                    <p>No recent shortages.</p>
+                  )}
+                </div>
+                <div className="alert-card">
+                  <h3>Upcoming Refill Reminders</h3>
+                  {alerts.upcomingRefills.length > 0 ? (
+                    alerts.upcomingRefills.map((item) => (
+                      <p key={item.id}>{item.patient_name} - {item.drug_name}</p>
+                    ))
+                  ) : (
+                    <p>No upcoming refills.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Most Requested Medicines */}
+            <div className="most-requested">
+              <h2>Most Requested Medicines</h2>
+              <table className="results-table">
+                <thead>
+                  <tr>
+                    <th>Drug Name</th>
+                    <th>Number of Requests</th>
+                    <th>Last Requested</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mostRequested.length > 0 ? (
+                    mostRequested.map((item) => (
+                      <tr key={item.drug}>
+                        <td>{item.drug}</td>
+                        <td>{item.count}</td>
+                        <td>{item.lastDate ? item.lastDate.toLocaleDateString() : 'N/A'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={3}>No data available.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
 
             <div className="dashboard">
