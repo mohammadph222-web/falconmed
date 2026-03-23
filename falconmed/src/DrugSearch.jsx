@@ -11,6 +11,9 @@ function DrugSearch({ onBack }) {
   const [drugs, setDrugs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [shortages, setShortages] = useState([]);
+  const [expiries, setExpiries] = useState([]);
+  const [refills, setRefills] = useState([]);
 
   const [filters, setFilters] = useState({
     brand: "",
@@ -80,7 +83,21 @@ function DrugSearch({ onBack }) {
       }
     };
 
+    const loadIntelligenceData = () => {
+      try {
+        const shortagesData = localStorage.getItem('falconmed_shortages');
+        const expiriesData = localStorage.getItem('falconmed_expiries');
+        const refillsData = localStorage.getItem('falconmed_refills');
+        setShortages(shortagesData ? JSON.parse(shortagesData) : []);
+        setExpiries(expiriesData ? JSON.parse(expiriesData) : []);
+        setRefills(refillsData ? JSON.parse(refillsData) : []);
+      } catch (error) {
+        console.error('Error loading intelligence data:', error);
+      }
+    };
+
     loadDrugsData();
+    loadIntelligenceData();
   }, []);
 
   const normalizedDrugs = useMemo(
@@ -162,6 +179,46 @@ function DrugSearch({ onBack }) {
   const handleFilterChange = (field) => (event) => {
     setFilters((prev) => ({ ...prev, [field]: event.target.value }));
   };
+
+  const drugIntelligence = useMemo(() => {
+    if (!selectedDrug) return null;
+
+    const drugName = selectedDrug.brand || selectedDrug.generic;
+    const shortageReports = shortages.filter(s => s.drug_name === drugName);
+    const refillRequests = refills.filter(r => r.drug_name === drugName);
+    const expiryAlerts = expiries.filter(e => e.drug_name === drugName);
+
+    const shortageCount = shortageReports.length;
+    const refillCount = refillRequests.length;
+    const expiryCount = expiryAlerts.length;
+
+    const lastShortageDate = shortageReports.length > 0
+      ? new Date(Math.max(...shortageReports.map(s => new Date(s.requested_at || s.created_at))))
+      : null;
+    const lastRefillDate = refillRequests.length > 0
+      ? new Date(Math.max(...refillRequests.map(r => new Date(r.created_at))))
+      : null;
+
+    let status = 'Available';
+    let statusColor = 'green';
+    if (shortageCount > 0) {
+      status = 'Shortage';
+      statusColor = 'red';
+    } else if (expiryAlerts.some(e => e.status === 'Near Expiry')) {
+      status = 'Near Expiry';
+      statusColor = 'orange';
+    }
+
+    return {
+      shortageCount,
+      refillCount,
+      expiryCount,
+      lastShortageDate,
+      lastRefillDate,
+      status,
+      statusColor
+    };
+  }, [selectedDrug, shortages, expiries, refills]);
 
   return (
     <div className="drug-search-container">
@@ -348,6 +405,54 @@ function DrugSearch({ onBack }) {
                       <div className="detail-label">Barcode</div>
                       <div className="detail-value">{selectedDrug.barcode}</div>
                     </div>
+                  )}
+
+                  {/* Drug Intelligence Panel */}
+                  {drugIntelligence && (
+                    <>
+                      <div className="intelligence-section">
+                        <h4>Operational Insights</h4>
+                        <div className="insight-item">
+                          <span className="insight-label">Shortage Reports:</span>
+                          <span className="insight-value">{drugIntelligence.shortageCount}</span>
+                        </div>
+                        <div className="insight-item">
+                          <span className="insight-label">Refill Requests:</span>
+                          <span className="insight-value">{drugIntelligence.refillCount}</span>
+                        </div>
+                        <div className="insight-item">
+                          <span className="insight-label">Expiry Alerts:</span>
+                          <span className="insight-value">{drugIntelligence.expiryCount}</span>
+                        </div>
+                      </div>
+
+                      <div className="intelligence-section">
+                        <h4>Status Indicator</h4>
+                        <div className={`status-badge ${drugIntelligence.statusColor}`}>
+                          {drugIntelligence.status}
+                        </div>
+                      </div>
+
+                      <div className="intelligence-section">
+                        <h4>Usage Insights</h4>
+                        <div className="insight-item">
+                          <span className="insight-label">Times in Shortages:</span>
+                          <span className="insight-value">{drugIntelligence.shortageCount}</span>
+                        </div>
+                        <div className="insight-item">
+                          <span className="insight-label">Last Refill Date:</span>
+                          <span className="insight-value">
+                            {drugIntelligence.lastRefillDate ? drugIntelligence.lastRefillDate.toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="insight-item">
+                          <span className="insight-label">Last Shortage Date:</span>
+                          <span className="insight-value">
+                            {drugIntelligence.lastShortageDate ? drugIntelligence.lastShortageDate.toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </div>
               )}

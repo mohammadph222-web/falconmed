@@ -206,6 +206,64 @@ button:active {
   border: 1px solid #e2e8f0;
 }
 
+/* Drug Intelligence Panel Styles */
+.intelligence-section {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.intelligence-section h4 {
+  margin: 0 0 1rem 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.insight-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.insight-label {
+  font-weight: 500;
+  color: #374151;
+}
+
+.insight-value {
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.status-badge.green {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-badge.orange {
+  background: #fed7aa;
+  color: #9a3412;
+}
+
+.status-badge.red {
+  background: #fecaca;
+  color: #991b1b;
+}
+
 /* Responsive for new sections */
 @media (max-width: 768px) {
   .charts-grid {
