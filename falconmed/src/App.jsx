@@ -4,6 +4,7 @@ import DrugSearch from "./DrugSearch";
 import ShortageTracker from "./ShortageTracker";
 import ExpiryTracker from "./ExpiryTracker";
 import RefillTracker from "./RefillTracker";
+import Reports from "./Reports";
 
 const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
 
@@ -66,12 +67,7 @@ function App() {
       case "refill-tracker":
         return <RefillTracker onBack={() => setCurrentPage("dashboard")} />;
       case "reports":
-        return (
-          <div className="placeholder-content">
-            <h2>Reports</h2>
-            <p>Advanced reporting and analytics features coming soon.</p>
-          </div>
-        );
+        return <Reports onBack={() => setCurrentPage("dashboard")} />;
       case "settings":
         return (
           <div className="placeholder-content">
