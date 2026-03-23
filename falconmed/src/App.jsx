@@ -132,6 +132,109 @@ function App() {
       .slice(0, 5);
   }, [shortages, expiries, refills]);
 
+  const shortagePredictions = useMemo(() => {
+    const drugStats = {};
+
+    // Aggregate data per drug
+    shortages.forEach((item) => {
+      const drug = item.drug_name;
+      if (!drugStats[drug]) drugStats[drug] = { shortages: [], refills: [], expiries: [] };
+      drugStats[drug].shortages.push(item);
+    });
+
+    refills.forEach((item) => {
+      const drug = item.drug_name;
+      if (!drugStats[drug]) drugStats[drug] = { shortages: [], refills: [], expiries: [] };
+      drugStats[drug].refills.push(item);
+    });
+
+    expiries.forEach((item) => {
+      const drug = item.drug_name;
+      if (!drugStats[drug]) drugStats[drug] = { shortages: [], refills: [], expiries: [] };
+      drugStats[drug].expiries.push(item);
+    });
+
+    // Calculate predictions
+    const predictions = Object.entries(drugStats).map(([drug, stats]) => {
+      const shortageCount = stats.shortages.length;
+      const refillCount = stats.refills.length;
+      const expiryCount = stats.expiries.length;
+      const nearExpiryCount = stats.expiries.filter(e => e.status === 'Near Expiry').length;
+
+      let score = 0;
+      const reasons = [];
+
+      // Scoring logic
+      if (shortageCount >= 3) {
+        score += 30;
+        reasons.push('Frequent shortage reports');
+      } else if (shortageCount >= 1) {
+        score += 15;
+        reasons.push('Recent shortage history');
+      }
+
+      if (refillCount >= 5) {
+        score += 25;
+        reasons.push('High refill activity');
+      } else if (refillCount >= 2) {
+        score += 10;
+        reasons.push('Multiple refill requests');
+      }
+
+      if (nearExpiryCount > 0) {
+        score += 10;
+        reasons.push('Near expiry records');
+      }
+
+      // Recent activity bonus
+      const recentShortages = stats.shortages.filter(s => {
+        const date = new Date(s.requested_at || s.created_at);
+        const daysAgo = (new Date() - date) / (1000 * 60 * 60 * 24);
+        return daysAgo <= 30;
+      });
+      if (recentShortages.length > 0) {
+        score += 15;
+        reasons.push('Recent shortage activity');
+      }
+
+      // Determine risk level
+      let riskLevel, riskColor;
+      if (score >= 50) {
+        riskLevel = 'High Risk';
+        riskColor = 'red';
+      } else if (score >= 25) {
+        riskLevel = 'Medium Risk';
+        riskColor = 'orange';
+      } else {
+        riskLevel = 'Low Risk';
+        riskColor = 'green';
+      }
+
+      const lastShortageDate = stats.shortages.length > 0
+        ? new Date(Math.max(...stats.shortages.map(s => new Date(s.requested_at || s.created_at))))
+        : null;
+
+      return {
+        drug,
+        riskLevel,
+        riskColor,
+        reasons: reasons.length > 0 ? reasons : ['Low activity'],
+        lastShortageDate,
+        shortageCount,
+        refillCount
+      };
+    });
+
+    // Sort by score descending and return top 10
+    return predictions
+      .sort((a, b) => {
+        const scoreA = a.riskLevel === 'High Risk' ? 3 : a.riskLevel === 'Medium Risk' ? 2 : 1;
+        const scoreB = b.riskLevel === 'High Risk' ? 3 : b.riskLevel === 'Medium Risk' ? 2 : 1;
+        return scoreB - scoreA;
+      })
+      .slice(0, 10);
+  }, [shortages, expiries, refills]);
+
   const renderContent = () => {
     switch (currentPage) {
       case "drug-search":
@@ -302,6 +405,46 @@ function App() {
                   )}
                 </tbody>
               </table>
+            </div>
+
+            {/* Smart Shortage Prediction */}
+            <div className="shortage-prediction">
+              <h2>Smart Shortage Prediction</h2>
+              <p>AI-powered predictions based on historical data patterns</p>
+              <div className="prediction-cards">
+                {shortagePredictions.length > 0 ? (
+                  shortagePredictions.map((pred) => (
+                    <div key={pred.drug} className="prediction-card">
+                      <div className="prediction-header">
+                        <h3>{pred.drug}</h3>
+                        <span className={`risk-badge ${pred.riskColor}`}>{pred.riskLevel}</span>
+                      </div>
+                      <div className="prediction-details">
+                        <div className="detail-row">
+                          <span className="detail-label">Reason:</span>
+                          <span className="detail-value">{pred.reasons.join(', ')}</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Last Shortage:</span>
+                          <span className="detail-value">
+                            {pred.lastShortageDate ? pred.lastShortageDate.toLocaleDateString() : 'N/A'}
+                          </span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Shortage Reports:</span>
+                          <span className="detail-value">{pred.shortageCount}</span>
+                        </div>
+                        <div className="detail-row">
+                          <span className="detail-label">Refill Activity:</span>
+                          <span className="detail-value">{pred.refillCount}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p className="no-predictions">No prediction data available. Add more records to generate insights.</p>
+                )}
+              </div>
             </div>
 
             <div className="dashboard">
