@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import "./App.css";
 
 const STORAGE_KEY = 'falconmed_expiries';
+const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
 
 function ExpiryTracker({ onBack }) {
   const [expiries, setExpiries] = useState([]);
@@ -33,7 +35,7 @@ function ExpiryTracker({ onBack }) {
   useEffect(() => {
     const loadMedicines = async () => {
       try {
-        const response = await fetch('/drugs.csv');
+        const response = await fetch(DRUGS_CSV_URL);
         if (!response.ok) throw new Error('Failed to load CSV');
         const csvText = await response.text();
         const parsedData = Papa.parse(csvText, { header: false, skipEmptyLines: true });
@@ -116,15 +118,56 @@ function ExpiryTracker({ onBack }) {
     }
   };
 
+  const [sortConfig, setSortConfig] = useState({ key: 'expiry_date', direction: 'asc' });
+
   const getSummary = () => {
     const total = expiries.length;
-    const expired = expiries.filter(e => e.status === 'Expired').length;
-    const nearExpiry = expiries.filter(e => e.status === 'Near Expiry').length;
-    const safe = expiries.filter(e => e.status === 'Safe').length;
+    const expired = expiries.filter((e) => e.status === 'Expired').length;
+    const nearExpiry = expiries.filter((e) => e.status === 'Near Expiry').length;
+    const safe = expiries.filter((e) => e.status === 'Safe').length;
     return { total, expired, nearExpiry, safe };
   };
 
   const summary = getSummary();
+
+  const sortedExpiries = useMemo(() => {
+    const sorted = [...expiries];
+    const { key, direction } = sortConfig;
+
+    sorted.sort((a, b) => {
+      const aVal = a[key] ?? '';
+      const bVal = b[key] ?? '';
+
+      if (key === 'expiry_date') {
+        const aDate = new Date(aVal);
+        const bDate = new Date(bVal);
+        return direction === 'asc' ? aDate - bDate : bDate - aDate;
+      }
+
+      if (key === 'days_left' || key === 'quantity') {
+        const aNum = Number(aVal) || 0;
+        const bNum = Number(bVal) || 0;
+        return direction === 'asc' ? aNum - bNum : bNum - aNum;
+      }
+
+      const aStr = String(aVal).toLowerCase();
+      const bStr = String(bVal).toLowerCase();
+      if (aStr < bStr) return direction === 'asc' ? -1 : 1;
+      if (aStr > bStr) return direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+    return sorted;
+  }, [expiries, sortConfig]);
+
+  const changeSort = (key) => {
+    setSortConfig((prev) => {
+      if (prev.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
 
   const handleExport = () => {
     const ws = XLSX.utils.json_to_sheet(expiries);
@@ -269,21 +312,37 @@ function ExpiryTracker({ onBack }) {
             <table className="expiries-table">
               <thead>
                 <tr>
-                  <th>Drug</th>
-                  <th>Batch</th>
-                  <th>Quantity</th>
-                  <th>Expiry Date</th>
-                  <th>Days Left</th>
-                  <th>Status</th>
-                  <th>Location</th>
-                  <th>Supplier</th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('drug_name')}>Drug</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('batch_no')}>Batch</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('quantity')}>Quantity</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('expiry_date')}>Expiry Date</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('days_left')}>Days Left</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('status')}>Status</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('location')}>Location</button>
+                  </th>
+                  <th>
+                    <button type="button" className="sort-button" onClick={() => changeSort('supplier')}>Supplier</button>
+                  </th>
                   <th>Notes</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {expiries.map((expiry) => (
-                  <tr key={expiry.id}>
+                {sortedExpiries.map((expiry) => (
+                  <tr key={expiry.id} className={expiry.status === 'Near Expiry' ? 'near-expiry-row' : expiry.status === 'Expired' ? 'expired-row' : ''}>
                     <td>{expiry.drug_name}</td>
                     <td>{expiry.batch_no}</td>
                     <td>{expiry.quantity}</td>

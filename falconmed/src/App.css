@@ -120,9 +120,7 @@ button:active {
 .drug-search-container {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  min-height: 100vh;
+  padding: 0;
 }
 
 .drug-search-header {
@@ -270,13 +268,150 @@ button:active {
   font-style: italic;
 }
 
+.table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.table-controls .search-input {
+  width: 260px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+}
+
+.table-controls select {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: white;
+}
+
+.status-select,
+.payment-select,
+.delete-button,
+.export-button,
+.submit-button {
+  transition: all 0.15s ease-in-out;
+}
+
+.status-select,
+.payment-select {
+  min-width: 115px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+}
+
+.shortages-table th,
+.shortages-table td {
+  white-space: nowrap;
+}
+
+.delete-button,
+.export-button,
+.submit-button {
+  background: #3b82f6;
+  color: white;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.delete-button {
+  background: #ef4444;
+}
+
+.export-button {
+  background: #10b981;
+}
+
+.submit-button {
+  background: #1d4ed8;
+}
+
+.delete-button:hover,
+.export-button:hover,
+.submit-button:hover,
+.status-select:hover,
+.payment-select:hover {
+  opacity: 0.9;
+}
+
+.filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+  margin: 1rem 0 0.75rem;
+}
+
+.filter-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.filter-item label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.filter-item input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 0.9rem;
+}
+
+.results-summary {
+  margin: 0.6rem 0 1rem;
+  color: #334155;
+  font-weight: 600;
+}
+
+.autocomplete-list {
+  border: 1px solid #cbd5e1;
+  border-top: none;
+  background: white;
+  position: absolute;
+  width: calc(100% - 2px);
+  margin-top: -0.1rem;
+  z-index: 50;
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.suggestion-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  padding: 0.5rem 0.75rem;
+  color: #1e293b;
+  cursor: pointer;
+}
+
+.suggestion-item:hover {
+  background: #f1f5f9;
+}
+
+.search-input-container {
+  position: relative;
+}
+
 /* Shortage Tracker Styles */
 .shortage-tracker-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem;
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  min-height: 100vh;
+  padding: 0;
 }
 
 .summary-cards {
@@ -323,9 +458,7 @@ button:active {
 .expiry-tracker-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem;
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  min-height: 100vh;
+  padding: 0;
 }
 
 .summary-number.expired {
@@ -334,6 +467,65 @@ button:active {
 
 .summary-number.near-expiry {
   color: #f59e0b;
+}
+
+.expiries-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.expiries-table th,
+.expiries-table td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+  text-align: left;
+  font-size: 0.875rem;
+}
+
+.expiries-table th {
+  background: #f8fafc;
+  color: #334155;
+}
+
+.sort-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #1e40af;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.near-expiry-row {
+  background: #fef3c7;
+}
+
+.expired-row {
+  background: #fee2e2;
+}
+
+.status-badge {
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.status-badge.safe {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.near-expiry {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.status-badge.expired {
+  background: #fecaca;
+  color: #991b1b;
 }
 
 .summary-number.safe {
@@ -375,9 +567,7 @@ button:active {
 .refill-tracker-container {
   max-width: 1400px;
   margin: 0 auto;
-  padding: 2rem;
-  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-  min-height: 100vh;
+  padding: 0;
 }
 
 .summary-number.upcoming {
@@ -423,6 +613,29 @@ button:active {
   background: #f8fafc;
 }
 
+.filter-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.filter-buttons button {
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  padding: 0.35rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+
+.filter-buttons button.active,
+.filter-buttons button:hover {
+  background: #2563eb;
+  color: white;
+  border-color: #2563eb;
+}
+
 .status-badge.upcoming {
   background: #dbeafe;
   color: #1e40af;
@@ -436,6 +649,29 @@ button:active {
 .status-badge.overdue {
   background: #fee2e2;
   color: #dc2626;
+}
+
+.status-badge.completed {
+  background: #dcfce7;
+  color: #065f46;
+  border: 1px solid #10b981;
+}
+
+.upcoming-row {
+  box-shadow: inset 0 0 0 1px #c7d2fe;
+}
+
+.due-row {
+  background: #fef3c7;
+}
+
+.overdue-row {
+  background: #fee2e2;
+  font-weight: 600;
+}
+
+.completed-row {
+  background: #dcfce7;
 }
 
 .expiries-table {
@@ -721,4 +957,213 @@ button:active {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* SaaS Dashboard Layout */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+.sidebar {
+  width: 280px;
+  background: white;
+  border-right: 1px solid #e2e8f0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  height: 100vh;
+  z-index: 1000;
+}
+
+.sidebar-brand {
+  padding: 2rem 1.5rem 1rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.sidebar-brand h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: -0.025em;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: 1rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-nav button {
+  width: 100%;
+  padding: 0.75rem 1.5rem;
+  background: none;
+  border: none;
+  text-align: left;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+  border-left: 3px solid transparent;
+}
+
+.sidebar-nav button:hover {
+  background: #f8fafc;
+  color: #1e293b;
+}
+
+.sidebar-nav button.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border-left-color: #1d4ed8;
+}
+
+.main-content {
+  flex: 1;
+  margin-left: 280px;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  background: white;
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  padding: 1rem 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hamburger {
+  display: none;
+  flex-direction: column;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem;
+}
+
+.hamburger span {
+  width: 20px;
+  height: 2px;
+  background: #1e293b;
+  margin: 2px 0;
+  transition: 0.3s;
+}
+
+.topbar-content h1 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e293b;
+  letter-spacing: -0.025em;
+}
+
+.topbar-content p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.content-area {
+  flex: 1;
+  padding: 2rem;
+  overflow-y: auto;
+}
+
+.placeholder-content {
+  background: white;
+  border-radius: 12px;
+  padding: 3rem;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  border: 1px solid #e2e8f0;
+  text-align: center;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.placeholder-content h2 {
+  margin-bottom: 1rem;
+  color: #1e293b;
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.placeholder-content p {
+  color: #64748b;
+  font-size: 1rem;
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 240px;
+  }
+
+  .main-content {
+    margin-left: 240px;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease-in-out;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .main-content {
+    margin-left: 0;
+  }
+
+  .topbar {
+    padding: 1rem;
+  }
+
+  .hamburger {
+    display: flex;
+  }
+
+  .content-area {
+    padding: 1rem;
+  }
+
+  .topbar-content h1 {
+    font-size: 1.25rem;
+  }
+
+  .topbar-content p {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .content-area {
+    padding: 0.5rem;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .dashboard {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .card {
+    padding: 1.5rem;
+  }
 }

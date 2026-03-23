@@ -1,12 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import "./App.css";
 
 const STORAGE_KEY = 'falconmed_refills';
+const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
 
 function RefillTracker({ onBack }) {
   const [refills, setRefills] = useState([]);
   const [medicines, setMedicines] = useState([]);
+  const [filterStatus, setFilterStatus] = useState('all');
   const [formData, setFormData] = useState({
     patient_name: '',
     phone: '',
@@ -33,7 +36,7 @@ function RefillTracker({ onBack }) {
   useEffect(() => {
     const loadMedicines = async () => {
       try {
-        const response = await fetch('/drugs.csv');
+        const response = await fetch(DRUGS_CSV_URL);
         if (!response.ok) throw new Error('Failed to load CSV');
         const csvText = await response.text();
         const parsedData = Papa.parse(csvText, { header: false, skipEmptyLines: true });
@@ -137,12 +140,22 @@ function RefillTracker({ onBack }) {
     }
   };
 
+  const handleMarkCompleted = (id) => {
+    setRefills(prev => prev.map(refill => refill.id === id ? { ...refill, status: 'Completed' } : refill));
+  };
+
+  const filteredRefills = useMemo(() => {
+    if (filterStatus === 'all') return refills;
+    return refills.filter(refill => refill.status.toLowerCase() === filterStatus);
+  }, [refills, filterStatus]);
+
   const getSummary = () => {
     const total = refills.length;
     const upcoming = refills.filter(r => r.status === 'Upcoming').length;
     const due = refills.filter(r => r.status === 'Due').length;
     const overdue = refills.filter(r => r.status === 'Overdue').length;
-    return { total, upcoming, due, overdue };
+    const completed = refills.filter(r => r.status === 'Completed').length;
+    return { total, upcoming, due, overdue, completed };
   };
 
   const summary = getSummary();
@@ -285,7 +298,14 @@ function RefillTracker({ onBack }) {
       {/* Refills Table */}
       <div className="table-container">
         <div className="table-header">
-          <h3>Refill Records ({refills.length})</h3>
+          <h3>Refill Records ({filteredRefills.length} / {refills.length})</h3>
+          <div className="filter-buttons">
+            <button className={filterStatus === 'all' ? 'active' : ''} onClick={() => setFilterStatus('all')}>All</button>
+            <button className={filterStatus === 'upcoming' ? 'active' : ''} onClick={() => setFilterStatus('upcoming')}>Upcoming</button>
+            <button className={filterStatus === 'due' ? 'active' : ''} onClick={() => setFilterStatus('due')}>Due</button>
+            <button className={filterStatus === 'overdue' ? 'active' : ''} onClick={() => setFilterStatus('overdue')}>Overdue</button>
+            <button className={filterStatus === 'completed' ? 'active' : ''} onClick={() => setFilterStatus('completed')}>Completed</button>
+          </div>
           <button onClick={handleExport} className="export-button">Export to Excel</button>
         </div>
         {refills.length === 0 ? (
@@ -308,8 +328,21 @@ function RefillTracker({ onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {refills.map((refill) => (
-                  <tr key={refill.id}>
+                {filteredRefills.map((refill) => (
+                  <tr
+                    key={refill.id}
+                    className={
+                      refill.status === 'Overdue'
+                        ? 'overdue-row'
+                        : refill.status === 'Due'
+                        ? 'due-row'
+                        : refill.status === 'Upcoming'
+                        ? 'upcoming-row'
+                        : refill.status === 'Completed'
+                        ? 'completed-row'
+                        : ''
+                    }
+                  >
                     <td>{refill.patient_name}</td>
                     <td>{refill.phone}</td>
                     <td>{refill.drug_name}</td>
@@ -324,6 +357,14 @@ function RefillTracker({ onBack }) {
                     </td>
                     <td>{refill.notes}</td>
                     <td>
+                      {refill.status !== 'Completed' && (
+                        <button
+                          className="action-button"
+                          onClick={() => handleMarkCompleted(refill.id)}
+                        >
+                          Mark Completed
+                        </button>
+                      )}
                       <button
                         className="delete-button"
                         onClick={() => handleDelete(refill.id)}
