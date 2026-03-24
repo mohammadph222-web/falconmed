@@ -1,29 +1,40 @@
-import { useState } from "react"
-import { supabase } from "./lib/supabaseClient"
+import { useState } from "react";
+import { supabase } from "./supabaseClient";
 
-export default function Login() {
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [message, setMessage] = useState("")
+export default function Login({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   const handleLogin = async (e) => {
-    e.preventDefault()
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: email,
-      password: password,
-    })
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setMessage(error.message)
-    } else {
-      setMessage("Login successful")
+      if (error) {
+        setMessage(error.message);
+      } else {
+        setMessage("Login successful");
+        if (onLogin) onLogin(data.user);
+      }
+    } catch (err) {
+      setMessage(err.message || "Failed to fetch");
+      console.error("Login error:", err);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
   return (
-    <div style={{ maxWidth: "400px", margin: "50px auto" }}>
-      <h2>FalconMed Login</h2>
+    <div style={{ maxWidth: "420px", margin: "60px auto", padding: "20px" }}>
+      <h2 style={{ textAlign: "center" }}>FalconMed Login</h2>
 
       <form onSubmit={handleLogin}>
         <input
@@ -31,7 +42,13 @@ export default function Login() {
           placeholder="Email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+          required
+          style={{
+            width: "100%",
+            padding: "12px",
+            marginBottom: "12px",
+            fontSize: "16px",
+          }}
         />
 
         <input
@@ -39,15 +56,34 @@ export default function Login() {
           placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          style={{ width: "100%", padding: "10px", marginBottom: "10px" }}
+          required
+          style={{
+            width: "100%",
+            padding: "12px",
+            marginBottom: "12px",
+            fontSize: "16px",
+          }}
         />
 
-        <button style={{ width: "100%", padding: "10px" }}>
-          Login
+        <button
+          type="submit"
+          disabled={loading}
+          style={{
+            width: "100%",
+            padding: "12px",
+            fontSize: "18px",
+            cursor: "pointer",
+          }}
+        >
+          {loading ? "Loading..." : "Login"}
         </button>
       </form>
 
-      <p>{message}</p>
+      {message && (
+        <p style={{ textAlign: "center", marginTop: "16px", color: "#444" }}>
+          {message}
+        </p>
+      )}
     </div>
-  )
+  );
 }
