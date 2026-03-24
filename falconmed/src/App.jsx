@@ -39,103 +39,320 @@ export default function App() {
   };
 
   if (loading) {
-    return <h2 style={{ textAlign: "center" }}>Loading...</h2>;
+    return (
+      <div style={loadingWrap}>
+        <div style={loadingCard}>
+          <h2 style={{ margin: 0 }}>Loading FalconMed...</h2>
+        </div>
+      </div>
+    );
   }
 
   if (!user) {
     return <Login onLogin={setUser} />;
   }
 
+  const renderPage = () => {
+    switch (page) {
+      case "drugsearch":
+        return (
+          <div style={contentCard}>
+            <DrugSearch />
+          </div>
+        );
+      case "expiry":
+        return (
+          <div style={contentCard}>
+            <ExpiryTracker />
+          </div>
+        );
+      case "shortage":
+        return (
+          <div style={contentCard}>
+            <ShortageTracker />
+          </div>
+        );
+      case "reports":
+        return (
+          <div style={contentCard}>
+            <Reports />
+          </div>
+        );
+      case "labels":
+        return (
+          <div style={contentCard}>
+            <LabelBuilder />
+          </div>
+        );
+      case "billing":
+        return (
+          <div style={contentCard}>
+            <Billing />
+          </div>
+        );
+      case "refill":
+        return (
+          <div style={contentCard}>
+            <RefillTracker />
+          </div>
+        );
+      default:
+        return (
+          <>
+            <div style={headerCard}>
+              <h1 style={headerTitle}>FalconMed Dashboard</h1>
+              <p style={headerText}>Welcome back, {user.email}</p>
+            </div>
+
+            <div style={cardsGrid}>
+              <div style={statCard}>
+                <div style={statLabel}>System Status</div>
+                <div style={statValue}>Active</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>Main Module</div>
+                <div style={statValue}>Drug Search</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>Records Loaded</div>
+                <div style={statValue}>22,451</div>
+              </div>
+            </div>
+
+            <div style={contentCard}>
+              <h3 style={sectionTitle}>Overview</h3>
+              <p style={sectionText}>
+                Stable FalconMed version with secure login and restored modules.
+                You can now navigate between dashboard, drug search, expiry,
+                shortage, reports, labels, billing, and refill tracker.
+              </p>
+            </div>
+          </>
+        );
+    }
+  };
+
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      
-      <div
-        style={{
-          width: "260px",
-          background: "#1f2937",
-          color: "white",
-          padding: "20px",
-        }}
-      >
-        <h2>FalconMed</h2>
-        <p style={{ fontSize: "12px" }}>{user.email}</p>
+    <div style={layout}>
+      <aside style={sidebar}>
+        <div>
+          <div style={brandBox}>
+            <h2 style={brandTitle}>FalconMed</h2>
+            <p style={brandSub}>Pharmacy Intelligence Platform</p>
+          </div>
 
-        <button style={btn} onClick={() => setPage("dashboard")}>
-          Dashboard
-        </button>
+          <div style={userCard}>
+            <div style={userLabel}>Signed in as</div>
+            <div style={userEmail}>{user.email}</div>
+          </div>
 
-        <button style={btn} onClick={() => setPage("drugsearch")}>
-          Drug Search
-        </button>
+          <button style={page === "dashboard" ? activeBtn : btn} onClick={() => setPage("dashboard")}>
+            Dashboard
+          </button>
 
-        <button style={btn} onClick={() => setPage("expiry")}>
-          Expiry Tracker
-        </button>
+          <button style={page === "drugsearch" ? activeBtn : btn} onClick={() => setPage("drugsearch")}>
+            Drug Search
+          </button>
 
-        <button style={btn} onClick={() => setPage("shortage")}>
-          Shortage Tracker
-        </button>
+          <button style={page === "expiry" ? activeBtn : btn} onClick={() => setPage("expiry")}>
+            Expiry Tracker
+          </button>
 
-        <button style={btn} onClick={() => setPage("reports")}>
-          Reports
-        </button>
+          <button style={page === "shortage" ? activeBtn : btn} onClick={() => setPage("shortage")}>
+            Shortage Tracker
+          </button>
 
-        <button style={btn} onClick={() => setPage("labels")}>
-          Label Builder
-        </button>
+          <button style={page === "reports" ? activeBtn : btn} onClick={() => setPage("reports")}>
+            Reports
+          </button>
 
-        <button style={btn} onClick={() => setPage("billing")}>
-          Billing
-        </button>
+          <button style={page === "labels" ? activeBtn : btn} onClick={() => setPage("labels")}>
+            Label Builder
+          </button>
 
-        <button style={btn} onClick={() => setPage("refill")}>
-          Refill Tracker
-        </button>
+          <button style={page === "billing" ? activeBtn : btn} onClick={() => setPage("billing")}>
+            Billing
+          </button>
 
-        <button
-          style={{ ...btn, background: "#dc2626", marginTop: "20px" }}
-          onClick={logout}
-        >
+          <button style={page === "refill" ? activeBtn : btn} onClick={() => setPage("refill")}>
+            Refill Tracker
+          </button>
+        </div>
+
+        <button style={logoutBtn} onClick={logout}>
           Logout
         </button>
-      </div>
+      </aside>
 
-      <div style={{ flex: 1, padding: "40px", background: "#f3f4f6" }}>
-
-        {page === "dashboard" && (
-          <div>
-            <h1>FalconMed Dashboard</h1>
-            <p>Welcome {user.email}</p>
-          </div>
-        )}
-
-        {page === "drugsearch" && <DrugSearch />}
-
-        {page === "expiry" && <ExpiryTracker />}
-
-        {page === "shortage" && <ShortageTracker />}
-
-        {page === "reports" && <Reports />}
-
-        {page === "labels" && <LabelBuilder />}
-
-        {page === "billing" && <Billing />}
-
-        {page === "refill" && <RefillTracker />}
-
-      </div>
+      <main style={main}>{renderPage()}</main>
     </div>
   );
 }
 
+const layout = {
+  display: "flex",
+  minHeight: "100vh",
+  background: "#f3f6fb",
+  fontFamily: "Arial, sans-serif",
+};
+
+const sidebar = {
+  width: "270px",
+  background: "#0f172a",
+  color: "white",
+  padding: "24px 18px",
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+  boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+};
+
+const brandBox = {
+  marginBottom: "24px",
+};
+
+const brandTitle = {
+  margin: 0,
+  fontSize: "28px",
+};
+
+const brandSub = {
+  marginTop: "6px",
+  fontSize: "13px",
+  color: "#cbd5e1",
+};
+
+const userCard = {
+  background: "rgba(255,255,255,0.08)",
+  borderRadius: "12px",
+  padding: "14px",
+  marginBottom: "20px",
+};
+
+const userLabel = {
+  fontSize: "12px",
+  color: "#cbd5e1",
+  marginBottom: "6px",
+};
+
+const userEmail = {
+  fontSize: "13px",
+  wordBreak: "break-word",
+};
+
 const btn = {
   display: "block",
   width: "100%",
-  padding: "12px",
+  padding: "12px 14px",
   marginTop: "10px",
-  background: "#374151",
+  background: "#1e293b",
   color: "white",
-  border: "none",
+  border: "1px solid #334155",
+  borderRadius: "10px",
   cursor: "pointer",
   textAlign: "left",
+  fontSize: "15px",
+};
+
+const activeBtn = {
+  ...btn,
+  background: "#2563eb",
+  border: "1px solid #2563eb",
+};
+
+const logoutBtn = {
+  display: "block",
+  width: "100%",
+  padding: "12px 14px",
+  background: "#dc2626",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  textAlign: "left",
+  fontSize: "15px",
+};
+
+const main = {
+  flex: 1,
+  padding: "28px",
+};
+
+const headerCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "24px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  marginBottom: "20px",
+};
+
+const headerTitle = {
+  margin: 0,
+  fontSize: "30px",
+  color: "#0f172a",
+};
+
+const headerText = {
+  marginTop: "8px",
+  color: "#475569",
+};
+
+const cardsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "16px",
+  marginBottom: "20px",
+};
+
+const statCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const statLabel = {
+  fontSize: "13px",
+  color: "#64748b",
+  marginBottom: "10px",
+};
+
+const statValue = {
+  fontSize: "28px",
+  fontWeight: "bold",
+  color: "#0f172a",
+};
+
+const contentCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const sectionTitle = {
+  marginTop: 0,
+  color: "#0f172a",
+};
+
+const sectionText = {
+  color: "#475569",
+  lineHeight: 1.7,
+};
+
+const loadingWrap = {
+  minHeight: "100vh",
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  background: "#f3f6fb",
+};
+
+const loadingCard = {
+  background: "white",
+  padding: "28px 36px",
+  borderRadius: "16px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
 };
