@@ -1936,8 +1936,8 @@ button:active {
 
 .label-builder-body {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1.25rem;
+  grid-template-columns: minmax(360px, 1.1fr) minmax(320px, 0.9fr);
+  gap: 1.1rem;
   align-items: start;
 }
 
@@ -1946,12 +1946,12 @@ button:active {
   background: #ffffff;
   border: 1px solid #d4dfe8;
   border-radius: 12px;
-  padding: 1.25rem 1.4rem;
+  padding: 1.1rem 1.2rem;
   box-shadow: 0 2px 8px rgba(20, 40, 80, 0.05);
 }
 
 .lb-section {
-  margin-bottom: 1.6rem;
+  margin-bottom: 1.3rem;
 }
 
 .lb-section-title {
@@ -1964,9 +1964,32 @@ button:active {
 }
 
 .lb-section-hint {
-  font-size: 0.82rem;
+  font-size: 0.83rem;
   color: #607a96;
   margin: 0 0 0.7rem;
+}
+
+.lb-size-group {
+  display: flex;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.lb-size-btn {
+  border: 1px solid #bfd0e2;
+  background: #f4f8fc;
+  color: #335172;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0.36rem 0.75rem;
+  cursor: pointer;
+}
+
+.lb-size-btn.active {
+  background: #1f5fae;
+  color: #fff;
+  border-color: #1f5fae;
 }
 
 /* ── Inputs ── */
@@ -2005,8 +2028,40 @@ button:active {
 }
 
 .lb-textarea {
-  min-height: 70px;
+  min-height: 72px;
   resize: vertical;
+}
+
+.lb-quick-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+}
+
+.lb-quick-select {
+  margin: 0;
+}
+
+.lb-quick-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.lb-chip {
+  border: 1px solid #bfd0e2;
+  background: #f2f7fd;
+  color: #315275;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  padding: 0.28rem 0.55rem;
+  cursor: pointer;
+}
+
+.lb-chip:hover {
+  background: #e4eef9;
 }
 
 /* ── DB search suggestion box ── */
@@ -2083,7 +2138,7 @@ button:active {
 .lb-actions {
   display: flex;
   gap: 0.75rem;
-  margin-top: 0.5rem;
+  margin-top: 0.25rem;
 }
 
 .lb-btn-print {
@@ -2132,11 +2187,11 @@ button:active {
 /* ── Preview panel ── */
 .label-preview-panel {
   position: sticky;
-  top: 1.5rem;
+  top: 1rem;
   background: #ffffff;
   border: 1px solid #d4dfe8;
   border-radius: 12px;
-  padding: 1.25rem 1.4rem;
+  padding: 1rem;
   box-shadow: 0 2px 8px rgba(20, 40, 80, 0.05);
 }
 
@@ -2151,20 +2206,22 @@ button:active {
 
 /* The actual printable label card */
 .lb-preview-card {
-  border: 1.5px solid #96b4d0;
+  border: 1.5px solid #8caed0;
   border-radius: 8px;
-  padding: 1rem 1.2rem;
-  background: #fafcff;
-  min-height: 180px;
+  padding: 0.9rem 1rem;
+  background: linear-gradient(180deg, #fbfdff 0%, #f7fbff 100%);
+  min-height: 220px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .lb-preview-pharmacy {
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 800;
   color: #1a3a6e;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  margin-bottom: 0.3rem;
+  margin-bottom: 0.22rem;
 }
 
 .lb-preview-pharmacy--placeholder {
@@ -2177,20 +2234,58 @@ button:active {
 
 .lb-preview-divider {
   border: none;
-  border-top: 1.5px dashed #c5d8ec;
-  margin: 0.5rem 0;
+  border-top: 1px dashed #c5d8ec;
+  margin: 0.4rem 0;
 }
 
 .lb-preview-divider--bottom {
-  margin-top: 0.8rem;
+  margin-top: 0.6rem;
+}
+
+.lb-drug-title {
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  color: #1d3960;
+  background: #ecf3fb;
+  border: 1px solid #c4d7eb;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.55rem;
+}
+
+.lb-directions-box {
+  background: #fff4de;
+  border: 1px solid #efcf95;
+  border-radius: 6px;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.55rem;
+}
+
+.lb-directions-label {
+  display: inline-block;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #885806;
+  font-weight: 800;
+  margin-bottom: 0.15rem;
+}
+
+.lb-directions-value {
+  margin: 0;
+  color: #4f3404;
+  font-size: 0.94rem;
+  font-weight: 700;
+  white-space: pre-wrap;
 }
 
 .lb-preview-row {
   display: flex;
   gap: 0.6rem;
-  padding: 0.28rem 0;
+  padding: 0.22rem 0;
   border-bottom: 1px dotted #dde8f2;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
 }
 
 .lb-preview-row:last-of-type {
@@ -2208,6 +2303,30 @@ button:active {
   color: #1a2c44;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.lb-preview-row-note {
+  align-items: flex-start;
+}
+
+.lb-preview-warning {
+  margin-top: 0.5rem;
+  border: 1px solid #e5afb0;
+  background: #fff0f1;
+  border-radius: 6px;
+  padding: 0.4rem 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.lb-preview-warning .lb-preview-label {
+  color: #9f2327;
+  min-width: 0;
+}
+
+.lb-preview-warning .lb-preview-value {
+  color: #6f161a;
 }
 
 .lb-preview-empty {
@@ -2231,6 +2350,41 @@ button:active {
   text-align: center;
 }
 
+.lb-size-small {
+  max-width: 280px;
+  margin-left: auto;
+  margin-right: auto;
+  min-height: 190px;
+}
+
+.lb-size-standard {
+  max-width: 100%;
+  min-height: 220px;
+}
+
+.lb-size-large {
+  max-width: 100%;
+  min-height: 300px;
+  padding: 1.2rem 1.25rem;
+}
+
+.lb-size-large .lb-drug-title {
+  font-size: 1.2rem;
+}
+
+.lb-size-large .lb-directions-value {
+  font-size: 1rem;
+}
+
+.lb-size-small .lb-drug-title {
+  font-size: 0.95rem;
+}
+
+.lb-size-small .lb-preview-row,
+.lb-size-small .lb-directions-value {
+  font-size: 0.82rem;
+}
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .label-builder-body {
@@ -2241,10 +2395,20 @@ button:active {
     position: static;
     order: -1;
   }
+
+  .lb-size-small,
+  .lb-size-standard,
+  .lb-size-large {
+    max-width: 100%;
+  }
 }
 
 /* ── Print: show only the label card ── */
 @media print {
+  @page {
+    margin: 12mm;
+  }
+
   body * {
     visibility: hidden !important;
   }
@@ -2256,12 +2420,23 @@ button:active {
 
   .lb-preview-card {
     position: fixed !important;
-    top: 20mm;
-    left: 15mm;
-    right: 15mm;
+    top: 50% !important;
+    left: 50% !important;
+    right: auto !important;
+    transform: translate(-50%, -50%) !important;
+    width: min(120mm, 92vw) !important;
+    min-height: auto !important;
     border: 1.5px solid #333 !important;
     background: #fff !important;
-    padding: 10mm 12mm !important;
+    padding: 8mm 9mm !important;
     box-shadow: none !important;
+  }
+
+  .lb-size-large {
+    width: min(140mm, 95vw) !important;
+  }
+
+  .lb-size-small {
+    width: min(90mm, 90vw) !important;
   }
 }

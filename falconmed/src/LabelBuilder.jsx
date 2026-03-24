@@ -3,6 +3,23 @@ import Papa from "papaparse";
 import "./App.css";
 import drugsMasterCsv from "./data/drugs_master.csv?raw";
 
+const QUICK_DIRECTIONS = [
+  "Take 1 tablet once daily",
+  "Take 1 tablet twice daily",
+  "Take 1 tablet every 8 hours",
+  "Take after food",
+  "Take before food",
+  "Apply twice daily",
+  "Instill 1 drop in each eye twice daily",
+  "Use as directed by physician",
+];
+
+const LABEL_SIZES = [
+  { key: "small", label: "Small" },
+  { key: "standard", label: "Standard" },
+  { key: "large", label: "Large" },
+];
+
 const EMPTY_FORM = {
   drugName: "",
   strength: "",
@@ -15,6 +32,13 @@ const EMPTY_FORM = {
   dispensingDate: "",
   notes: "",
   warnings: "",
+  // Reserved for future premium add-ons (logo/address/phone/QR)
+  premium: {
+    logoUrl: "",
+    pharmacyAddress: "",
+    pharmacyPhone: "",
+    qrValue: "",
+  },
 };
 
 function LabelBuilder({ onBack }) {
@@ -22,6 +46,7 @@ function LabelBuilder({ onBack }) {
   const [drugQuery, setDrugQuery] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [labelSize, setLabelSize] = useState("standard");
 
   useEffect(() => {
     const parsed = Papa.parse(drugsMasterCsv, {
@@ -79,19 +104,19 @@ function LabelBuilder({ onBack }) {
 
   const canPrint = form.drugName.trim() && form.directions.trim();
 
-  const previewFields = [
-    { key: "pharmacyName", label: "Pharmacy" },
-    { key: "patientName", label: "Patient" },
-    { key: "mrn", label: "MRN / File #" },
-    { key: "doctorName", label: "Prescriber" },
-    { key: "drugName", label: "Medicine" },
-    { key: "strength", label: "Strength" },
-    { key: "dosageForm", label: "Form" },
-    { key: "directions", label: "Directions" },
-    { key: "dispensingDate", label: "Dispensed" },
-    { key: "notes", label: "Notes" },
-    { key: "warnings", label: "⚠ Warnings" },
-  ];
+  const composedDrugLine = useMemo(() => {
+    return [form.drugName, form.strength, form.dosageForm].filter(Boolean).join(" • ");
+  }, [form.drugName, form.strength, form.dosageForm]);
+
+  const metaFields = useMemo(
+    () => [
+      { key: "patientName", label: "Patient" },
+      { key: "mrn", label: "MRN / File #" },
+      { key: "doctorName", label: "Prescriber" },
+      { key: "dispensingDate", label: "Dispensed" },
+    ],
+    []
+  );
 
   return (
     <div className="label-builder-container">
@@ -145,9 +170,26 @@ function LabelBuilder({ onBack }) {
             </div>
           </div>
 
+          <div className="lb-section">
+            <h3 className="lb-section-title">2. Label Size</h3>
+            <div className="lb-size-group" role="radiogroup" aria-label="Label size">
+              {LABEL_SIZES.map((size) => (
+                <button
+                  key={size.key}
+                  type="button"
+                  className={`lb-size-btn ${labelSize === size.key ? "active" : ""}`}
+                  onClick={() => setLabelSize(size.key)}
+                  aria-pressed={labelSize === size.key}
+                >
+                  {size.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Step 2: Required fields */}
           <div className="lb-section">
-            <h3 className="lb-section-title">2. Required Fields</h3>
+            <h3 className="lb-section-title">3. Required Fields</h3>
 
             <label className="lb-label">
               Drug Name <span className="lb-required">*</span>
@@ -184,6 +226,37 @@ function LabelBuilder({ onBack }) {
 
             <label className="lb-label">
               Directions for Use <span className="lb-required">*</span>
+              <div className="lb-quick-row">
+                <select
+                  className="lb-input lb-quick-select"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      updateField("directions", e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                >
+                  <option value="">Quick Directions...</option>
+                  {QUICK_DIRECTIONS.map((item) => (
+                    <option value={item} key={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+                <div className="lb-quick-chips">
+                  {QUICK_DIRECTIONS.slice(0, 4).map((item) => (
+                    <button
+                      type="button"
+                      key={item}
+                      className="lb-chip"
+                      onClick={() => updateField("directions", item)}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <textarea
                 className="lb-input lb-textarea"
                 rows={3}
@@ -196,7 +269,7 @@ function LabelBuilder({ onBack }) {
 
           {/* Step 3: Optional fields */}
           <div className="lb-section">
-            <h3 className="lb-section-title">3. Optional Fields</h3>
+            <h3 className="lb-section-title">4. Optional Fields</h3>
 
             <label className="lb-label">
               Patient Name
@@ -295,7 +368,7 @@ function LabelBuilder({ onBack }) {
         {/* ── Right: Live Preview ── */}
         <section className="label-preview-panel">
           <h3 className="lb-preview-heading">Live Label Preview</h3>
-          <div className="lb-preview-card" id="lb-print-target">
+          <div className={`lb-preview-card lb-size-${labelSize}`} id="lb-print-target">
             {form.pharmacyName ? (
               <div className="lb-preview-pharmacy">{form.pharmacyName}</div>
             ) : (
@@ -304,13 +377,36 @@ function LabelBuilder({ onBack }) {
 
             <div className="lb-preview-divider" />
 
-            {previewFields.map(({ key, label }) =>
+            {composedDrugLine && <div className="lb-drug-title">{composedDrugLine}</div>}
+
+            {form.directions && (
+              <div className="lb-directions-box">
+                <span className="lb-directions-label">Directions</span>
+                <p className="lb-directions-value">{form.directions}</p>
+              </div>
+            )}
+
+            {metaFields.map(({ key, label }) =>
               form[key] ? (
                 <div className="lb-preview-row" key={key}>
                   <span className="lb-preview-label">{label}</span>
                   <span className="lb-preview-value">{form[key]}</span>
                 </div>
               ) : null
+            )}
+
+            {form.notes && (
+              <div className="lb-preview-row lb-preview-row-note">
+                <span className="lb-preview-label">Notes</span>
+                <span className="lb-preview-value">{form.notes}</span>
+              </div>
+            )}
+
+            {form.warnings && (
+              <div className="lb-preview-warning">
+                <span className="lb-preview-label">Warnings</span>
+                <span className="lb-preview-value">{form.warnings}</span>
+              </div>
             )}
 
             {!form.drugName && !form.directions && (
