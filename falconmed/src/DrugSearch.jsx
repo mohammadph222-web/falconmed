@@ -1,8 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import Papa from "papaparse";
 import "./App.css";
-
-const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
+import drugsMasterCsv from "./data/drugs_master.csv?raw";
 
 function DrugSearch({ onBack }) {
   const [query, setQuery] = useState("");
@@ -31,45 +30,57 @@ function DrugSearch({ onBack }) {
   }, [query]);
 
   useEffect(() => {
-    const loadDrugsData = async () => {
+    const loadDrugsData = () => {
       try {
         setLoading(true);
-        const response = await fetch(DRUGS_CSV_URL);
-        if (!response.ok) {
-          throw new Error(`Failed to load drugs data: ${response.status}`);
-        }
-        const csvText = await response.text();
+        const csvText = drugsMasterCsv;
 
-        const parsedData = await new Promise((resolve, reject) => {
-          Papa.parse(csvText, {
-            header: false,
-            skipEmptyLines: true,
-            encoding: 'utf-8',
-            complete: (results) => {
-              if (results.errors.length > 0) {
-                reject(new Error(results.errors[0].message));
-              } else {
-                resolve(results.data);
-              }
-            },
-            error: (error) => reject(error)
-          });
+        const parsedData = Papa.parse(csvText, {
+          header: true,
+          skipEmptyLines: true,
+          dynamicTyping: false,
+          transformHeader: (header) => header.trim().toLowerCase().replace(/[^a-z0-9_]/g, '_'),
         });
 
-        let dataRows = parsedData;
-        if (dataRows.length > 0 && isNaN(parseInt(dataRows[0][0], 10))) {
-          dataRows = dataRows.slice(1);
-        }
+        const dataRows = parsedData.data;
 
         const parsedDrugs = dataRows
           .map((row, index) => {
-            const id = parseInt(row[0], 10) || (index + 1);
-            const brand = (row[1] || '').trim();
-            const generic = (row[2] || '').trim();
-            const strength = (row[3] || '').trim();
-            const dosageForm = (row[4] || '').trim();
-            const barcode = (row[5] || '').trim();
-            return { id, brand, generic, strength, dosageForm, barcode };
+            const drug_code = (row.drug_code || row.drug_code?.trim?.() || '').trim();
+            const brand = (row.brand_name || row.brand_name?.trim?.() || '').trim();
+            const generic = (row.generic_name || row.generic_name?.trim?.() || '').trim();
+            const strength = (row.strength || row.strength?.trim?.() || '').trim();
+            const dosageForm = (row.dosage_form || row.dosage_form?.trim?.() || '').trim();
+            const packageSize = (row.package_size || row.package_size?.trim?.() || '').trim();
+            const rx_otc = (row.rx_otc || row.dispense_mode || row.rx_otc?.trim?.() || '').trim();
+            const price_public = (row.price_public || row.public_price || row.price_public?.trim?.() || '').trim();
+            const price_pharmacy = (row.price_pharmacy || row.pharmacy_price || row.price_pharmacy?.trim?.() || '').trim();
+            const agent = (row.agent || row.agent_name || row.agent?.trim?.() || '').trim();
+            const manufacturer = (row.manufacturer || row.manufacturer_name || row.manufacturer?.trim?.() || '').trim();
+            const upp_scope = (row.upp_scope || row.upp_scope?.trim?.() || '').trim();
+            const thiqa_abm_coverage = (row.thiqa_abm_coverage || row['included_in_thiqa_abm_other_than_1_7_drug_formulary'] || row.thiqa_abm_coverage?.trim?.() || '').trim();
+            const basic_coverage = (row.basic_coverage || row.basic_coverage?.trim?.() || '').trim();
+
+            const id = drug_code || index + 1;
+
+            return {
+              id,
+              drug_code,
+              brand,
+              generic,
+              strength,
+              dosageForm,
+              packageSize,
+              rx_otc,
+              price_public,
+              price_pharmacy,
+              agent,
+              manufacturer,
+              upp_scope,
+              thiqa_abm_coverage,
+              basic_coverage,
+              barcode: (row.barcode || '').trim()
+            };
           })
           .filter((drug) => drug.brand && drug.generic);
 
@@ -104,11 +115,12 @@ function DrugSearch({ onBack }) {
     () =>
       drugs.map((drug) => ({
         ...drug,
-        __brand: drug.brand.toLowerCase(),
-        __generic: drug.generic.toLowerCase(),
-        __strength: drug.strength.toLowerCase(),
-        __dosageForm: drug.dosageForm.toLowerCase(),
-        __barcode: drug.barcode.toLowerCase()
+        __brand: (drug.brand || '').toLowerCase(),
+        __generic: (drug.generic || '').toLowerCase(),
+        __strength: (drug.strength || '').toLowerCase(),
+        __dosageForm: (drug.dosageForm || '').toLowerCase(),
+        __drug_code: (drug.drug_code || '').toLowerCase(),
+        __barcode: (drug.barcode || '').toLowerCase()
       })),
     [drugs]
   );
@@ -146,11 +158,12 @@ function DrugSearch({ onBack }) {
       if (!search) return true;
 
       const isNumeric = /^\d+$/.test(search);
-      if (isNumeric && drug.__barcode.includes(search)) return true;
+      if (isNumeric && (drug.__barcode.includes(search) || drug.__drug_code.includes(search))) return true;
 
       return (
         drug.__brand.includes(search) ||
         drug.__generic.includes(search) ||
+        drug.__drug_code.includes(search) ||
         drug.__strength.includes(search) ||
         drug.__dosageForm.includes(search) ||
         drug.__barcode.includes(search)
@@ -167,6 +180,7 @@ function DrugSearch({ onBack }) {
       if (suggestionSet.size >= 8) break;
       if (drug.__brand.startsWith(input)) suggestionSet.add(drug.brand);
       if (drug.__generic.startsWith(input)) suggestionSet.add(drug.generic);
+      if (drug.__drug_code.startsWith(input)) suggestionSet.add(drug.drug_code);
       if (drug.__strength.startsWith(input)) suggestionSet.add(drug.strength);
       if (drug.__dosageForm.startsWith(input)) suggestionSet.add(drug.dosageForm);
     }
@@ -398,14 +412,48 @@ function DrugSearch({ onBack }) {
                   </div>
                   <div className="detail-item">
                     <div className="detail-label">Dosage Form</div>
-                    <div className="detail-value">{selectedDrug.dosageForm}</div>
+                    <div className="detail-value">{selectedDrug.dosageForm || 'N/A'}</div>
                   </div>
-                  {selectedDrug.barcode && (
-                    <div className="detail-item">
-                      <div className="detail-label">Barcode</div>
-                      <div className="detail-value">{selectedDrug.barcode}</div>
-                    </div>
-                  )}
+                  <div className="detail-item">
+                    <div className="detail-label">Drug Code</div>
+                    <div className="detail-value">{selectedDrug.drug_code || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Package Size</div>
+                    <div className="detail-value">{selectedDrug.packageSize || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Rx/OTC</div>
+                    <div className="detail-value">{selectedDrug.rx_otc || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Public Price</div>
+                    <div className="detail-value">{selectedDrug.price_public || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Pharmacy Price</div>
+                    <div className="detail-value">{selectedDrug.price_pharmacy || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Agent</div>
+                    <div className="detail-value">{selectedDrug.agent || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Manufacturer</div>
+                    <div className="detail-value">{selectedDrug.manufacturer || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">UPP Scope</div>
+                    <div className="detail-value">{selectedDrug.upp_scope || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Thiqa/ABM Coverage</div>
+                    <div className="detail-value">{selectedDrug.thiqa_abm_coverage || 'N/A'}</div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Basic Coverage</div>
+                    <div className="detail-value">{selectedDrug.basic_coverage || 'N/A'}</div>
+                  </div>
 
                   {/* Drug Intelligence Panel */}
                   {drugIntelligence && (

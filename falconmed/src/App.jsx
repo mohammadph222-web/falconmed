@@ -19,8 +19,7 @@ import {
   Pie,
   Cell,
 } from "recharts";
-
-const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
+import drugsMasterCsv from "./data/drugs_master.csv?raw";
 
 function App() {
   const [currentPage, setCurrentPage] = useState("dashboard");
@@ -36,16 +35,12 @@ function App() {
   const [refills, setRefills] = useState([]);
 
   useEffect(() => {
-    const loadStats = async () => {
+    const loadStats = () => {
       try {
-        // Load total medicines from CSV
-        const response = await fetch(DRUGS_CSV_URL);
-        if (response.ok) {
-          const csvText = await response.text();
-          const lines = csvText.trim().split('\n');
-          const totalMedicines = lines.length > 1 ? lines.length - 1 : 0; // Subtract header
-          setStats(prev => ({ ...prev, totalMedicines }));
-        }
+        const csvText = drugsMasterCsv;
+        const lines = csvText.trim().split('\n');
+        const totalMedicines = lines.length > 1 ? lines.length - 1 : 0; // Subtract header
+        setStats(prev => ({ ...prev, totalMedicines }));
 
         // Load shortages
         const shortagesData = localStorage.getItem('falconmed_shortages');
