@@ -6,6 +6,7 @@ import ExpiryTracker from "./ExpiryTracker";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import LabelBuilder from "./LabelBuilder";
+import Billing from "./Billing";
 import {
   LineChart,
   Line,
@@ -245,6 +246,8 @@ function App() {
         return <Reports onBack={() => setCurrentPage("dashboard")} />;
       case "label-builder":
         return <LabelBuilder onBack={() => setCurrentPage("dashboard")} />;
+      case "billing":
+        return <Billing onBack={() => setCurrentPage("dashboard")} />;
       case "settings":
         return (
           <div className="placeholder-content">
@@ -469,6 +472,12 @@ function App() {
                 <p>Manage patient refill requests.</p>
                 <button onClick={() => setCurrentPage("refill-tracker")}>Open</button>
               </div>
+
+              <div className="card">
+                <h2>Billing</h2>
+                <p>Create professional invoices and quotations.</p>
+                <button onClick={() => setCurrentPage("billing")}>Open</button>
+              </div>
             </div>
           </>
         );
@@ -523,6 +532,12 @@ function App() {
             className={currentPage === "label-builder" ? "active" : ""}
           >
             🏷 Label Builder
+          </button>
+          <button
+            onClick={() => { setCurrentPage("billing"); setSidebarOpen(false); }}
+            className={currentPage === "billing" ? "active" : ""}
+          >
+            🧾 Billing
           </button>
           <button
             onClick={() => { setCurrentPage("settings"); setSidebarOpen(false); }}
