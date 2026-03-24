@@ -18,7 +18,11 @@ function DrugSearch({ onBack }) {
     brand: "",
     generic: "",
     strength: "",
-    dosageForm: ""
+    dosageForm: "",
+    rxOtc: "",
+    uppScope: "",
+    thiqaCoverage: "",
+    basicCoverage: ""
   });
 
   // Debounce search query
@@ -142,18 +146,46 @@ function DrugSearch({ onBack }) {
     [drugs]
   );
 
+  const rxOtcOptions = useMemo(
+    () => Array.from(new Set(drugs.map((d) => d.rx_otc).filter(Boolean))).sort(),
+    [drugs]
+  );
+
+  const uppScopeOptions = useMemo(
+    () => Array.from(new Set(drugs.map((d) => d.upp_scope).filter(Boolean))).sort(),
+    [drugs]
+  );
+
+  const thiqaCoverageOptions = useMemo(
+    () => Array.from(new Set(drugs.map((d) => d.thiqa_abm_coverage).filter(Boolean))).sort(),
+    [drugs]
+  );
+
+  const basicCoverageOptions = useMemo(
+    () => Array.from(new Set(drugs.map((d) => d.basic_coverage).filter(Boolean))).sort(),
+    [drugs]
+  );
+
   const filteredDrugs = useMemo(() => {
     const search = debouncedQuery.trim().toLowerCase();
     const brandFilter = filters.brand.trim().toLowerCase();
     const genericFilter = filters.generic.trim().toLowerCase();
     const strengthFilter = filters.strength.trim().toLowerCase();
     const dosageFilter = filters.dosageForm.trim().toLowerCase();
+    const rxOtcFilter = filters.rxOtc.trim().toLowerCase();
+    const uppScopeFilter = filters.uppScope.trim().toLowerCase();
+    const thiqaCoverageFilter = filters.thiqaCoverage.trim().toLowerCase();
+    const basicCoverageFilter = filters.basicCoverage.trim().toLowerCase();
 
     return normalizedDrugs.filter((drug) => {
       if (brandFilter && !drug.__brand.includes(brandFilter)) return false;
       if (genericFilter && !drug.__generic.includes(genericFilter)) return false;
       if (strengthFilter && !drug.__strength.includes(strengthFilter)) return false;
       if (dosageFilter && !drug.__dosageForm.includes(dosageFilter)) return false;
+      if (rxOtcFilter && !(drug.rx_otc || '').toLowerCase().includes(rxOtcFilter)) return false;
+      if (uppScopeFilter && !(drug.upp_scope || '').toLowerCase().includes(uppScopeFilter)) return false;
+      if (thiqaCoverageFilter && !(drug.thiqa_abm_coverage || '').toLowerCase().includes(thiqaCoverageFilter)) return false;
+      if (basicCoverageFilter && !(drug.basic_coverage || '').toLowerCase().includes(basicCoverageFilter)) return false;
 
       if (!search) return true;
 
@@ -234,6 +266,28 @@ function DrugSearch({ onBack }) {
     };
   }, [selectedDrug, shortages, expiries, refills]);
 
+  const getRxOtcClass = (rxotc) => {
+    const norm = (rxotc || '').trim().toLowerCase();
+    if (norm.includes('otc')) return 'badge badge-otc';
+    if (norm.includes('rx') || norm.includes('prescription')) return 'badge badge-rx';
+    return 'badge badge-default';
+  };
+
+  const getCoverageClass = (value) => {
+    const norm = (value || '').trim().toLowerCase();
+    if (/(yes|covered|included|true|1)/.test(norm)) return 'badge badge-covered';
+    if (/(no|not covered|excluded|false|0)/.test(norm)) return 'badge badge-not-covered';
+    return 'badge badge-default';
+  };
+
+  const getCoverageText = (value) => {
+    if (!value) return 'N/A';
+    const norm = value.trim();
+    if (/(no|not covered|excluded|false|0)/i.test(norm)) return 'Not covered';
+    if (/(yes|covered|included|true|1)/i.test(norm)) return 'Covered';
+    return norm;
+  };
+
   return (
     <div className="drug-search-container">
       <div className="drug-search-header">
@@ -264,11 +318,14 @@ function DrugSearch({ onBack }) {
               id="drug-search"
               type="text"
               className="search-input"
-              placeholder="Search by brand / generic / strength / dosage form / barcode"
+              placeholder="Search by brand / generic / drug code / strength / dosage form / barcode"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               autoComplete="off"
             />
+            <div className="search-helper">
+              Search by brand name, generic name, or drug code. Supports partial matches.
+            </div>
             {suggestions.length > 0 && (
               <div className="autocomplete-list">
                 {suggestions.map((item, index) => (
@@ -346,6 +403,66 @@ function DrugSearch({ onBack }) {
                 ))}
               </datalist>
             </div>
+            <div className="filter-item">
+              <label htmlFor="filter-rxotc">Rx / OTC</label>
+              <input
+                id="filter-rxotc"
+                list="rxotc-list"
+                value={filters.rxOtc}
+                onChange={handleFilterChange('rxOtc')}
+                placeholder="Filter by Rx/OTC"
+              />
+              <datalist id="rxotc-list">
+                {rxOtcOptions.map((opt) => (
+                  <option value={opt} key={`rxotc-${opt}`} />
+                ))}
+              </datalist>
+            </div>
+            <div className="filter-item">
+              <label htmlFor="filter-uppscope">UPP Scope</label>
+              <input
+                id="filter-uppscope"
+                list="uppscope-list"
+                value={filters.uppScope}
+                onChange={handleFilterChange('uppScope')}
+                placeholder="Filter by UPP scope"
+              />
+              <datalist id="uppscope-list">
+                {uppScopeOptions.map((opt) => (
+                  <option value={opt} key={`uppscope-${opt}`} />
+                ))}
+              </datalist>
+            </div>
+            <div className="filter-item">
+              <label htmlFor="filter-thiqa">Thiqa/ABM Coverage</label>
+              <input
+                id="filter-thiqa"
+                list="thiqa-list"
+                value={filters.thiqaCoverage}
+                onChange={handleFilterChange('thiqaCoverage')}
+                placeholder="Filter by Thiqa/ABM"
+              />
+              <datalist id="thiqa-list">
+                {thiqaCoverageOptions.map((opt) => (
+                  <option value={opt} key={`thiqa-${opt}`} />
+                ))}
+              </datalist>
+            </div>
+            <div className="filter-item">
+              <label htmlFor="filter-basic">Basic Coverage</label>
+              <input
+                id="filter-basic"
+                list="basic-list"
+                value={filters.basicCoverage}
+                onChange={handleFilterChange('basicCoverage')}
+                placeholder="Filter by Basic Coverage"
+              />
+              <datalist id="basic-list">
+                {basicCoverageOptions.map((opt) => (
+                  <option value={opt} key={`basic-${opt}`} />
+                ))}
+              </datalist>
+            </div>
           </div>
 
           <div className="results-summary">
@@ -368,6 +485,8 @@ function DrugSearch({ onBack }) {
                       <th>Generic</th>
                       <th>Strength</th>
                       <th>Dosage Form</th>
+                      <th>Rx/OTC</th>
+                      <th>Public Price</th>
                       <th>Action</th>
                     </tr>
                   </thead>
@@ -378,6 +497,8 @@ function DrugSearch({ onBack }) {
                         <td>{drug.generic}</td>
                         <td>{drug.strength}</td>
                         <td>{drug.dosageForm}</td>
+                        <td>{drug.rx_otc || 'N/A'}</td>
+                        <td>{drug.price_public || 'N/A'}</td>
                         <td>
                           <button className="view-button" onClick={() => setSelectedDrug(drug)}>View</button>
                         </td>
@@ -394,22 +515,94 @@ function DrugSearch({ onBack }) {
                 <p className="no-selection">Select a drug from the table.</p>
               ) : (
                 <div className="details-content">
-                  <div className="detail-item">
-                    <div className="detail-label">ID</div>
-                    <div className="detail-value">{selectedDrug.id}</div>
+                  <div className="details-section">
+                    <h4>Basic Information</h4>
+                    <div className="detail-item">
+                      <div className="detail-label">Brand Name</div>
+                      <div className="detail-value">{selectedDrug.brand}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Generic Name</div>
+                      <div className="detail-value">{selectedDrug.generic}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Drug Code</div>
+                      <div className="detail-value">{selectedDrug.drug_code || 'N/A'}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Strength</div>
+                      <div className="detail-value">{selectedDrug.strength}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Dosage Form</div>
+                      <div className="detail-value">{selectedDrug.dosageForm || 'N/A'}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Package Size</div>
+                      <div className="detail-value">{selectedDrug.packageSize || 'N/A'}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Rx/OTC</div>
+                      <div className="detail-value">
+                        <span className={getRxOtcClass(selectedDrug.rx_otc)}>
+                          {selectedDrug.rx_otc || 'Unknown'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Brand Name</div>
-                    <div className="detail-value">{selectedDrug.brand}</div>
+
+                  <div className="details-section">
+                    <h4>Pricing</h4>
+                    <div className="detail-item">
+                      <div className="detail-label">Public Price</div>
+                      <div className="detail-value">{selectedDrug.price_public || 'N/A'}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Pharmacy Price</div>
+                      <div className="detail-value">{selectedDrug.price_pharmacy || 'N/A'}</div>
+                    </div>
                   </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Generic Name</div>
-                    <div className="detail-value">{selectedDrug.generic}</div>
+
+                  <div className="details-section">
+                    <h4>Coverage</h4>
+                    <div className="detail-item">
+                      <div className="detail-label">UPP Scope</div>
+                      <div className="detail-value">
+                        <span className={selectedDrug.upp_scope ? 'badge badge-upp' : 'badge badge-default'}>
+                          {selectedDrug.upp_scope || 'N/A'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Thiqa/ABM Coverage</div>
+                      <div className="detail-value">
+                        <span className={getCoverageClass(selectedDrug.thiqa_abm_coverage)}>
+                          {getCoverageText(selectedDrug.thiqa_abm_coverage)}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Basic Coverage</div>
+                      <div className="detail-value">
+                        <span className={getCoverageClass(selectedDrug.basic_coverage)}>
+                          {getCoverageText(selectedDrug.basic_coverage)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Strength</div>
-                    <div className="detail-value">{selectedDrug.strength}</div>
+
+                  <div className="details-section">
+                    <h4>Supplier Information</h4>
+                    <div className="detail-item">
+                      <div className="detail-label">Manufacturer</div>
+                      <div className="detail-value">{selectedDrug.manufacturer || 'N/A'}</div>
+                    </div>
+                    <div className="detail-item">
+                      <div className="detail-label">Agent</div>
+                      <div className="detail-value">{selectedDrug.agent || 'N/A'}</div>
+                    </div>
                   </div>
+
                   <div className="detail-item">
                     <div className="detail-label">Dosage Form</div>
                     <div className="detail-value">{selectedDrug.dosageForm || 'N/A'}</div>
@@ -424,7 +617,35 @@ function DrugSearch({ onBack }) {
                   </div>
                   <div className="detail-item">
                     <div className="detail-label">Rx/OTC</div>
-                    <div className="detail-value">{selectedDrug.rx_otc || 'N/A'}</div>
+                    <div className="detail-value">
+                      <span className={getRxOtcClass(selectedDrug.rx_otc)}>
+                        {selectedDrug.rx_otc || 'Unknown'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">UPP Scope</div>
+                    <div className="detail-value">
+                      <span className={selectedDrug.upp_scope ? 'badge badge-upp' : 'badge badge-default'}>
+                        {selectedDrug.upp_scope || 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Thiqa/ABM Coverage</div>
+                    <div className="detail-value">
+                      <span className={getCoverageClass(selectedDrug.thiqa_abm_coverage)}>
+                        {getCoverageText(selectedDrug.thiqa_abm_coverage)}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="detail-item">
+                    <div className="detail-label">Basic Coverage</div>
+                    <div className="detail-value">
+                      <span className={getCoverageClass(selectedDrug.basic_coverage)}>
+                        {getCoverageText(selectedDrug.basic_coverage)}
+                      </span>
+                    </div>
                   </div>
                   <div className="detail-item">
                     <div className="detail-label">Public Price</div>
@@ -438,23 +659,6 @@ function DrugSearch({ onBack }) {
                     <div className="detail-label">Agent</div>
                     <div className="detail-value">{selectedDrug.agent || 'N/A'}</div>
                   </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Manufacturer</div>
-                    <div className="detail-value">{selectedDrug.manufacturer || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">UPP Scope</div>
-                    <div className="detail-value">{selectedDrug.upp_scope || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Thiqa/ABM Coverage</div>
-                    <div className="detail-value">{selectedDrug.thiqa_abm_coverage || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Basic Coverage</div>
-                    <div className="detail-value">{selectedDrug.basic_coverage || 'N/A'}</div>
-                  </div>
-
                   {/* Drug Intelligence Panel */}
                   {drugIntelligence && (
                     <>
