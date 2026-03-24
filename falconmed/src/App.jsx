@@ -5,6 +5,7 @@ import ShortageTracker from "./ShortageTracker";
 import ExpiryTracker from "./ExpiryTracker";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
+import LabelBuilder from "./LabelBuilder";
 import {
   LineChart,
   Line,
@@ -242,6 +243,8 @@ function App() {
         return <RefillTracker onBack={() => setCurrentPage("dashboard")} />;
       case "reports":
         return <Reports onBack={() => setCurrentPage("dashboard")} />;
+      case "label-builder":
+        return <LabelBuilder onBack={() => setCurrentPage("dashboard")} />;
       case "settings":
         return (
           <div className="placeholder-content">
@@ -514,6 +517,12 @@ function App() {
             className={currentPage === "reports" ? "active" : ""}
           >
             📈 Reports
+          </button>
+          <button
+            onClick={() => { setCurrentPage("label-builder"); setSidebarOpen(false); }}
+            className={currentPage === "label-builder" ? "active" : ""}
+          >
+            🏷 Label Builder
           </button>
           <button
             onClick={() => { setCurrentPage("settings"); setSidebarOpen(false); }}

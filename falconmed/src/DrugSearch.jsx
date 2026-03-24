@@ -288,6 +288,10 @@ function DrugSearch({ onBack }) {
     return norm;
   };
 
+  const closeDetailsModal = () => {
+    setSelectedDrug(null);
+  };
+
   return (
     <div className="drug-search-container">
       <div className="drug-search-header">
@@ -474,47 +478,49 @@ function DrugSearch({ onBack }) {
             </p>
           </div>
 
-          <div className="search-layout">
-            <div className="results-panel">
-              <h3>Drugs</h3>
-              <div style={{ overflowX: "auto" }}>
-                <table className="results-table">
-                  <thead>
-                    <tr>
-                      <th>Brand</th>
-                      <th>Generic</th>
-                      <th>Strength</th>
-                      <th>Dosage Form</th>
-                      <th>Rx/OTC</th>
-                      <th>Public Price</th>
-                      <th>Action</th>
+          <div className="results-panel" style={{ maxWidth: '100%' }}>
+            <h3>Drugs</h3>
+            <div style={{ overflowX: "auto" }}>
+              <table className="results-table">
+                <thead>
+                  <tr>
+                    <th>Brand</th>
+                    <th>Generic</th>
+                    <th>Strength</th>
+                    <th>Dosage Form</th>
+                    <th>Rx/OTC</th>
+                    <th>Public Price</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {displayedRows.map((drug) => (
+                    <tr key={drug.id}>
+                      <td>{drug.brand}</td>
+                      <td>{drug.generic}</td>
+                      <td>{drug.strength}</td>
+                      <td>{drug.dosageForm}</td>
+                      <td>{drug.rx_otc || 'N/A'}</td>
+                      <td>{drug.price_public || 'N/A'}</td>
+                      <td>
+                        <button className="view-button" onClick={() => setSelectedDrug(drug)}>View</button>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {displayedRows.map((drug) => (
-                      <tr key={drug.id}>
-                        <td>{drug.brand}</td>
-                        <td>{drug.generic}</td>
-                        <td>{drug.strength}</td>
-                        <td>{drug.dosageForm}</td>
-                        <td>{drug.rx_otc || 'N/A'}</td>
-                        <td>{drug.price_public || 'N/A'}</td>
-                        <td>
-                          <button className="view-button" onClick={() => setSelectedDrug(drug)}>View</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </div>
+          </div>
 
-            <div className="details-panel">
-              <h3>Drug Details</h3>
-              {!selectedDrug ? (
-                <p className="no-selection">Select a drug from the table.</p>
-              ) : (
-                <div className="details-content">
+          {selectedDrug && (
+            <div className="drug-details-modal-overlay" onClick={closeDetailsModal}>
+              <div className="drug-details-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="drug-details-modal-header">
+                  <h2>{selectedDrug.brand}</h2>
+                  <button className="modal-close-button" onClick={closeDetailsModal}>✕</button>
+                </div>
+
+                <div className="drug-details-modal-body">
                   <div className="details-section">
                     <h4>Basic Information</h4>
                     <div className="detail-item">
@@ -603,66 +609,9 @@ function DrugSearch({ onBack }) {
                     </div>
                   </div>
 
-                  <div className="detail-item">
-                    <div className="detail-label">Dosage Form</div>
-                    <div className="detail-value">{selectedDrug.dosageForm || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Drug Code</div>
-                    <div className="detail-value">{selectedDrug.drug_code || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Package Size</div>
-                    <div className="detail-value">{selectedDrug.packageSize || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Rx/OTC</div>
-                    <div className="detail-value">
-                      <span className={getRxOtcClass(selectedDrug.rx_otc)}>
-                        {selectedDrug.rx_otc || 'Unknown'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">UPP Scope</div>
-                    <div className="detail-value">
-                      <span className={selectedDrug.upp_scope ? 'badge badge-upp' : 'badge badge-default'}>
-                        {selectedDrug.upp_scope || 'N/A'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Thiqa/ABM Coverage</div>
-                    <div className="detail-value">
-                      <span className={getCoverageClass(selectedDrug.thiqa_abm_coverage)}>
-                        {getCoverageText(selectedDrug.thiqa_abm_coverage)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Basic Coverage</div>
-                    <div className="detail-value">
-                      <span className={getCoverageClass(selectedDrug.basic_coverage)}>
-                        {getCoverageText(selectedDrug.basic_coverage)}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Public Price</div>
-                    <div className="detail-value">{selectedDrug.price_public || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Pharmacy Price</div>
-                    <div className="detail-value">{selectedDrug.price_pharmacy || 'N/A'}</div>
-                  </div>
-                  <div className="detail-item">
-                    <div className="detail-label">Agent</div>
-                    <div className="detail-value">{selectedDrug.agent || 'N/A'}</div>
-                  </div>
-                  {/* Drug Intelligence Panel */}
                   {drugIntelligence && (
                     <>
-                      <div className="intelligence-section">
+                      <div className="details-section">
                         <h4>Operational Insights</h4>
                         <div className="insight-item">
                           <span className="insight-label">Shortage Reports:</span>
@@ -678,14 +627,14 @@ function DrugSearch({ onBack }) {
                         </div>
                       </div>
 
-                      <div className="intelligence-section">
+                      <div className="details-section">
                         <h4>Status Indicator</h4>
                         <div className={`status-badge ${drugIntelligence.statusColor}`}>
                           {drugIntelligence.status}
                         </div>
                       </div>
 
-                      <div className="intelligence-section">
+                      <div className="details-section">
                         <h4>Usage Insights</h4>
                         <div className="insight-item">
                           <span className="insight-label">Times in Shortages:</span>
@@ -707,9 +656,9 @@ function DrugSearch({ onBack }) {
                     </>
                   )}
                 </div>
-              )}
+              </div>
             </div>
-          </div>
+          )}
         </>
       )}
     </div>
