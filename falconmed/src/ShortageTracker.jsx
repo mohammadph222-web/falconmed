@@ -1,354 +1,427 @@
-import { useState, useEffect, useMemo } from "react";
-import Papa from "papaparse";
-import * as XLSX from "xlsx";
-import "./App.css";
+import { useMemo, useState } from "react";
 
-const STORAGE_KEY = 'falconmed_shortages';
-const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
+export default function ShortageTracker() {
+  const [items, setItems] = useState([
+    {
+      id: 1,
+      drugName: "Ozempic 1mg",
+      quantityRequested: 3,
+      patientName: "Ahmed Ali",
+      contactNumber: "0501234567",
+      requestDate: "2026-03-24",
+      status: "Pending",
+      notes: "Patient will return tomorrow",
+    },
+    {
+      id: 2,
+      drugName: "Augmentin 1g",
+      quantityRequested: 2,
+      patientName: "Sara Hassan",
+      contactNumber: "0559876543",
+      requestDate: "2026-03-23",
+      status: "Ordered",
+      notes: "Supplier contacted",
+    },
+    {
+      id: 3,
+      drugName: "Enoxaparin 40mg",
+      quantityRequested: 5,
+      patientName: "Mariam Khaled",
+      contactNumber: "0521112233",
+      requestDate: "2026-03-22",
+      status: "Completed",
+      notes: "Patient notified",
+    },
+  ]);
 
-function ShortageTracker({ onBack }) {
-  const [shortages, setShortages] = useState([]);
-  const [medicines, setMedicines] = useState([]);
-  const [formData, setFormData] = useState({
-    drug_name: '',
-    quantity: '',
-    patient_name: '',
-    contact: '',
-    payment_status: 'Unpaid',
-    status: 'Pending',
-    notes: ''
+  const [form, setForm] = useState({
+    drugName: "",
+    quantityRequested: "",
+    patientName: "",
+    contactNumber: "",
+    requestDate: "",
+    status: "Pending",
+    notes: "",
   });
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All');
-
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setShortages(JSON.parse(saved));
-      } catch (error) {
-        console.error('Error loading shortages:', error);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const loadMedicines = async () => {
-      try {
-        const response = await fetch(DRUGS_CSV_URL);
-        if (!response.ok) throw new Error('Failed to load CSV');
-        const csvText = await response.text();
-        const parsedData = Papa.parse(csvText, { header: false, skipEmptyLines: true });
-        let dataRows = parsedData.data;
-        if (dataRows.length > 0 && isNaN(parseInt(dataRows[0][0], 10))) {
-          dataRows = dataRows.slice(1);
-        }
-        const meds = dataRows
-          .map((row) => {
-            return {
-              brand: (row[1] || '').trim(),
-              generic: (row[2] || '').trim(),
-              strength: (row[3] || '').trim(),
-              dosageForm: (row[4] || '').trim()
-            };
-          })
-          .filter((m) => m.brand || m.generic);
-        setMedicines(meds);
-      } catch (error) {
-        console.error('Error loading medicines:', error);
-      }
-    };
-    loadMedicines();
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(shortages));
-  }, [shortages]);
-
-  const drugNameOptions = useMemo(() => {
-    const names = medicines.flatMap((med) => [med.brand, med.generic].filter(Boolean));
-    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
-  }, [medicines]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleAdd = (e) => {
     e.preventDefault();
-    if (!formData.drug_name || !formData.patient_name) {
-      alert('Please fill in at least drug name and patient name');
+
+    if (
+      !form.drugName ||
+      !form.quantityRequested ||
+      !form.patientName ||
+      !form.contactNumber ||
+      !form.requestDate
+    ) {
       return;
     }
 
-    const newShortage = {
+    const newItem = {
       id: Date.now(),
-      drug_name: formData.drug_name,
-      quantity: formData.quantity || 'N/A',
-      patient_name: formData.patient_name,
-      contact: formData.contact || 'N/A',
-      payment_status: formData.payment_status,
-      status: formData.status,
-      notes: formData.notes,
-      requested_at: new Date().toISOString()
+      drugName: form.drugName,
+      quantityRequested: Number(form.quantityRequested),
+      patientName: form.patientName,
+      contactNumber: form.contactNumber,
+      requestDate: form.requestDate,
+      status: form.status,
+      notes: form.notes,
     };
 
-    setShortages((prev) => [newShortage, ...prev]);
-    setFormData({
-      drug_name: '',
-      quantity: '',
-      patient_name: '',
-      contact: '',
-      payment_status: 'Unpaid',
-      status: 'Pending',
-      notes: ''
+    setItems((prev) => [newItem, ...prev]);
+    setForm({
+      drugName: "",
+      quantityRequested: "",
+      patientName: "",
+      contactNumber: "",
+      requestDate: "",
+      status: "Pending",
+      notes: "",
     });
   };
 
-  const handleStatusChange = (id, newStatus) => {
-    setShortages((prev) => prev.map((shortage) =>
-      shortage.id === id ? { ...shortage, status: newStatus } : shortage
-    ));
+  const updateStatus = (id, newStatus) => {
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, status: newStatus } : item
+      )
+    );
   };
 
-  const handlePaymentChange = (id, newPaymentStatus) => {
-    setShortages((prev) => prev.map((shortage) =>
-      shortage.id === id ? { ...shortage, payment_status: newPaymentStatus } : shortage
-    ));
-  };
+  const totals = useMemo(() => {
+    const pending = items.filter((x) => x.status === "Pending").length;
+    const ordered = items.filter((x) => x.status === "Ordered").length;
+    const completed = items.filter((x) => x.status === "Completed").length;
+    const totalQty = items.reduce(
+      (sum, x) => sum + Number(x.quantityRequested || 0),
+      0
+    );
 
-  const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to delete this shortage record?')) {
-      setShortages((prev) => prev.filter((shortage) => shortage.id !== id));
+    return { pending, ordered, completed, totalQty };
+  }, [items]);
+
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case "Pending":
+        return badgePending;
+      case "Ordered":
+        return badgeOrdered;
+      case "Completed":
+        return badgeCompleted;
+      default:
+        return badgePending;
     }
   };
 
-  const summary = useMemo(() => {
-    const total = shortages.length;
-    const pending = shortages.filter((s) => s.status === 'Pending').length;
-    const ordered = shortages.filter((s) => s.status === 'Ordered').length;
-    const ready = shortages.filter((s) => s.status === 'Ready').length;
-    const collected = shortages.filter((s) => s.status === 'Collected').length;
-    const paid = shortages.filter((s) => s.payment_status === 'Paid').length;
-    const unpaid = shortages.filter((s) => s.payment_status === 'Unpaid').length;
-    return { total, pending, ordered, ready, collected, paid, unpaid };
-  }, [shortages]);
-
-  const filteredShortages = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    return shortages.filter((item) => {
-      const matchSearch =
-        !term ||
-        item.drug_name.toLowerCase().includes(term) ||
-        item.patient_name.toLowerCase().includes(term) ||
-        item.contact.toLowerCase().includes(term) ||
-        item.notes.toLowerCase().includes(term);
-
-      const matchStatus = statusFilter === 'All' || item.status === statusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [shortages, searchTerm, statusFilter]);
-
-  const pagedShortages = filteredShortages.slice(0, 1000);
-
-  const uniqueStatuses = ['All', 'Pending', 'Ordered', 'Ready', 'Collected'];
-
   return (
-    <div className="shortage-tracker-container">
-      <div className="drug-search-header">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <h2>Shortage Tracker</h2>
+    <div>
+      <h1 style={pageTitle}>Shortage Tracker</h1>
+
+      <div style={cardsGrid}>
+        <div style={statCard}>
+          <div style={statLabel}>Pending Requests</div>
+          <div style={statValue}>{totals.pending}</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>Ordered Requests</div>
+          <div style={statValue}>{totals.ordered}</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>Completed Requests</div>
+          <div style={statValue}>{totals.completed}</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>Total Quantity Requested</div>
+          <div style={statValue}>{totals.totalQty}</div>
+        </div>
       </div>
 
-      <div className="summary-cards">
-        <div className="summary-card"><h3>Total Requests</h3><p className="summary-number">{summary.total}</p></div>
-        <div className="summary-card"><h3>Pending</h3><p className="summary-number pending">{summary.pending}</p></div>
-        <div className="summary-card"><h3>Ready</h3><p className="summary-number ready">{summary.ready}</p></div>
-        <div className="summary-card"><h3>Collected</h3><p className="summary-number collected">{summary.collected}</p></div>
-        <div className="summary-card"><h3>Paid</h3><p className="summary-number">{summary.paid}</p></div>
-        <div className="summary-card"><h3>Unpaid</h3><p className="summary-number pending">{summary.unpaid}</p></div>
-      </div>
+      <div style={formCard}>
+        <h2 style={sectionTitle}>Add Shortage Request</h2>
 
-      <div className="form-container">
-        <h3>Add New Shortage Request</h3>
-        <form onSubmit={handleSubmit} className="shortage-form">
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="drug_name">Drug Name *</label>
-              <input
-                type="text"
-                id="drug_name"
-                name="drug_name"
-                value={formData.drug_name}
-                onChange={handleInputChange}
-                list="medicines"
-                required
-              />
-              <datalist id="medicines">
-                {drugNameOptions.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </div>
-            <div className="form-group">
-              <label htmlFor="quantity">Requested Quantity</label>
-              <input
-                type="number"
-                id="quantity"
-                name="quantity"
-                value={formData.quantity}
-                onChange={handleInputChange}
-                min="1"
-                placeholder="Units"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="patient_name">Requester / Patient</label>
-              <input
-                type="text"
-                id="patient_name"
-                name="patient_name"
-                value={formData.patient_name}
-                onChange={handleInputChange}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="contact">Contact Number</label>
-              <input
-                type="text"
-                id="contact"
-                name="contact"
-                value={formData.contact}
-                onChange={handleInputChange}
-                placeholder="Mobile or Phone"
-              />
-            </div>
-          </div>
+        <form onSubmit={handleAdd} style={formGrid}>
+          <input
+            style={input}
+            placeholder="Drug Name"
+            value={form.drugName}
+            onChange={(e) => handleChange("drugName", e.target.value)}
+          />
 
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="payment_status">Payment Status</label>
-              <select id="payment_status" name="payment_status" value={formData.payment_status} onChange={handleInputChange}>
-                <option value="Unpaid">Unpaid</option>
-                <option value="Paid">Paid</option>
-              </select>
-            </div>
-            <div className="form-group">
-              <label htmlFor="status">Shortage Status</label>
-              <select id="status" name="status" value={formData.status} onChange={handleInputChange}>
-                <option value="Pending">Pending</option>
-                <option value="Ordered">Ordered</option>
-                <option value="Ready">Ready</option>
-                <option value="Collected">Collected</option>
-              </select>
-            </div>
-            <div className="form-group full-width">
-              <label htmlFor="notes">Note</label>
-              <textarea
-                id="notes"
-                name="notes"
-                value={formData.notes}
-                onChange={handleInputChange}
-                rows="3"
-                placeholder="Additional request notes..."
-              />
-            </div>
-          </div>
+          <input
+            style={input}
+            type="number"
+            placeholder="Quantity Requested"
+            value={form.quantityRequested}
+            onChange={(e) => handleChange("quantityRequested", e.target.value)}
+          />
 
-          <button className="submit-button">Save Request</button>
+          <input
+            style={input}
+            placeholder="Patient Name"
+            value={form.patientName}
+            onChange={(e) => handleChange("patientName", e.target.value)}
+          />
+
+          <input
+            style={input}
+            placeholder="Contact Number"
+            value={form.contactNumber}
+            onChange={(e) => handleChange("contactNumber", e.target.value)}
+          />
+
+          <input
+            style={input}
+            type="date"
+            value={form.requestDate}
+            onChange={(e) => handleChange("requestDate", e.target.value)}
+          />
+
+          <select
+            style={input}
+            value={form.status}
+            onChange={(e) => handleChange("status", e.target.value)}
+          >
+            <option value="Pending">Pending</option>
+            <option value="Ordered">Ordered</option>
+            <option value="Completed">Completed</option>
+          </select>
+
+          <input
+            style={input}
+            placeholder="Notes"
+            value={form.notes}
+            onChange={(e) => handleChange("notes", e.target.value)}
+          />
+
+          <button type="submit" style={primaryBtn}>
+            Add Request
+          </button>
         </form>
       </div>
 
-      <div className="table-controls">
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Search records..."
-          className="search-input"
-        />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-          {uniqueStatuses.map((status) => (
-            <option key={status} value={status}>{status}</option>
-          ))}
-        </select>
-      </div>
+      <div style={tableCard}>
+        <h2 style={sectionTitle}>Tracked Requests</h2>
 
-      <div className="table-container">
-        <div className="table-header">
-          <h3>Shortage Records ({filteredShortages.length})</h3>
-          <button className="export-button" onClick={() => {
-            const ws = XLSX.utils.json_to_sheet(filteredShortages);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, 'Shortages');
-            XLSX.writeFile(wb, 'FalconMed_shortage_export.xlsx');
-          }}>
-            Export to Excel
-          </button>
-        </div>
+        <div style={tableWrap}>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>Drug</th>
+                <th style={th}>Qty</th>
+                <th style={th}>Patient</th>
+                <th style={th}>Contact</th>
+                <th style={th}>Date</th>
+                <th style={th}>Status</th>
+                <th style={th}>Notes</th>
+                <th style={th}>Action</th>
+              </tr>
+            </thead>
 
-        {filteredShortages.length === 0 ? (
-          <p className="no-records">No matching records</p>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table className="shortages-table">
-              <thead>
-                <tr>
-                  <th>Drug</th>
-                  <th>Requester</th>
-                  <th>Qty</th>
-                  <th>Contact</th>
-                  <th>Requested</th>
-                  <th>Payment</th>
-                  <th>Status</th>
-                  <th>Notes</th>
-                  <th>Actions</th>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td style={td}>{item.drugName}</td>
+                  <td style={td}>{item.quantityRequested}</td>
+                  <td style={td}>{item.patientName}</td>
+                  <td style={td}>{item.contactNumber}</td>
+                  <td style={td}>{item.requestDate}</td>
+                  <td style={td}>
+                    <span style={getStatusStyle(item.status)}>{item.status}</span>
+                  </td>
+                  <td style={td}>{item.notes || "-"}</td>
+                  <td style={td}>
+                    <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      <button
+                        style={smallBtn}
+                        onClick={() => updateStatus(item.id, "Pending")}
+                        type="button"
+                      >
+                        Pending
+                      </button>
+                      <button
+                        style={smallBtn}
+                        onClick={() => updateStatus(item.id, "Ordered")}
+                        type="button"
+                      >
+                        Ordered
+                      </button>
+                      <button
+                        style={smallBtn}
+                        onClick={() => updateStatus(item.id, "Completed")}
+                        type="button"
+                      >
+                        Completed
+                      </button>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {pagedShortages.map((record) => (
-                  <tr key={record.id}>
-                    <td>{record.drug_name}</td>
-                    <td>{record.patient_name}</td>
-                    <td>{record.quantity}</td>
-                    <td>{record.contact}</td>
-                    <td>{new Date(record.requested_at).toLocaleString()}</td>
-                    <td>
-                      <select
-                        value={record.payment_status}
-                        onChange={(e) => handlePaymentChange(record.id, e.target.value)}
-                      >
-                        <option value="Unpaid">Unpaid</option>
-                        <option value="Paid">Paid</option>
-                      </select>
-                    </td>
-                    <td>
-                      <select
-                        value={record.status}
-                        onChange={(e) => handleStatusChange(record.id, e.target.value)}
-                      >
-                        <option value="Pending">Pending</option>
-                        <option value="Ordered">Ordered</option>
-                        <option value="Ready">Ready</option>
-                        <option value="Collected">Collected</option>
-                      </select>
-                    </td>
-                    <td>{record.notes}</td>
-                    <td>
-                      <button className="delete-button" onClick={() => handleDelete(record.id)}>Delete</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+              ))}
+
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan="8" style={emptyCell}>
+                    No shortage requests found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
 
-export default ShortageTracker;
+const pageTitle = {
+  fontSize: "26px",
+  marginTop: 0,
+  marginBottom: "22px",
+  color: "#0f172a",
+};
+
+const cardsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "16px",
+  marginBottom: "22px",
+};
+
+const statCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const statLabel = {
+  fontSize: "13px",
+  color: "#64748b",
+  marginBottom: "10px",
+};
+
+const statValue = {
+  fontSize: "24px",
+  fontWeight: "bold",
+  color: "#0f172a",
+};
+
+const formCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  marginBottom: "22px",
+};
+
+const sectionTitle = {
+  marginTop: 0,
+  marginBottom: "16px",
+  color: "#0f172a",
+};
+
+const formGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "14px",
+};
+
+const input = {
+  width: "100%",
+  padding: "12px 14px",
+  fontSize: "15px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const primaryBtn = {
+  padding: "12px 14px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "15px",
+  fontWeight: "bold",
+};
+
+const tableCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const tableWrap = {
+  overflowX: "auto",
+};
+
+const table = {
+  width: "100%",
+  borderCollapse: "collapse",
+};
+
+const th = {
+  textAlign: "left",
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: "14px",
+};
+
+const td = {
+  padding: "12px",
+  borderBottom: "1px solid #f1f5f9",
+  color: "#0f172a",
+  fontSize: "14px",
+  verticalAlign: "top",
+};
+
+const badgeBase = {
+  display: "inline-block",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const badgePending = {
+  ...badgeBase,
+  background: "#fef3c7",
+  color: "#92400e",
+};
+
+const badgeOrdered = {
+  ...badgeBase,
+  background: "#dbeafe",
+  color: "#1d4ed8",
+};
+
+const badgeCompleted = {
+  ...badgeBase,
+  background: "#dcfce7",
+  color: "#166534",
+};
+
+const smallBtn = {
+  padding: "8px 10px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontSize: "12px",
+};
+
+const emptyCell = {
+  padding: "24px",
+  textAlign: "center",
+  color: "#64748b",
+};

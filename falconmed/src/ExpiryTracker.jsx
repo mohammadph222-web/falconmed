@@ -1,382 +1,405 @@
-import { useState, useEffect, useMemo } from "react";
-import Papa from "papaparse";
-import * as XLSX from "xlsx";
-import "./App.css";
+import { useMemo, useState } from "react";
 
-const STORAGE_KEY = 'falconmed_expiries';
-const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
+export default function ExpiryTracker() {
+  const [items, setItems] = useState([
+    {
+      id: 1,
+      drugName: "Meropenem 1g Injection",
+      batchNo: "MER-2401",
+      quantity: 120,
+      expiryDate: "2026-06-15",
+      unitPrice: 18,
+      location: "Main Store",
+    },
+    {
+      id: 2,
+      drugName: "Enoxaparin 40mg",
+      batchNo: "ENO-2219",
+      quantity: 75,
+      expiryDate: "2026-04-10",
+      unitPrice: 22,
+      location: "Inpatient Pharmacy",
+    },
+    {
+      id: 3,
+      drugName: "Insulin Glargine",
+      batchNo: "INS-903",
+      quantity: 44,
+      expiryDate: "2026-02-01",
+      unitPrice: 95,
+      location: "Fridge A",
+    },
+  ]);
 
-function ExpiryTracker({ onBack }) {
-  const [expiries, setExpiries] = useState([]);
-  const [medicines, setMedicines] = useState([]);
-  const [formData, setFormData] = useState({
-    drug_name: '',
-    batch_no: '',
-    quantity: '',
-    expiry_date: '',
-    location: '',
-    supplier: '',
-    notes: ''
+  const [form, setForm] = useState({
+    drugName: "",
+    batchNo: "",
+    quantity: "",
+    expiryDate: "",
+    unitPrice: "",
+    location: "",
   });
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setExpiries(JSON.parse(saved));
-      } catch (error) {
-        console.error('Error loading expiries:', error);
-      }
-    }
-  }, []);
+  const today = new Date();
 
-  // Load medicines from CSV
-  useEffect(() => {
-    const loadMedicines = async () => {
-      try {
-        const response = await fetch(DRUGS_CSV_URL);
-        if (!response.ok) throw new Error('Failed to load CSV');
-        const csvText = await response.text();
-        const parsedData = Papa.parse(csvText, { header: false, skipEmptyLines: true });
-        let dataRows = parsedData.data;
-        if (dataRows.length > 0 && isNaN(parseInt(dataRows[0][0], 10))) {
-          dataRows = dataRows.slice(1);
-        }
-        const meds = dataRows.map(row => ({
-          brand: row[1] || '',
-          generic: row[2] || ''
-        })).filter(m => m.brand || m.generic);
-        setMedicines(meds);
-      } catch (error) {
-        console.error('Error loading medicines:', error);
-      }
-    };
-    loadMedicines();
-  }, []);
-
-  // Save to localStorage whenever expiries change
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(expiries));
-  }, [expiries]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-
-  const calculateDaysLeft = (expiryDate) => {
-    const today = new Date();
-    const expiry = new Date(expiryDate);
+  const getMonthsLeft = (dateStr) => {
+    const expiry = new Date(dateStr);
     const diffTime = expiry - today;
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays;
+    return diffDays / 30;
   };
 
-  const getStatus = (daysLeft) => {
-    if (daysLeft < 0) return 'Expired';
-    if (daysLeft <= 90) return 'Near Expiry';
-    return 'Safe';
+  const getStatus = (dateStr) => {
+    const monthsLeft = getMonthsLeft(dateStr);
+
+    if (monthsLeft < 0) return "Expired";
+    if (monthsLeft <= 3) return "High Risk";
+    if (monthsLeft <= 6) return "Near Expiry";
+    return "OK";
   };
 
-  const handleSubmit = (e) => {
+  const getStatusStyle = (status) => {
+    switch (status) {
+      case "Expired":
+        return badgeExpired;
+      case "High Risk":
+        return badgeHighRisk;
+      case "Near Expiry":
+        return badgeNear;
+      default:
+        return badgeOk;
+    }
+  };
+
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleAdd = (e) => {
     e.preventDefault();
-    if (!formData.drug_name || !formData.expiry_date) {
-      alert('Please fill in at least drug name and expiry date');
+
+    if (
+      !form.drugName ||
+      !form.batchNo ||
+      !form.quantity ||
+      !form.expiryDate ||
+      !form.unitPrice ||
+      !form.location
+    ) {
       return;
     }
 
-    const daysLeft = calculateDaysLeft(formData.expiry_date);
-    const status = getStatus(daysLeft);
-
-    const newExpiry = {
+    const newItem = {
       id: Date.now(),
-      ...formData,
-      days_left: daysLeft,
-      status,
-      created_at: new Date().toISOString()
+      drugName: form.drugName,
+      batchNo: form.batchNo,
+      quantity: Number(form.quantity),
+      expiryDate: form.expiryDate,
+      unitPrice: Number(form.unitPrice),
+      location: form.location,
     };
 
-    setExpiries(prev => [...prev, newExpiry]);
-    setFormData({
-      drug_name: '',
-      batch_no: '',
-      quantity: '',
-      expiry_date: '',
-      location: '',
-      supplier: '',
-      notes: ''
+    setItems((prev) => [newItem, ...prev]);
+    setForm({
+      drugName: "",
+      batchNo: "",
+      quantity: "",
+      expiryDate: "",
+      unitPrice: "",
+      location: "",
     });
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to delete this expiry record?')) {
-      setExpiries(prev => prev.filter(expiry => expiry.id !== id));
-    }
-  };
+  const totals = useMemo(() => {
+    let totalValue = 0;
+    let nearExpiryValue = 0;
+    let highRiskValue = 0;
+    let expiredValue = 0;
 
-  const [sortConfig, setSortConfig] = useState({ key: 'expiry_date', direction: 'asc' });
+    items.forEach((item) => {
+      const value = Number(item.quantity) * Number(item.unitPrice);
+      const status = getStatus(item.expiryDate);
 
-  const getSummary = () => {
-    const total = expiries.length;
-    const expired = expiries.filter((e) => e.status === 'Expired').length;
-    const nearExpiry = expiries.filter((e) => e.status === 'Near Expiry').length;
-    const safe = expiries.filter((e) => e.status === 'Safe').length;
-    return { total, expired, nearExpiry, safe };
-  };
-
-  const summary = getSummary();
-
-  const sortedExpiries = useMemo(() => {
-    const sorted = [...expiries];
-    const { key, direction } = sortConfig;
-
-    sorted.sort((a, b) => {
-      const aVal = a[key] ?? '';
-      const bVal = b[key] ?? '';
-
-      if (key === 'expiry_date') {
-        const aDate = new Date(aVal);
-        const bDate = new Date(bVal);
-        return direction === 'asc' ? aDate - bDate : bDate - aDate;
-      }
-
-      if (key === 'days_left' || key === 'quantity') {
-        const aNum = Number(aVal) || 0;
-        const bNum = Number(bVal) || 0;
-        return direction === 'asc' ? aNum - bNum : bNum - aNum;
-      }
-
-      const aStr = String(aVal).toLowerCase();
-      const bStr = String(bVal).toLowerCase();
-      if (aStr < bStr) return direction === 'asc' ? -1 : 1;
-      if (aStr > bStr) return direction === 'asc' ? 1 : -1;
-      return 0;
+      totalValue += value;
+      if (status === "Near Expiry") nearExpiryValue += value;
+      if (status === "High Risk") highRiskValue += value;
+      if (status === "Expired") expiredValue += value;
     });
 
-    return sorted;
-  }, [expiries, sortConfig]);
-
-  const changeSort = (key) => {
-    setSortConfig((prev) => {
-      if (prev.key === key) {
-        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
-      }
-      return { key, direction: 'asc' };
-    });
-  };
-
-  const handleExport = () => {
-    const ws = XLSX.utils.json_to_sheet(expiries);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Expiries");
-    XLSX.writeFile(wb, "FalconMed_expiry_export.xlsx");
-  };
+    return {
+      totalValue,
+      nearExpiryValue,
+      highRiskValue,
+      expiredValue,
+    };
+  }, [items]);
 
   return (
-    <div className="expiry-tracker-container">
-      <div className="drug-search-header">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <h2>Expiry Tracker</h2>
+    <div>
+      <h1 style={pageTitle}>Expiry Tracker</h1>
+
+      <div style={cardsGrid}>
+        <div style={statCard}>
+          <div style={statLabel}>Total Stock Value</div>
+          <div style={statValue}>{totals.totalValue.toLocaleString()} AED</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>Near Expiry Value</div>
+          <div style={statValue}>{totals.nearExpiryValue.toLocaleString()} AED</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>High Risk Value</div>
+          <div style={statValue}>{totals.highRiskValue.toLocaleString()} AED</div>
+        </div>
+
+        <div style={statCard}>
+          <div style={statLabel}>Expired Value</div>
+          <div style={statValue}>{totals.expiredValue.toLocaleString()} AED</div>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="summary-cards">
-        <div className="summary-card">
-          <h3>Total Items</h3>
-          <p className="summary-number">{summary.total}</p>
-        </div>
-        <div className="summary-card">
-          <h3>Expired</h3>
-          <p className="summary-number expired">{summary.expired}</p>
-        </div>
-        <div className="summary-card">
-          <h3>Near Expiry</h3>
-          <p className="summary-number near-expiry">{summary.nearExpiry}</p>
-        </div>
-        <div className="summary-card">
-          <h3>Safe</h3>
-          <p className="summary-number safe">{summary.safe}</p>
-        </div>
-      </div>
+      <div style={formCard}>
+        <h2 style={sectionTitle}>Add Expiry Item</h2>
 
-      {/* Add New Expiry Form */}
-      <div className="form-container">
-        <h3>Add New Expiry Item</h3>
-        <form onSubmit={handleSubmit} className="expiry-form">
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="drug_name">Drug Name *</label>
-              <input
-                type="text"
-                id="drug_name"
-                name="drug_name"
-                value={formData.drug_name}
-                onChange={handleInputChange}
-                list="medicines"
-                required
-              />
-              <datalist id="medicines">
-                {medicines.map((med, index) => [
-                  med.brand && <option key={`brand-${index}`} value={med.brand} />,
-                  med.generic && med.generic !== med.brand && <option key={`generic-${index}`} value={med.generic} />
-                ])}
-              </datalist>
-            </div>
-            <div className="form-group">
-              <label htmlFor="batch_no">Batch No</label>
-              <input
-                type="text"
-                id="batch_no"
-                name="batch_no"
-                value={formData.batch_no}
-                onChange={handleInputChange}
-              />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="quantity">Quantity</label>
-              <input
-                type="text"
-                id="quantity"
-                name="quantity"
-                value={formData.quantity}
-                onChange={handleInputChange}
-                placeholder="e.g., 100 tablets"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="expiry_date">Expiry Date *</label>
-              <input
-                type="date"
-                id="expiry_date"
-                name="expiry_date"
-                value={formData.expiry_date}
-                onChange={handleInputChange}
-                required
-              />
-            </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="location">Location</label>
-              <input
-                type="text"
-                id="location"
-                name="location"
-                value={formData.location}
-                onChange={handleInputChange}
-                placeholder="Storage location"
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="supplier">Supplier</label>
-              <input
-                type="text"
-                id="supplier"
-                name="supplier"
-                value={formData.supplier}
-                onChange={handleInputChange}
-              />
-            </div>
-          </div>
-          <div className="form-group full-width">
-            <label htmlFor="notes">Notes</label>
-            <textarea
-              id="notes"
-              name="notes"
-              value={formData.notes}
-              onChange={handleInputChange}
-              rows="3"
-              placeholder="Additional notes..."
-            />
-          </div>
-          <button type="submit" className="submit-button">Add Item</button>
+        <form onSubmit={handleAdd} style={formGrid}>
+          <input
+            style={input}
+            placeholder="Drug Name"
+            value={form.drugName}
+            onChange={(e) => handleChange("drugName", e.target.value)}
+          />
+          <input
+            style={input}
+            placeholder="Batch No"
+            value={form.batchNo}
+            onChange={(e) => handleChange("batchNo", e.target.value)}
+          />
+          <input
+            style={input}
+            type="number"
+            placeholder="Quantity"
+            value={form.quantity}
+            onChange={(e) => handleChange("quantity", e.target.value)}
+          />
+          <input
+            style={input}
+            type="date"
+            value={form.expiryDate}
+            onChange={(e) => handleChange("expiryDate", e.target.value)}
+          />
+          <input
+            style={input}
+            type="number"
+            placeholder="Unit Price"
+            value={form.unitPrice}
+            onChange={(e) => handleChange("unitPrice", e.target.value)}
+          />
+          <input
+            style={input}
+            placeholder="Location"
+            value={form.location}
+            onChange={(e) => handleChange("location", e.target.value)}
+          />
+
+          <button type="submit" style={primaryBtn}>
+            Add Item
+          </button>
         </form>
       </div>
 
-      {/* Expiries Table */}
-      <div className="table-container">
-        <div className="table-header">
-          <h3>Expiry Records ({expiries.length})</h3>
-          <button onClick={handleExport} className="export-button">Export to Excel</button>
-        </div>
-        {expiries.length === 0 ? (
-          <p className="no-records">No expiry records found.</p>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="expiries-table">
-              <thead>
-                <tr>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('drug_name')}>Drug</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('batch_no')}>Batch</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('quantity')}>Quantity</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('expiry_date')}>Expiry Date</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('days_left')}>Days Left</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('status')}>Status</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('location')}>Location</button>
-                  </th>
-                  <th>
-                    <button type="button" className="sort-button" onClick={() => changeSort('supplier')}>Supplier</button>
-                  </th>
-                  <th>Notes</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedExpiries.map((expiry) => (
-                  <tr key={expiry.id} className={expiry.status === 'Near Expiry' ? 'near-expiry-row' : expiry.status === 'Expired' ? 'expired-row' : ''}>
-                    <td>{expiry.drug_name}</td>
-                    <td>{expiry.batch_no}</td>
-                    <td>{expiry.quantity}</td>
-                    <td>{new Date(expiry.expiry_date).toLocaleDateString()}</td>
-                    <td>
-                      <span className={`days-left ${expiry.days_left < 0 ? 'negative' : expiry.days_left <= 90 ? 'warning' : 'positive'}`}>
-                        {expiry.days_left}
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`status-badge ${expiry.status.toLowerCase().replace(' ', '-')}`}>
-                        {expiry.status}
-                      </span>
-                    </td>
-                    <td>{expiry.location}</td>
-                    <td>{expiry.supplier}</td>
-                    <td>{expiry.notes}</td>
-                    <td>
-                      <button
-                        className="delete-button"
-                        onClick={() => handleDelete(expiry.id)}
-                      >
-                        Delete
-                      </button>
+      <div style={tableCard}>
+        <h2 style={sectionTitle}>Tracked Items</h2>
+
+        <div style={tableWrap}>
+          <table style={table}>
+            <thead>
+              <tr>
+                <th style={th}>Drug</th>
+                <th style={th}>Batch</th>
+                <th style={th}>Qty</th>
+                <th style={th}>Unit Price</th>
+                <th style={th}>Value</th>
+                <th style={th}>Expiry Date</th>
+                <th style={th}>Location</th>
+                <th style={th}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => {
+                const status = getStatus(item.expiryDate);
+                const value = Number(item.quantity) * Number(item.unitPrice);
+
+                return (
+                  <tr key={item.id}>
+                    <td style={td}>{item.drugName}</td>
+                    <td style={td}>{item.batchNo}</td>
+                    <td style={td}>{item.quantity}</td>
+                    <td style={td}>{item.unitPrice}</td>
+                    <td style={td}>{value.toLocaleString()} AED</td>
+                    <td style={td}>{item.expiryDate}</td>
+                    <td style={td}>{item.location}</td>
+                    <td style={td}>
+                      <span style={getStatusStyle(status)}>{status}</span>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                );
+              })}
+
+              {items.length === 0 && (
+                <tr>
+                  <td colSpan="8" style={emptyCell}>
+                    No expiry items found.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 }
 
-export default ExpiryTracker;
+const pageTitle = {
+  fontSize: "26px",
+  marginTop: 0,
+  marginBottom: "22px",
+  color: "#0f172a",
+};
+
+const cardsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "16px",
+  marginBottom: "22px",
+};
+
+const statCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const statLabel = {
+  fontSize: "13px",
+  color: "#64748b",
+  marginBottom: "10px",
+};
+
+const statValue = {
+  fontSize: "24px",
+  fontWeight: "bold",
+  color: "#0f172a",
+};
+
+const formCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  marginBottom: "22px",
+};
+
+const sectionTitle = {
+  marginTop: 0,
+  marginBottom: "16px",
+  color: "#0f172a",
+};
+
+const formGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "14px",
+};
+
+const input = {
+  width: "100%",
+  padding: "12px 14px",
+  fontSize: "15px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const primaryBtn = {
+  padding: "12px 14px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "15px",
+  fontWeight: "bold",
+};
+
+const tableCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const tableWrap = {
+  overflowX: "auto",
+};
+
+const table = {
+  width: "100%",
+  borderCollapse: "collapse",
+};
+
+const th = {
+  textAlign: "left",
+  padding: "12px",
+  borderBottom: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: "14px",
+};
+
+const td = {
+  padding: "12px",
+  borderBottom: "1px solid #f1f5f9",
+  color: "#0f172a",
+  fontSize: "14px",
+};
+
+const badgeBase = {
+  display: "inline-block",
+  padding: "6px 10px",
+  borderRadius: "999px",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const badgeOk = {
+  ...badgeBase,
+  background: "#dcfce7",
+  color: "#166534",
+};
+
+const badgeNear = {
+  ...badgeBase,
+  background: "#fef3c7",
+  color: "#92400e",
+};
+
+const badgeHighRisk = {
+  ...badgeBase,
+  background: "#fee2e2",
+  color: "#b91c1c",
+};
+
+const badgeExpired = {
+  ...badgeBase,
+  background: "#e2e8f0",
+  color: "#334155",
+};
+
+const emptyCell = {
+  padding: "24px",
+  textAlign: "center",
+  color: "#64748b",
+};

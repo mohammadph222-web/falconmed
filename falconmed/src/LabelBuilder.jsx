@@ -1,837 +1,582 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
-import Papa from "papaparse";
-import "./App.css";
-import drugsMasterCsv from "./data/drugs_master.csv?raw";
+import { useMemo, useState } from "react";
 
-const LABEL_TABS = [
-  { key: "patient", label: "Patient Label" },
-  { key: "shelf", label: "Shelf Label" },
-  { key: "auxiliary", label: "Auxiliary Label" },
-];
+export default function LabelBuilder() {
+  const today = new Date().toISOString().split("T")[0];
 
-const LABEL_SIZES = [
-  { key: "small", label: "Small" },
-  { key: "standard", label: "Standard" },
-  { key: "large", label: "Large" },
-];
-
-const COLOR_OPTIONS = ["red", "yellow", "blue", "green", "orange", "gray"];
-
-const QUICK_DIRECTIONS = [
-  "Take 1 tablet once daily",
-  "Take 1 tablet twice daily",
-  "Take 1 tablet every 8 hours",
-  "Take after food",
-  "Take before food",
-  "Apply twice daily",
-  "Instill 1 drop in each eye twice daily",
-  "Use as directed by physician",
-];
-
-const SHELF_TEMPLATES = [
-  {
-    key: "shelf",
-    label: "Shelf Label",
-    category: "Shelf",
-    defaultText: "Arrange by strength and FEFO sequence",
-  },
-  {
-    key: "fridge",
-    label: "Fridge Label",
-    category: "Refrigerator",
-    defaultText: "Store at 2-8 C",
-  },
-  {
-    key: "drawer",
-    label: "Drawer Label",
-    category: "Drawer",
-    defaultText: "Use dedicated drawer section",
-  },
-  {
-    key: "bin",
-    label: "Storage Bin",
-    category: "Storage Bin",
-    defaultText: "Restock when level is low",
-  },
-];
-
-const AUX_TEMPLATES = [
-  { key: "high-alert", title: "High Alert", message: "Double check dose and patient", color: "red" },
-  { key: "refrigerate", title: "Refrigerate", message: "Keep between 2-8 C", color: "blue" },
-  { key: "shake-well", title: "Shake Well", message: "Shake bottle before each use", color: "yellow" },
-  { key: "external-use", title: "For External Use Only", message: "Do not swallow", color: "orange" },
-  { key: "children", title: "Keep Away from Children", message: "Store safely out of reach", color: "green" },
-  { key: "cytotoxic", title: "Cytotoxic", message: "Handle with protective equipment", color: "gray" },
-  { key: "protect-light", title: "Protect from Light", message: "Store in original light-protective container", color: "blue" },
-  { key: "lasa", title: "Look-Alike / Sound-Alike", message: "Apply LASA caution in selection and dispensing", color: "red" },
-];
-
-const EMPTY_PATIENT_FORM = {
-  drugName: "",
-  strength: "",
-  dosageForm: "",
-  directions: "",
-  patientName: "",
-  doctorName: "",
-  pharmacyName: "",
-  mrn: "",
-  dispensingDate: "",
-  notes: "",
-  warnings: "",
-};
-
-const EMPTY_SHELF_FORM = {
-  drugName: "",
-  strength: "",
-  dosageForm: "",
-  storageCategory: "Shelf",
-  location: "",
-  customText: "",
-};
-
-const EMPTY_AUX_FORM = {
-  title: "",
-  message: "",
-  drugName: "",
-  extraText: "",
-};
-
-const PREMIUM_FUTURE = {
-  logoUrl: "",
-  pharmacyAddress: "",
-  pharmacyPhone: "",
-  qrValue: "",
-  savedTemplates: [],
-  favorites: [],
-};
-
-function LabelBuilder({ onBack }) {
-  const [drugs, setDrugs] = useState([]);
-  const [activeTab, setActiveTab] = useState("patient");
+  const [mode, setMode] = useState("patient");
   const [labelSize, setLabelSize] = useState("standard");
 
-  const [patientForm, setPatientForm] = useState(EMPTY_PATIENT_FORM);
-  const [patientDrugQuery, setPatientDrugQuery] = useState("");
-  const [showPatientSuggestions, setShowPatientSuggestions] = useState(false);
+  const [form, setForm] = useState({
+    packageName: "",
+    genericName: "",
+    strength: "",
+    dosageForm: "",
+    directions: "",
+    patientName: "",
+    prescriberName: "",
+    mrn: "",
+    dispenseDate: today,
+    pharmacyName: "FalconMed Pharmacy",
+    shelfTitle: "",
+    shelfGeneric: "",
+    shelfDosageForm: "",
+    shelfStrength: "",
+    auxText: "",
+  });
 
-  const [shelfForm, setShelfForm] = useState(EMPTY_SHELF_FORM);
-  const [shelfDrugQuery, setShelfDrugQuery] = useState("");
-  const [showShelfSuggestions, setShowShelfSuggestions] = useState(false);
-  const [shelfTemplate, setShelfTemplate] = useState("shelf");
-  const [shelfColor, setShelfColor] = useState("blue");
+  const [selectedWarnings, setSelectedWarnings] = useState([]);
 
-  const [auxForm, setAuxForm] = useState(EMPTY_AUX_FORM);
-  const [auxTemplate, setAuxTemplate] = useState("high-alert");
-  const [auxColor, setAuxColor] = useState("red");
+  const warningOptions = [
+    "Refrigerate",
+    "Shake Well",
+    "High Alert",
+    "LASA",
+    "For External Use",
+    "Keep Out of Reach of Children",
+    "Do Not Crush",
+    "Take With Food",
+  ];
 
-  const [premiumConfig] = useState(PREMIUM_FUTURE);
-
-  useEffect(() => {
-    const parsed = Papa.parse(drugsMasterCsv, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: false,
-      transformHeader: (h) => h.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-    });
-
-    const rows = parsed.data
-      .map((row, idx) => ({
-        id: (row.drug_code || String(idx + 1)).trim(),
-        brand: (row.brand_name || "").trim(),
-        generic: (row.generic_name || "").trim(),
-        strength: (row.strength || "").trim(),
-        dosageForm: (row.dosage_form || "").trim(),
-        drug_code: (row.drug_code || "").trim(),
-      }))
-      .filter((d) => d.brand || d.generic);
-
-    setDrugs(rows);
-  }, []);
-
-  const getDrugSuggestions = useCallback(
-    (query) => {
-      const q = query.trim().toLowerCase();
-      if (!q) return [];
-      return drugs
-        .filter((d) => {
-          const haystack = `${d.brand} ${d.generic} ${d.drug_code}`.toLowerCase();
-          return haystack.includes(q);
-        })
-        .slice(0, 10);
-    },
-    [drugs]
-  );
-
-  const patientSuggestions = useMemo(() => getDrugSuggestions(patientDrugQuery), [getDrugSuggestions, patientDrugQuery]);
-  const shelfSuggestions = useMemo(() => getDrugSuggestions(shelfDrugQuery), [getDrugSuggestions, shelfDrugQuery]);
-
-  const selectPatientDrug = useCallback((drug) => {
-    setPatientForm((prev) => ({
-      ...prev,
-      drugName: drug.brand || drug.generic,
-      strength: drug.strength,
-      dosageForm: drug.dosageForm,
-    }));
-    setPatientDrugQuery(drug.brand || drug.generic);
-    setShowPatientSuggestions(false);
-  }, []);
-
-  const selectShelfDrug = useCallback((drug) => {
-    setShelfForm((prev) => ({
-      ...prev,
-      drugName: drug.brand || drug.generic,
-      strength: drug.strength,
-      dosageForm: drug.dosageForm,
-    }));
-    setShelfDrugQuery(drug.brand || drug.generic);
-    setShowShelfSuggestions(false);
-  }, []);
-
-  const setPatientField = useCallback((field, value) => {
-    setPatientForm((prev) => ({ ...prev, [field]: value }));
-  }, []);
-
-  const setShelfField = useCallback((field, value) => {
-    setShelfForm((prev) => ({ ...prev, [field]: value }));
-  }, []);
-
-  const setAuxField = useCallback((field, value) => {
-    setAuxForm((prev) => ({ ...prev, [field]: value }));
-  }, []);
-
-  const applyShelfTemplate = (templateKey) => {
-    const selected = SHELF_TEMPLATES.find((t) => t.key === templateKey);
-    setShelfTemplate(templateKey);
-    if (!selected) return;
-    setShelfForm((prev) => ({
-      ...prev,
-      storageCategory: selected.category,
-      customText: prev.customText || selected.defaultText,
-    }));
+  const handleChange = (field, value) => {
+    setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const applyAuxTemplate = (templateKey) => {
-    const selected = AUX_TEMPLATES.find((t) => t.key === templateKey);
-    setAuxTemplate(templateKey);
-    if (!selected) return;
-    setAuxForm((prev) => ({
-      ...prev,
-      title: selected.title,
-      message: selected.message,
-    }));
-    setAuxColor(selected.color);
+  const toggleWarning = (item) => {
+    setSelectedWarnings((prev) =>
+      prev.includes(item) ? prev.filter((x) => x !== item) : [...prev, item]
+    );
   };
 
-  const clearCurrentTab = () => {
-    if (activeTab === "patient") {
-      setPatientForm(EMPTY_PATIENT_FORM);
-      setPatientDrugQuery("");
-      setShowPatientSuggestions(false);
-      return;
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const previewStyle = useMemo(() => {
+    if (labelSize === "small") {
+      return {
+        width: "280px",
+        minHeight: "160px",
+        fontSize: "11px",
+      };
     }
 
-    if (activeTab === "shelf") {
-      setShelfForm(EMPTY_SHELF_FORM);
-      setShelfDrugQuery("");
-      setShowShelfSuggestions(false);
-      setShelfTemplate("shelf");
-      setShelfColor("blue");
-      return;
+    if (labelSize === "large") {
+      return {
+        width: "520px",
+        minHeight: "260px",
+        fontSize: "15px",
+      };
     }
 
-    setAuxForm(EMPTY_AUX_FORM);
-    setAuxTemplate("high-alert");
-    setAuxColor("red");
-  };
-
-  const canPrint =
-    (activeTab === "patient" && patientForm.drugName.trim() && patientForm.directions.trim()) ||
-    (activeTab === "shelf" && shelfForm.drugName.trim()) ||
-    (activeTab === "auxiliary" && (auxForm.title.trim() || auxForm.message.trim() || auxForm.extraText.trim()));
-
-  const patientDrugLine = useMemo(
-    () => [patientForm.drugName, patientForm.strength, patientForm.dosageForm].filter(Boolean).join(" • "),
-    [patientForm.drugName, patientForm.strength, patientForm.dosageForm]
-  );
-
-  const shelfDrugLine = useMemo(
-    () => [shelfForm.drugName, shelfForm.strength, shelfForm.dosageForm].filter(Boolean).join(" • "),
-    [shelfForm.drugName, shelfForm.strength, shelfForm.dosageForm]
-  );
-
-  const renderPatientForm = () => (
-    <>
-      <div className="lb-section">
-        <h3 className="lb-section-title">1. Select Medicine (optional)</h3>
-        <p className="lb-section-hint">Search from the drug database to auto-fill drug name, strength, and dosage form.</p>
-        <div className="lb-search-wrapper">
-          <input
-            type="text"
-            className="lb-input"
-            placeholder="Search by brand / generic / drug code..."
-            value={patientDrugQuery}
-            autoComplete="off"
-            onChange={(e) => {
-              setPatientDrugQuery(e.target.value);
-              setShowPatientSuggestions(true);
-            }}
-            onFocus={() => setShowPatientSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowPatientSuggestions(false), 180)}
-          />
-          {showPatientSuggestions && patientSuggestions.length > 0 && (
-            <ul className="lb-suggestions">
-              {patientSuggestions.map((drug) => (
-                <li key={`patient-${drug.id}-${drug.drug_code}`}>
-                  <button type="button" className="lb-suggestion-btn" onMouseDown={() => selectPatientDrug(drug)}>
-                    <span className="sug-brand">{drug.brand || drug.generic}</span>
-                    {drug.strength && <span className="sug-meta">{drug.strength}</span>}
-                    {drug.dosageForm && <span className="sug-meta">{drug.dosageForm}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {showPatientSuggestions && patientDrugQuery.trim() && patientSuggestions.length === 0 && (
-            <div className="lb-no-results">No matches - use manual entry below.</div>
-          )}
-        </div>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">2. Label Size</h3>
-        <div className="lb-size-group" role="radiogroup" aria-label="Label size">
-          {LABEL_SIZES.map((size) => (
-            <button
-              key={size.key}
-              type="button"
-              className={`lb-size-btn ${labelSize === size.key ? "active" : ""}`}
-              onClick={() => setLabelSize(size.key)}
-            >
-              {size.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">3. Required Fields</h3>
-
-        <label className="lb-label">
-          Drug Name <span className="lb-required">*</span>
-          <input
-            type="text"
-            className="lb-input"
-            value={patientForm.drugName}
-            onChange={(e) => setPatientField("drugName", e.target.value)}
-            placeholder="e.g., Amoxicillin"
-          />
-        </label>
-
-        <label className="lb-label">
-          Strength
-          <input
-            type="text"
-            className="lb-input"
-            value={patientForm.strength}
-            onChange={(e) => setPatientField("strength", e.target.value)}
-            placeholder="e.g., 500 mg"
-          />
-        </label>
-
-        <label className="lb-label">
-          Dosage Form
-          <input
-            type="text"
-            className="lb-input"
-            value={patientForm.dosageForm}
-            onChange={(e) => setPatientField("dosageForm", e.target.value)}
-            placeholder="e.g., Tablet, Syrup"
-          />
-        </label>
-
-        <label className="lb-label">
-          Directions for Use <span className="lb-required">*</span>
-          <div className="lb-quick-row">
-            <select
-              className="lb-input lb-quick-select"
-              defaultValue=""
-              onChange={(e) => {
-                if (e.target.value) {
-                  setPatientField("directions", e.target.value);
-                  e.target.value = "";
-                }
-              }}
-            >
-              <option value="">Quick Directions...</option>
-              {QUICK_DIRECTIONS.map((item) => (
-                <option value={item} key={item}>
-                  {item}
-                </option>
-              ))}
-            </select>
-            <div className="lb-quick-chips">
-              {QUICK_DIRECTIONS.slice(0, 4).map((item) => (
-                <button type="button" key={item} className="lb-chip" onClick={() => setPatientField("directions", item)}>
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-          <textarea
-            className="lb-input lb-textarea"
-            rows={3}
-            value={patientForm.directions}
-            onChange={(e) => setPatientField("directions", e.target.value)}
-            placeholder="e.g., Take 1 tablet every 8 hours with food."
-          />
-        </label>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">4. Optional Fields</h3>
-
-        <label className="lb-label">
-          Patient Name
-          <input type="text" className="lb-input" value={patientForm.patientName} onChange={(e) => setPatientField("patientName", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Doctor / Prescriber
-          <input type="text" className="lb-input" value={patientForm.doctorName} onChange={(e) => setPatientField("doctorName", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Pharmacy Name
-          <input type="text" className="lb-input" value={patientForm.pharmacyName} onChange={(e) => setPatientField("pharmacyName", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Patient File Number / MRN
-          <input
-            type="text"
-            className="lb-input"
-            value={patientForm.mrn}
-            onChange={(e) => setPatientField("mrn", e.target.value)}
-            placeholder="MRN / File #"
-          />
-        </label>
-
-        <label className="lb-label">
-          Dispensing Date
-          <input
-            type="date"
-            className="lb-input"
-            value={patientForm.dispensingDate}
-            onChange={(e) => setPatientField("dispensingDate", e.target.value)}
-          />
-        </label>
-
-        <label className="lb-label">
-          Notes
-          <textarea
-            className="lb-input lb-textarea"
-            rows={2}
-            value={patientForm.notes}
-            onChange={(e) => setPatientField("notes", e.target.value)}
-            placeholder="Additional notes..."
-          />
-        </label>
-
-        <label className="lb-label">
-          Warnings
-          <textarea
-            className="lb-input lb-textarea"
-            rows={2}
-            value={patientForm.warnings}
-            onChange={(e) => setPatientField("warnings", e.target.value)}
-            placeholder="e.g., Do not drive. Keep away from children."
-          />
-        </label>
-      </div>
-    </>
-  );
-
-  const renderShelfForm = () => (
-    <>
-      <div className="lb-section">
-        <h3 className="lb-section-title">1. Shelf Templates</h3>
-        <div className="lb-template-grid">
-          {SHELF_TEMPLATES.map((template) => (
-            <button
-              type="button"
-              key={template.key}
-              className={`lb-template-btn ${shelfTemplate === template.key ? "active" : ""}`}
-              onClick={() => applyShelfTemplate(template.key)}
-            >
-              {template.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">2. Drug Selection (optional)</h3>
-        <p className="lb-section-hint">Select from FalconMed database or type manually for custom shelf labels.</p>
-        <div className="lb-search-wrapper">
-          <input
-            type="text"
-            className="lb-input"
-            placeholder="Search medicine for shelf label..."
-            value={shelfDrugQuery}
-            autoComplete="off"
-            onChange={(e) => {
-              setShelfDrugQuery(e.target.value);
-              setShowShelfSuggestions(true);
-            }}
-            onFocus={() => setShowShelfSuggestions(true)}
-            onBlur={() => setTimeout(() => setShowShelfSuggestions(false), 180)}
-          />
-          {showShelfSuggestions && shelfSuggestions.length > 0 && (
-            <ul className="lb-suggestions">
-              {shelfSuggestions.map((drug) => (
-                <li key={`shelf-${drug.id}-${drug.drug_code}`}>
-                  <button type="button" className="lb-suggestion-btn" onMouseDown={() => selectShelfDrug(drug)}>
-                    <span className="sug-brand">{drug.brand || drug.generic}</span>
-                    {drug.strength && <span className="sug-meta">{drug.strength}</span>}
-                    {drug.dosageForm && <span className="sug-meta">{drug.dosageForm}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          {showShelfSuggestions && shelfDrugQuery.trim() && shelfSuggestions.length === 0 && (
-            <div className="lb-no-results">No matches - continue with manual shelf label details.</div>
-          )}
-        </div>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">3. Shelf Label Details</h3>
-
-        <label className="lb-label">
-          Drug Name <span className="lb-required">*</span>
-          <input type="text" className="lb-input" value={shelfForm.drugName} onChange={(e) => setShelfField("drugName", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Strength
-          <input type="text" className="lb-input" value={shelfForm.strength} onChange={(e) => setShelfField("strength", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Dosage Form
-          <input type="text" className="lb-input" value={shelfForm.dosageForm} onChange={(e) => setShelfField("dosageForm", e.target.value)} />
-        </label>
-
-        <label className="lb-label">
-          Storage Category
-          <input
-            type="text"
-            className="lb-input"
-            value={shelfForm.storageCategory}
-            onChange={(e) => setShelfField("storageCategory", e.target.value)}
-            placeholder="Shelf / Cabinet / Drawer / Fridge"
-          />
-        </label>
-
-        <label className="lb-label">
-          Location / Bin Code
-          <input
-            type="text"
-            className="lb-input"
-            value={shelfForm.location}
-            onChange={(e) => setShelfField("location", e.target.value)}
-            placeholder="e.g., A-12 / FR-03 / DR-07"
-          />
-        </label>
-
-        <label className="lb-label">
-          Custom Text
-          <textarea
-            className="lb-input lb-textarea"
-            rows={2}
-            value={shelfForm.customText}
-            onChange={(e) => setShelfField("customText", e.target.value)}
-            placeholder="Extra shelf instructions"
-          />
-        </label>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">4. Color Theme</h3>
-        <div className="lb-color-grid">
-          {COLOR_OPTIONS.map((color) => (
-            <button
-              type="button"
-              key={`shelf-color-${color}`}
-              className={`lb-color-btn lb-color-${color} ${shelfColor === color ? "active" : ""}`}
-              onClick={() => setShelfColor(color)}
-            >
-              {color}
-            </button>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-
-  const renderAuxForm = () => (
-    <>
-      <div className="lb-section">
-        <h3 className="lb-section-title">1. Auxiliary Templates</h3>
-        <div className="lb-template-grid">
-          {AUX_TEMPLATES.map((template) => (
-            <button
-              type="button"
-              key={template.key}
-              className={`lb-template-btn ${auxTemplate === template.key ? "active" : ""}`}
-              onClick={() => applyAuxTemplate(template.key)}
-            >
-              {template.title}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">2. Warning Content</h3>
-
-        <label className="lb-label">
-          Warning Title
-          <input
-            type="text"
-            className="lb-input"
-            value={auxForm.title}
-            onChange={(e) => setAuxField("title", e.target.value)}
-            placeholder="e.g., High Alert"
-          />
-        </label>
-
-        <label className="lb-label">
-          Main Warning Text
-          <textarea
-            className="lb-input lb-textarea"
-            rows={2}
-            value={auxForm.message}
-            onChange={(e) => setAuxField("message", e.target.value)}
-            placeholder="Primary warning / handling note"
-          />
-        </label>
-
-        <label className="lb-label">
-          Drug Name (optional)
-          <input
-            type="text"
-            className="lb-input"
-            value={auxForm.drugName}
-            onChange={(e) => setAuxField("drugName", e.target.value)}
-            placeholder="Optional linked medicine"
-          />
-        </label>
-
-        <label className="lb-label">
-          Extra Text
-          <textarea
-            className="lb-input lb-textarea"
-            rows={2}
-            value={auxForm.extraText}
-            onChange={(e) => setAuxField("extraText", e.target.value)}
-            placeholder="Any custom instruction"
-          />
-        </label>
-      </div>
-
-      <div className="lb-section">
-        <h3 className="lb-section-title">3. Color Theme</h3>
-        <div className="lb-color-grid">
-          {COLOR_OPTIONS.map((color) => (
-            <button
-              type="button"
-              key={`aux-color-${color}`}
-              className={`lb-color-btn lb-color-${color} ${auxColor === color ? "active" : ""}`}
-              onClick={() => setAuxColor(color)}
-            >
-              {color}
-            </button>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-
-  const renderPatientPreview = () => (
-    <div className={`lb-preview-card lb-size-${labelSize}`} id="lb-print-target">
-      {patientForm.pharmacyName ? (
-        <div className="lb-preview-pharmacy">{patientForm.pharmacyName}</div>
-      ) : (
-        <div className="lb-preview-pharmacy lb-preview-pharmacy--placeholder">Pharmacy Name</div>
-      )}
-
-      <div className="lb-preview-divider" />
-
-      {patientDrugLine && <div className="lb-drug-title">{patientDrugLine}</div>}
-
-      {patientForm.directions && (
-        <div className="lb-directions-box">
-          <span className="lb-directions-label">Directions</span>
-          <p className="lb-directions-value">{patientForm.directions}</p>
-        </div>
-      )}
-
-      {patientForm.patientName && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">Patient</span>
-          <span className="lb-preview-value">{patientForm.patientName}</span>
-        </div>
-      )}
-      {patientForm.mrn && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">MRN / File #</span>
-          <span className="lb-preview-value">{patientForm.mrn}</span>
-        </div>
-      )}
-      {patientForm.doctorName && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">Prescriber</span>
-          <span className="lb-preview-value">{patientForm.doctorName}</span>
-        </div>
-      )}
-      {patientForm.dispensingDate && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">Dispensed</span>
-          <span className="lb-preview-value">{patientForm.dispensingDate}</span>
-        </div>
-      )}
-
-      {patientForm.notes && (
-        <div className="lb-preview-row lb-preview-row-note">
-          <span className="lb-preview-label">Notes</span>
-          <span className="lb-preview-value">{patientForm.notes}</span>
-        </div>
-      )}
-
-      {patientForm.warnings && (
-        <div className="lb-preview-warning">
-          <span className="lb-preview-label">Warnings</span>
-          <span className="lb-preview-value">{patientForm.warnings}</span>
-        </div>
-      )}
-
-      {!patientForm.drugName && !patientForm.directions && (
-        <p className="lb-preview-empty">Fill in the form to see the patient label preview.</p>
-      )}
-
-      <div className="lb-preview-divider lb-preview-divider--bottom" />
-      <div className="lb-preview-footer">FalconMed - Patient Label</div>
-    </div>
-  );
-
-  const renderShelfPreview = () => (
-    <div className={`lb-preview-card lb-size-${labelSize} lb-shelf-preview lb-theme-${shelfColor}`} id="lb-print-target">
-      <div className="lb-shelf-template-tag">{SHELF_TEMPLATES.find((t) => t.key === shelfTemplate)?.label || "Shelf Label"}</div>
-      <div className="lb-shelf-category">{shelfForm.storageCategory || "Storage Category"}</div>
-      {shelfDrugLine && <div className="lb-shelf-drug">{shelfDrugLine}</div>}
-      {shelfForm.location && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">Location</span>
-          <span className="lb-preview-value">{shelfForm.location}</span>
-        </div>
-      )}
-      {shelfForm.customText && <div className="lb-shelf-note">{shelfForm.customText}</div>}
-
-      {!shelfForm.drugName && !shelfForm.customText && (
-        <p className="lb-preview-empty">Fill in drug or custom text to preview shelf label.</p>
-      )}
-
-      <div className="lb-preview-divider lb-preview-divider--bottom" />
-      <div className="lb-preview-footer">FalconMed - Shelf / Storage Label</div>
-    </div>
-  );
-
-  const renderAuxPreview = () => (
-    <div className={`lb-preview-card lb-size-${labelSize} lb-aux-preview lb-theme-${auxColor}`} id="lb-print-target">
-      {auxForm.title && <div className="lb-aux-title">{auxForm.title}</div>}
-      {auxForm.message && <div className="lb-aux-message">{auxForm.message}</div>}
-      {auxForm.drugName && (
-        <div className="lb-preview-row">
-          <span className="lb-preview-label">Drug</span>
-          <span className="lb-preview-value">{auxForm.drugName}</span>
-        </div>
-      )}
-      {auxForm.extraText && <div className="lb-aux-extra">{auxForm.extraText}</div>}
-
-      {!auxForm.title && !auxForm.message && !auxForm.extraText && (
-        <p className="lb-preview-empty">Choose an auxiliary template or enter manual warning text.</p>
-      )}
-
-      <div className="lb-preview-divider lb-preview-divider--bottom" />
-      <div className="lb-preview-footer">FalconMed - Auxiliary Label</div>
-    </div>
-  );
+    return {
+      width: "380px",
+      minHeight: "210px",
+      fontSize: "13px",
+    };
+  }, [labelSize]);
 
   return (
-    <div className="label-builder-container">
-      <div className="label-builder-header">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <h2>Pharmacy Labels Studio</h2>
-      </div>
+    <div>
+      <h1 style={pageTitle}>Label Builder</h1>
 
-      <div className="lb-tabs" role="tablist" aria-label="Label type selector">
-        {LABEL_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            className={`lb-tab-btn ${activeTab === tab.key ? "active" : ""}`}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <div style={topGrid}>
+        <div style={formCard}>
+          <h2 style={sectionTitle}>Label Settings</h2>
 
-      <div className="label-builder-body">
-        <section className="label-form-panel">
-          {activeTab === "patient" && renderPatientForm()}
-          {activeTab === "shelf" && renderShelfForm()}
-          {activeTab === "auxiliary" && renderAuxForm()}
-
-          <div className="lb-actions">
+          <div style={modeRow}>
             <button
+              style={mode === "patient" ? activeModeBtn : modeBtn}
+              onClick={() => setMode("patient")}
               type="button"
-              className="lb-btn-print"
-              onClick={() => window.print()}
-              disabled={!canPrint}
-              title={!canPrint ? "Complete minimum label details before printing" : "Print this label"}
             >
-              Print Label
+              Patient Label
             </button>
-            <button type="button" className="lb-btn-clear" onClick={clearCurrentTab}>
-              Clear Current Label
+
+            <button
+              style={mode === "shelf" ? activeModeBtn : modeBtn}
+              onClick={() => setMode("shelf")}
+              type="button"
+            >
+              Shelf Label
+            </button>
+
+            <button
+              style={mode === "aux" ? activeModeBtn : modeBtn}
+              onClick={() => setMode("aux")}
+              type="button"
+            >
+              Auxiliary Label
             </button>
           </div>
 
-          {!canPrint && (
-            <p className="lb-required-note">
-              Required: Patient label needs Drug Name + Directions. Shelf label needs Drug Name. Auxiliary label needs at least one warning text.
-            </p>
+          <div style={{ marginBottom: "18px" }}>
+            <label style={label}>Label Size</label>
+            <select
+              style={input}
+              value={labelSize}
+              onChange={(e) => setLabelSize(e.target.value)}
+            >
+              <option value="small">Small</option>
+              <option value="standard">Standard</option>
+              <option value="large">Large</option>
+            </select>
+          </div>
+
+          {mode === "patient" && (
+            <div style={formGrid}>
+              <div>
+                <label style={label}>Package Name</label>
+                <input
+                  style={input}
+                  value={form.packageName}
+                  onChange={(e) => handleChange("packageName", e.target.value)}
+                  placeholder="Augmentin 1g"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Generic Name</label>
+                <input
+                  style={input}
+                  value={form.genericName}
+                  onChange={(e) => handleChange("genericName", e.target.value)}
+                  placeholder="Amoxicillin + Clavulanate"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Strength</label>
+                <input
+                  style={input}
+                  value={form.strength}
+                  onChange={(e) => handleChange("strength", e.target.value)}
+                  placeholder="1 g"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Dosage Form</label>
+                <input
+                  style={input}
+                  value={form.dosageForm}
+                  onChange={(e) => handleChange("dosageForm", e.target.value)}
+                  placeholder="Tablet"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Patient Name</label>
+                <input
+                  style={input}
+                  value={form.patientName}
+                  onChange={(e) => handleChange("patientName", e.target.value)}
+                  placeholder="Patient name"
+                />
+              </div>
+
+              <div>
+                <label style={label}>MRN</label>
+                <input
+                  style={input}
+                  value={form.mrn}
+                  onChange={(e) => handleChange("mrn", e.target.value)}
+                  placeholder="Medical record number"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Prescriber Name</label>
+                <input
+                  style={input}
+                  value={form.prescriberName}
+                  onChange={(e) => handleChange("prescriberName", e.target.value)}
+                  placeholder="Dr. Name"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Dispense Date</label>
+                <input
+                  style={input}
+                  type="date"
+                  value={form.dispenseDate}
+                  onChange={(e) => handleChange("dispenseDate", e.target.value)}
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={label}>Directions</label>
+                <textarea
+                  style={textarea}
+                  value={form.directions}
+                  onChange={(e) => handleChange("directions", e.target.value)}
+                  placeholder="Take 1 tablet twice daily after meals"
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={label}>Pharmacy Name</label>
+                <input
+                  style={input}
+                  value={form.pharmacyName}
+                  onChange={(e) => handleChange("pharmacyName", e.target.value)}
+                  placeholder="Pharmacy name"
+                />
+              </div>
+
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={label}>Warning Chips</label>
+                <div style={chipsWrap}>
+                  {warningOptions.map((item) => (
+                    <button
+                      key={item}
+                      type="button"
+                      onClick={() => toggleWarning(item)}
+                      style={selectedWarnings.includes(item) ? chipActive : chip}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
           )}
-        </section>
 
-        <section className="label-preview-panel">
-          <h3 className="lb-preview-heading">Live Label Preview</h3>
-          {activeTab === "patient" && renderPatientPreview()}
-          {activeTab === "shelf" && renderShelfPreview()}
-          {activeTab === "auxiliary" && renderAuxPreview()}
-          <p className="lb-preview-note">Only filled fields appear on the printed label.</p>
-        </section>
-      </div>
+          {mode === "shelf" && (
+            <div style={formGrid}>
+              <div>
+                <label style={label}>Shelf Title / Brand</label>
+                <input
+                  style={input}
+                  value={form.shelfTitle}
+                  onChange={(e) => handleChange("shelfTitle", e.target.value)}
+                  placeholder="Brufen"
+                />
+              </div>
 
-      <div className="lb-future-ready" aria-hidden="true">
-        <strong>Future-ready:</strong> logo, address, phone, QR, saved templates, and favorites are prepared in state for future premium expansion.
-        <span className="lb-future-hidden">{JSON.stringify(premiumConfig).length}</span>
+              <div>
+                <label style={label}>Generic Name</label>
+                <input
+                  style={input}
+                  value={form.shelfGeneric}
+                  onChange={(e) => handleChange("shelfGeneric", e.target.value)}
+                  placeholder="Ibuprofen"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Strength</label>
+                <input
+                  style={input}
+                  value={form.shelfStrength}
+                  onChange={(e) => handleChange("shelfStrength", e.target.value)}
+                  placeholder="400 mg"
+                />
+              </div>
+
+              <div>
+                <label style={label}>Dosage Form</label>
+                <input
+                  style={input}
+                  value={form.shelfDosageForm}
+                  onChange={(e) =>
+                    handleChange("shelfDosageForm", e.target.value)
+                  }
+                  placeholder="Tablet"
+                />
+              </div>
+            </div>
+          )}
+
+          {mode === "aux" && (
+            <div>
+              <label style={label}>Auxiliary Text</label>
+              <textarea
+                style={textarea}
+                value={form.auxText}
+                onChange={(e) => handleChange("auxText", e.target.value)}
+                placeholder="Refrigerate"
+              />
+            </div>
+          )}
+
+          <div style={{ marginTop: "20px" }}>
+            <button style={printBtn} onClick={handlePrint} type="button">
+              Print Label
+            </button>
+          </div>
+        </div>
+
+        <div style={previewCard}>
+          <h2 style={sectionTitle}>Preview</h2>
+
+          <div style={{ ...labelPreview, ...previewStyle }}>
+            {mode === "patient" && (
+              <div>
+                <div style={previewHeader}>{form.pharmacyName || "Pharmacy"}</div>
+
+                <div style={previewBigTitle}>
+                  {form.packageName || "Package Name"}
+                </div>
+
+                <div style={previewLine}>
+                  <strong>Generic:</strong> {form.genericName || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>Strength:</strong> {form.strength || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>Dosage Form:</strong> {form.dosageForm || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>Patient:</strong> {form.patientName || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>MRN:</strong> {form.mrn || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>Prescriber:</strong> {form.prescriberName || "-"}
+                </div>
+                <div style={previewLine}>
+                  <strong>Date:</strong> {form.dispenseDate || "-"}
+                </div>
+
+                <div style={directionsBox}>
+                  <strong>Directions:</strong> {form.directions || "-"}
+                </div>
+
+                {selectedWarnings.length > 0 && (
+                  <div style={warningBox}>
+                    {selectedWarnings.map((w) => (
+                      <span key={w} style={warningTag}>
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {mode === "shelf" && (
+              <div style={{ textAlign: "center" }}>
+                <div style={previewShelfTitle}>
+                  {form.shelfTitle || "Shelf Label"}
+                </div>
+                <div style={previewShelfLine}>
+                  {form.shelfGeneric || "Generic Name"}
+                </div>
+                <div style={previewShelfLine}>
+                  {form.shelfStrength || "Strength"}
+                </div>
+                <div style={previewShelfLine}>
+                  {form.shelfDosageForm || "Dosage Form"}
+                </div>
+              </div>
+            )}
+
+            {mode === "aux" && (
+              <div style={auxPreview}>
+                {form.auxText || "Auxiliary Label"}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
 }
 
-export default LabelBuilder;
+const pageTitle = {
+  fontSize: "26px",
+  marginTop: 0,
+  marginBottom: "22px",
+  color: "#0f172a",
+};
+
+const topGrid = {
+  display: "grid",
+  gridTemplateColumns: "1.2fr 1fr",
+  gap: "22px",
+};
+
+const formCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const previewCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+};
+
+const sectionTitle = {
+  marginTop: 0,
+  marginBottom: "16px",
+  color: "#0f172a",
+};
+
+const modeRow = {
+  display: "flex",
+  gap: "10px",
+  flexWrap: "wrap",
+  marginBottom: "18px",
+};
+
+const modeBtn = {
+  padding: "10px 14px",
+  background: "#e2e8f0",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  color: "#0f172a",
+  fontWeight: "bold",
+};
+
+const activeModeBtn = {
+  ...modeBtn,
+  background: "#2563eb",
+  color: "white",
+};
+
+const formGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "14px",
+};
+
+const label = {
+  display: "block",
+  marginBottom: "8px",
+  fontSize: "14px",
+  color: "#334155",
+  fontWeight: "bold",
+};
+
+const input = {
+  width: "100%",
+  padding: "12px 14px",
+  fontSize: "15px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const textarea = {
+  width: "100%",
+  minHeight: "90px",
+  padding: "12px 14px",
+  fontSize: "15px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+  resize: "vertical",
+};
+
+const chipsWrap = {
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "10px",
+};
+
+const chip = {
+  padding: "8px 12px",
+  borderRadius: "999px",
+  border: "1px solid #cbd5e1",
+  background: "white",
+  cursor: "pointer",
+};
+
+const chipActive = {
+  ...chip,
+  background: "#2563eb",
+  color: "white",
+  border: "1px solid #2563eb",
+};
+
+const printBtn = {
+  padding: "12px 18px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  cursor: "pointer",
+  fontSize: "15px",
+  fontWeight: "bold",
+};
+
+const labelPreview = {
+  margin: "0 auto",
+  background: "white",
+  border: "2px dashed #94a3b8",
+  borderRadius: "14px",
+  padding: "18px",
+  boxSizing: "border-box",
+};
+
+const previewHeader = {
+  fontWeight: "bold",
+  fontSize: "1.1em",
+  marginBottom: "10px",
+  textAlign: "center",
+};
+
+const previewBigTitle = {
+  fontSize: "1.2em",
+  fontWeight: "bold",
+  marginBottom: "10px",
+  color: "#0f172a",
+};
+
+const previewLine = {
+  marginBottom: "6px",
+  color: "#0f172a",
+};
+
+const directionsBox = {
+  marginTop: "12px",
+  padding: "10px",
+  borderRadius: "10px",
+  background: "#f8fafc",
+};
+
+const warningBox = {
+  marginTop: "12px",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "8px",
+};
+
+const warningTag = {
+  padding: "6px 10px",
+  borderRadius: "999px",
+  background: "#fee2e2",
+  color: "#b91c1c",
+  fontSize: "12px",
+  fontWeight: "bold",
+};
+
+const previewShelfTitle = {
+  fontSize: "1.5em",
+  fontWeight: "bold",
+  marginBottom: "12px",
+};
+
+const previewShelfLine = {
+  marginBottom: "8px",
+  fontSize: "1.05em",
+};
+
+const auxPreview = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: "120px",
+  fontSize: "1.6em",
+  fontWeight: "bold",
+  color: "#b91c1c",
+  textAlign: "center",
+};
