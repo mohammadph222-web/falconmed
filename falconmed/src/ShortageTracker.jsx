@@ -546,34 +546,36 @@ export default function ShortageTracker({ user, profile }) {
 }
 
 const pageTitle = {
-  fontSize: "26px",
+  fontSize: "28px",
+  fontWeight: 700,
   marginTop: 0,
-  marginBottom: "22px",
+  marginBottom: "18px",
   color: "#0f172a",
 };
 
 const cardsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "16px",
-  marginBottom: "22px",
+  gap: "12px",
+  marginBottom: "16px",
 };
 
 const statCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  padding: "16px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
 };
 
 const statLabel = {
-  fontSize: "13px",
+  fontSize: "12px",
   color: "#64748b",
-  marginBottom: "10px",
+  marginBottom: "8px",
 };
 
 const statValue = {
-  fontSize: "24px",
+  fontSize: "22px",
   fontWeight: "bold",
   color: "#0f172a",
 };
@@ -581,38 +583,40 @@ const statValue = {
 const formCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "22px",
+  padding: "18px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
+  marginBottom: "16px",
 };
 
 const sectionTitle = {
   marginTop: 0,
-  marginBottom: "16px",
+  marginBottom: "12px",
   color: "#0f172a",
+  fontSize: "18px",
 };
 
 const formGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "14px",
+  gap: "12px",
 };
 
 const messageBox = {
-  marginBottom: "12px",
-  padding: "10px 12px",
+  marginBottom: "10px",
+  padding: "9px 11px",
   borderRadius: "10px",
   background: "#f8fafc",
   border: "1px solid #e2e8f0",
   color: "#334155",
-  fontSize: "14px",
+  fontSize: "13px",
 };
 
 const input = {
   width: "100%",
-  padding: "12px 14px",
-  fontSize: "15px",
-  borderRadius: "10px",
+  padding: "10px 12px",
+  fontSize: "14px",
+  borderRadius: "9px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
 };
@@ -656,21 +660,22 @@ const drugDropdownEmpty = {
 };
 
 const primaryBtn = {
-  padding: "12px 14px",
+  padding: "10px 12px",
   background: "#2563eb",
   color: "white",
   border: "none",
-  borderRadius: "10px",
+  borderRadius: "9px",
   cursor: "pointer",
-  fontSize: "15px",
+  fontSize: "14px",
   fontWeight: "bold",
 };
 
 const tableCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  padding: "18px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
 };
 
 const tableWrap = {
@@ -684,17 +689,17 @@ const table = {
 
 const th = {
   textAlign: "left",
-  padding: "12px",
+  padding: "10px 12px",
   borderBottom: "1px solid #e2e8f0",
   color: "#334155",
-  fontSize: "14px",
+  fontSize: "13px",
 };
 
 const td = {
-  padding: "12px",
+  padding: "10px 12px",
   borderBottom: "1px solid #f1f5f9",
   color: "#0f172a",
-  fontSize: "14px",
+  fontSize: "13px",
   verticalAlign: "top",
 };
 
@@ -725,13 +730,14 @@ const badgeCompleted = {
 };
 
 const smallBtn = {
-  padding: "8px 10px",
+  padding: "7px 10px",
   background: "#2563eb",
   color: "white",
   border: "none",
-  borderRadius: "8px",
+  borderRadius: "7px",
   cursor: "pointer",
   fontSize: "12px",
+  fontWeight: 600,
 };
 
 const emptyCell = {

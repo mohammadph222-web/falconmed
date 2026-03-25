@@ -638,7 +638,7 @@ export default function App() {
 const layout = {
   display: "flex",
   minHeight: "100vh",
-  background: "#f3f6fb",
+  background: "#f6f8fc",
   fontFamily: "Arial, sans-serif",
 };
 
@@ -646,7 +646,7 @@ const sidebar = {
   width: "270px",
   background: "#0f172a",
   color: "white",
-  padding: "24px 18px",
+  padding: "22px 16px",
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
@@ -689,15 +689,15 @@ const userEmail = {
 const btn = {
   display: "block",
   width: "100%",
-  padding: "12px 14px",
-  marginTop: "10px",
+  padding: "11px 13px",
+  marginTop: "9px",
   background: "#1e293b",
   color: "white",
   border: "1px solid #334155",
-  borderRadius: "10px",
+  borderRadius: "9px",
   cursor: "pointer",
   textAlign: "left",
-  fontSize: "15px",
+  fontSize: "14px",
 };
 
 const activeBtn = {
@@ -709,19 +709,19 @@ const activeBtn = {
 const logoutBtn = {
   display: "block",
   width: "100%",
-  padding: "12px 14px",
+  padding: "11px 13px",
   background: "#dc2626",
   color: "white",
   border: "none",
-  borderRadius: "10px",
+  borderRadius: "9px",
   cursor: "pointer",
   textAlign: "left",
-  fontSize: "15px",
+  fontSize: "14px",
 };
 
 const main = {
   flex: 1,
-  padding: "28px",
+  padding: "24px",
 };
 
 const dashboardPageWrap = {
@@ -765,7 +765,7 @@ const dashboardHeaderText = {
 const dashboardCardsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: "12px",
+  gap: "10px",
 };
 
 const dashboardStatCard = {
@@ -773,7 +773,7 @@ const dashboardStatCard = {
   borderRadius: "18px",
   padding: "0",
   border: "1px solid #e2e8f0",
-  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
   minHeight: "132px",
   display: "flex",
   flexDirection: "column",
@@ -787,7 +787,7 @@ const dashboardStatAccent = {
 };
 
 const dashboardStatContent = {
-  padding: "16px 18px 18px",
+  padding: "14px 16px 16px",
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
@@ -805,7 +805,7 @@ const dashboardStatLabel = {
 };
 
 const dashboardStatValue = {
-  fontSize: "34px",
+  fontSize: "30px",
   fontWeight: "700",
   lineHeight: 1,
   color: "#0f172a",
@@ -815,9 +815,9 @@ const dashboardStatValue = {
 const dashboardOverviewCard = {
   background: "white",
   borderRadius: "18px",
-  padding: "18px 20px",
+  padding: "16px 18px",
   border: "1px solid #e2e8f0",
-  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
 };
 
 const dashboardOverviewTitle = {
@@ -838,9 +838,9 @@ const dashboardOverviewText = {
 const dashboardActivityCard = {
   background: "white",
   borderRadius: "18px",
-  padding: "18px 20px",
+  padding: "16px 18px",
   border: "1px solid #e2e8f0",
-  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
 };
 
 const dashboardActivityTitle = {
@@ -906,8 +906,9 @@ const dashboardOverviewLoadingText = {
 const contentCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  padding: "18px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
 };
 
 const sectionTitle = {

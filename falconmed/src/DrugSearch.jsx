@@ -349,87 +349,91 @@ export default function DrugSearch() {
 }
 
 const pageTitle = {
-  fontSize: "26px",
+  fontSize: "28px",
+  fontWeight: 700,
   marginTop: 0,
-  marginBottom: "22px",
+  marginBottom: "18px",
   color: "#0f172a",
 };
 
 const topCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "24px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "24px",
+  padding: "20px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
+  marginBottom: "18px",
 };
 
 const searchLabel = {
-  textAlign: "center",
-  fontSize: "16px",
-  marginBottom: "10px",
+  textAlign: "left",
+  fontSize: "14px",
+  marginBottom: "8px",
   color: "#0f172a",
-  fontWeight: "bold",
+  fontWeight: 600,
 };
 
 const searchInput = {
   width: "100%",
-  padding: "14px 16px",
-  fontSize: "16px",
-  borderRadius: "12px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-};
-
-const helperText = {
-  marginTop: "12px",
-  marginBottom: 0,
-  textAlign: "center",
-  color: "#475569",
-  fontSize: "14px",
-};
-
-const filtersGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "16px",
-  marginBottom: "18px",
-};
-
-const filterLabel = {
-  display: "block",
-  marginBottom: "8px",
-  fontSize: "14px",
-  color: "#334155",
-  fontWeight: "bold",
-};
-
-const filterInput = {
-  width: "100%",
-  padding: "12px 14px",
+  padding: "11px 14px",
   fontSize: "15px",
   borderRadius: "10px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
 };
 
-const statsBar = {
-  marginBottom: "18px",
+const helperText = {
+  marginTop: "10px",
+  marginBottom: 0,
+  textAlign: "left",
+  color: "#475569",
+  fontSize: "13px",
+};
+
+const filtersGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "12px",
+  marginBottom: "14px",
+};
+
+const filterLabel = {
+  display: "block",
+  marginBottom: "6px",
+  fontSize: "13px",
   color: "#334155",
-  fontSize: "15px",
+  fontWeight: 600,
+};
+
+const filterInput = {
+  width: "100%",
+  padding: "10px 12px",
+  fontSize: "14px",
+  borderRadius: "9px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+};
+
+const statsBar = {
+  marginBottom: "14px",
+  color: "#334155",
+  fontSize: "14px",
 };
 
 const tableCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  padding: "18px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  border: "1px solid #e5eaf1",
 };
 
 const tableTitle = {
   marginTop: 0,
-  marginBottom: "18px",
-  textAlign: "center",
+  marginBottom: "12px",
+  textAlign: "left",
   color: "#0f172a",
+  fontSize: "18px",
 };
 
 const tableWrap = {
@@ -443,26 +447,28 @@ const table = {
 
 const th = {
   textAlign: "left",
-  padding: "12px",
+  padding: "10px 12px",
   borderBottom: "1px solid #e2e8f0",
   color: "#334155",
-  fontSize: "14px",
+  fontSize: "13px",
 };
 
 const td = {
-  padding: "12px",
+  padding: "10px 12px",
   borderBottom: "1px solid #f1f5f9",
   color: "#0f172a",
-  fontSize: "14px",
+  fontSize: "13px",
 };
 
 const smallBtn = {
-  padding: "8px 12px",
+  padding: "7px 10px",
   background: "#2563eb",
   color: "white",
   border: "none",
-  borderRadius: "8px",
+  borderRadius: "7px",
   cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 600,
 };
 
 const emptyCell = {

@@ -1160,22 +1160,22 @@ button:active {
 .summary-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1rem;
-  margin-bottom: 2rem;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
 }
 
 .summary-card {
   background: white;
-  padding: 1.5rem;
+  padding: 1.1rem;
   border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5eaf1;
   text-align: center;
 }
 
 .summary-card h3 {
   margin: 0 0 0.5rem 0;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #64748b;
   text-transform: uppercase;
@@ -1183,7 +1183,7 @@ button:active {
 }
 
 .summary-number {
-  font-size: 2rem;
+  font-size: 1.75rem;
   font-weight: 700;
   color: #1e293b;
   margin: 0;
@@ -1338,7 +1338,7 @@ button:active {
 
 .refills-table th,
 .refills-table td {
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   text-align: left;
   border-bottom: 1px solid #f1f5f9;
 }
@@ -1347,7 +1347,7 @@ button:active {
   background: #f8fafc;
   font-weight: 600;
   color: #374151;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -1366,10 +1366,10 @@ button:active {
   border: 1px solid #e2e8f0;
   background: #f8fafc;
   color: #334155;
-  padding: 0.35rem 0.75rem;
-  border-radius: 8px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 7px;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .filter-buttons button.active,
@@ -1452,16 +1452,16 @@ button:active {
 
 .form-container {
   background: white;
-  padding: 2rem;
+  padding: 1.3rem;
   border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid #e2e8f0;
-  margin-bottom: 2rem;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5eaf1;
+  margin-bottom: 1.25rem;
 }
 
 .form-container h3 {
-  margin: 0 0 1.5rem 0;
-  font-size: 1.25rem;
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #1e293b;
 }
@@ -1475,13 +1475,13 @@ button:active {
 .form-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .form-group {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .form-group.full-width {
@@ -1489,7 +1489,7 @@ button:active {
 }
 
 .form-group label {
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: #374151;
 }
@@ -1497,10 +1497,10 @@ button:active {
 .form-group input,
 .form-group select,
 .form-group textarea {
-  padding: 0.75rem;
+  padding: 0.62rem 0.7rem;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
-  font-size: 1rem;
+  border-radius: 7px;
+  font-size: 0.92rem;
   font-family: inherit;
   transition: border-color 0.2s ease-in-out;
 }
@@ -1516,7 +1516,9 @@ button:active {
 .submit-button {
   align-self: flex-start;
   background: #10b981 !important;
-  padding: 0.75rem 1.5rem !important;
+  padding: 0.62rem 1.1rem !important;
+  border-radius: 8px !important;
+  font-size: 0.85rem !important;
 }
 
 .submit-button:hover {
@@ -1525,15 +1527,15 @@ button:active {
 
 .table-container {
   background: white;
-  padding: 2rem;
+  padding: 1.3rem;
   border-radius: 12px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  border: 1px solid #e5eaf1;
 }
 
 .table-container h3 {
-  margin: 0 0 1.5rem 0;
-  font-size: 1.25rem;
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
   font-weight: 600;
   color: #1e293b;
 }
@@ -1545,20 +1547,21 @@ button:active {
 
 .shortages-table th {
   text-align: left;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 2px solid #e2e8f0;
   background: #f8fafc;
   font-weight: 600;
   color: #374151;
-  font-size: 0.875rem;
+  font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .shortages-table td {
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.75rem;
   border-bottom: 1px solid #f1f5f9;
   color: #64748b;
+  font-size: 0.9rem;
 }
 
 .shortages-table tbody tr:hover {
@@ -1612,14 +1615,14 @@ button:active {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .export-button {
   background: #059669 !important;
-  padding: 0.5rem 1rem !important;
-  font-size: 0.875rem !important;
-  border-radius: 6px !important;
+  padding: 0.45rem 0.85rem !important;
+  font-size: 0.8rem !important;
+  border-radius: 7px !important;
 }
 
 .export-button:hover {
