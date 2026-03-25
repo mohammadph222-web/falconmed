@@ -205,6 +205,19 @@ function Billing({ onBack }) {
     window.print();
   };
 
+  const handleClear = () => {
+    setDocumentType("Invoice");
+    setDocumentNumber("INV-1001");
+    setDocumentDate(new Date().toISOString().slice(0, 10));
+    setPharmacy(INITIAL_PHARMACY);
+    setCustomer(INITIAL_CUSTOMER);
+    setVatEnabled(true);
+    setVatRate(5);
+    setItems([createEmptyItem()]);
+    setDrugQuery("");
+    setShowSuggestions(false);
+  };
+
   return (
     <div className="billing-page">
       <div className="billing-header-bar">
@@ -214,7 +227,7 @@ function Billing({ onBack }) {
 
       <div className="billing-controls no-print">
         <div className="billing-control-card">
-          <h3>Document Settings</h3>
+          <h3 className="billing-section-title">Document Settings</h3>
           <div className="billing-settings-grid">
             <label>
               Mode
@@ -249,7 +262,7 @@ function Billing({ onBack }) {
         </div>
 
         <div className="billing-control-card">
-          <h3>Add Medicine from FalconMed Database</h3>
+          <h3 className="billing-section-title">Medicine Search</h3>
           <div className="billing-search-box">
             <input
               type="text"
@@ -285,8 +298,11 @@ function Billing({ onBack }) {
 
       <div className="billing-print-area">
         <div className="billing-document">
+          <h3 className="billing-section-title">Invoice Preview</h3>
+
           <div className="billing-doc-header">
             <div className="billing-pharmacy-block">
+              <div className="billing-subtitle no-print">Pharmacy Information</div>
               <div className="billing-logo-wrap">
                 {pharmacy.logoUrl ? (
                   <img src={pharmacy.logoUrl} alt="Pharmacy logo" className="billing-logo" />
@@ -372,6 +388,8 @@ function Billing({ onBack }) {
           </div>
 
           <div className="billing-table-section">
+            <h3 className="billing-section-title">Items Table</h3>
+
             <div className="billing-table-actions no-print">
               <button type="button" className="billing-secondary-btn" onClick={addManualItem}>Add Item</button>
             </div>
@@ -445,6 +463,8 @@ function Billing({ onBack }) {
           </div>
 
           <div className="billing-totals-row">
+            <h3 className="billing-section-title billing-summary-title">Totals / Summary</h3>
+
             <div className="billing-vat-box no-print">
               <label className="billing-toggle">
                 <input
@@ -492,6 +512,7 @@ function Billing({ onBack }) {
 
       <div className="billing-bottom-actions no-print">
         <button type="button" className="billing-secondary-btn" onClick={addManualItem}>Add Item</button>
+        <button type="button" className="billing-clear-btn" onClick={handleClear}>Clear</button>
         <button type="button" className="billing-primary-btn" onClick={handlePrint}>Print</button>
       </div>
 
