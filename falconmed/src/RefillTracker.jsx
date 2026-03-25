@@ -1,14 +1,123 @@
 import { useState, useEffect, useMemo } from "react";
 import Papa from "papaparse";
 import * as XLSX from "xlsx";
+import { supabase } from "./lib/supabaseClient";
 import "./App.css";
 
 const STORAGE_KEY = 'falconmed_refills';
-const DRUGS_CSV_URL = `${import.meta.env.BASE_URL}drugs.csv`;
+const REFILL_TABLE = "refill_requests";
+
+function calculateRefillInfo(quantityDispensed, dailyUsage, dispenseDate) {
+  const qty = Number(quantityDispensed || 0);
+  const usage = Number(dailyUsage || 0);
+
+  if (!Number.isFinite(qty) || !Number.isFinite(usage) || usage <= 0 || !dispenseDate) {
+    return { daysSupply: 0, nextRefillDate: null };
+  }
+
+  const daysSupply = qty / usage;
+  const dispense = new Date(dispenseDate);
+
+  if (Number.isNaN(dispense.getTime())) {
+    return { daysSupply: 0, nextRefillDate: null };
+  }
+
+  const nextRefill = new Date(dispense);
+  nextRefill.setDate(dispense.getDate() + Math.ceil(daysSupply));
+
+  return {
+    daysSupply: Number(daysSupply.toFixed(2)),
+    nextRefillDate: nextRefill.toISOString().split('T')[0],
+  };
+}
+
+function getRefillStatus(nextRefillDate, fallbackStatus = "Pending") {
+  if (!nextRefillDate) return fallbackStatus;
+
+  const today = new Date();
+  const next = new Date(nextRefillDate);
+  const diffTime = next - today;
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays < 0) return 'Overdue';
+  if (diffDays <= 3) return 'Due';
+  return 'Upcoming';
+}
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function normalizeKey(key) {
+  return String(key || "")
+    .toLowerCase()
+    .replace(/[\s/_-]+/g, "")
+    .trim();
+}
+
+function getValue(row, possibleKeys) {
+  for (const key of possibleKeys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
+
+const mapDbToUi = (row) => {
+  const dispensed = Number(row.dispensed ?? row.quantity ?? 0);
+  const usage = Number(row.daily_usage || 0);
+  const { daysSupply, nextRefillDate } = calculateRefillInfo(
+    dispensed,
+    usage,
+    row.request_date || ""
+  );
+
+  return {
+    id: row.id,
+    patient_name: row.patient_name || "",
+    phone: row.contact_number || "",
+    drug_name: row.drug_name || "",
+    quantity_dispensed: dispensed,
+    daily_usage: usage,
+    dispense_date: row.request_date || "",
+    days_supply: daysSupply,
+    next_refill_date: nextRefillDate,
+    status: row.status || getRefillStatus(nextRefillDate, "Pending"),
+    notes: row.notes || "",
+    created_at: row.created_at || new Date().toISOString(),
+  };
+};
 
 function RefillTracker({ onBack }) {
   const [refills, setRefills] = useState([]);
   const [medicines, setMedicines] = useState([]);
+  const [drugSearch, setDrugSearch] = useState('');
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
   const [filterStatus, setFilterStatus] = useState('all');
   const [formData, setFormData] = useState({
     patient_name: '',
@@ -17,37 +126,80 @@ function RefillTracker({ onBack }) {
     quantity_dispensed: '',
     daily_usage: '',
     dispense_date: '',
+    status: 'Pending',
     notes: ''
   });
 
-  // Load from localStorage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        setRefills(JSON.parse(saved));
-      } catch (error) {
-        console.error('Error loading refills:', error);
+  const loadRefills = async () => {
+    try {
+      const { data, error } = await supabase
+        .from(REFILL_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) {
+        console.error('Failed to load refill requests:', error.message);
+        return;
       }
+
+      setRefills((data || []).map(mapDbToUi));
+    } catch (error) {
+      console.error('Refill fetch error:', error?.message || error);
+    }
+  };
+
+  // Load from Supabase on mount; keep localStorage as fallback cache
+  useEffect(() => {
+    void loadRefills();
+
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setRefills((prev) => (prev.length > 0 ? prev : parsed));
+      }
+    } catch (error) {
+      console.error('Error loading refills cache:', error);
     }
   }, []);
 
-  // Load medicines from CSV
+  // Load medicines from the same dataset pattern used elsewhere
   useEffect(() => {
     const loadMedicines = async () => {
       try {
-        const response = await fetch(DRUGS_CSV_URL);
+        const response = await fetch('/src/data/drugs_master.csv');
         if (!response.ok) throw new Error('Failed to load CSV');
+
         const csvText = await response.text();
-        const parsedData = Papa.parse(csvText, { header: false, skipEmptyLines: true });
-        let dataRows = parsedData.data;
-        if (dataRows.length > 0 && isNaN(parseInt(dataRows[0][0], 10))) {
-          dataRows = dataRows.slice(1);
+        const lines = csvText
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== '');
+
+        if (lines.length < 2) {
+          setMedicines([]);
+          return;
         }
-        const meds = dataRows.map(row => ({
-          brand: row[1] || '',
-          generic: row[2] || ''
-        })).filter(m => m.brand || m.generic);
+
+        const rawHeaders = parseCSVLine(lines[0]);
+        const headers = rawHeaders.map((h) => normalizeKey(h));
+
+        const meds = lines.slice(1).map((line) => {
+          const cols = parseCSVLine(line);
+          const rawRow = {};
+
+          headers.forEach((header, index) => {
+            rawRow[header] = cols[index] ?? '';
+          });
+
+          return {
+            brand: getValue(rawRow, ['brand', 'brandname', 'packagename', 'tradename']),
+            generic: getValue(rawRow, ['generic', 'genericname', 'scientificname']),
+            strength: getValue(rawRow, ['strength']),
+          };
+        }).filter((m) => m.brand || m.generic);
+
         setMedicines(meds);
       } catch (error) {
         console.error('Error loading medicines:', error);
@@ -55,6 +207,19 @@ function RefillTracker({ onBack }) {
     };
     loadMedicines();
   }, []);
+
+  const filteredMedicines = useMemo(() => {
+    if (!drugSearch.trim() || !showDrugDropdown) return [];
+
+    const q = drugSearch.toLowerCase().trim();
+    return medicines.filter((med) => {
+      return (
+        med.brand?.toLowerCase().includes(q) ||
+        med.generic?.toLowerCase().includes(q) ||
+        med.strength?.toLowerCase().includes(q)
+      );
+    }).slice(0, 25);
+  }, [medicines, drugSearch, showDrugDropdown]);
 
   // Save to localStorage whenever refills change
   useEffect(() => {
@@ -69,69 +234,75 @@ function RefillTracker({ onBack }) {
     }));
   };
 
-  const calculateRefillInfo = (quantityDispensed, dailyUsage, dispenseDate) => {
-    const qty = parseFloat(quantityDispensed);
-    const usage = parseFloat(dailyUsage);
-    
-    if (isNaN(qty) || isNaN(usage) || usage <= 0) {
-      return { daysSupply: 0, nextRefillDate: null };
-    }
-
-    const daysSupply = Math.floor(qty / usage);
-    const dispense = new Date(dispenseDate);
-    const nextRefill = new Date(dispense);
-    nextRefill.setDate(dispense.getDate() + daysSupply);
-
-    return { daysSupply, nextRefillDate: nextRefill.toISOString().split('T')[0] };
-  };
-
-  const getRefillStatus = (nextRefillDate) => {
-    if (!nextRefillDate) return 'Unknown';
-    
-    const today = new Date();
-    const next = new Date(nextRefillDate);
-    const diffTime = next - today;
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays < 0) return 'Overdue';
-    if (diffDays <= 3) return 'Due';
-    return 'Upcoming';
-  };
-
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!formData.patient_name || !formData.drug_name || !formData.dispense_date) {
-      alert('Please fill in patient name, drug name, and dispense date');
-      return;
-    }
 
-    const { daysSupply, nextRefillDate } = calculateRefillInfo(
-      formData.quantity_dispensed,
-      formData.daily_usage,
-      formData.dispense_date
-    );
-    
-    const status = getRefillStatus(nextRefillDate);
+    const submit = async () => {
+      if (
+        !formData.patient_name ||
+        !formData.phone ||
+        !formData.drug_name ||
+        !formData.quantity_dispensed ||
+        !formData.dispense_date
+      ) {
+        alert('Please fill in patient name, contact number, drug name, quantity, and request date');
+        return;
+      }
 
-    const newRefill = {
-      id: Date.now(),
-      ...formData,
-      days_supply: daysSupply,
-      next_refill_date: nextRefillDate,
-      status,
-      created_at: new Date().toISOString()
+      try {
+        const basePayload = {
+          patient_name: formData.patient_name,
+          contact_number: formData.phone,
+          drug_name: formData.drug_name,
+          quantity: Number(formData.quantity_dispensed),
+          dispensed: Number(formData.quantity_dispensed),
+          request_date: formData.dispense_date,
+          status: formData.status || 'Pending',
+          notes: formData.notes,
+        };
+
+        let { error } = await supabase
+          .from(REFILL_TABLE)
+          .insert({
+            ...basePayload,
+            daily_usage: Number(formData.daily_usage || 0),
+          });
+
+        if (error && String(error.message || '').toLowerCase().includes('daily_usage')) {
+          console.error('Missing daily_usage column in refill_requests. Falling back without daily_usage:', error.message);
+
+          const retry = await supabase
+            .from(REFILL_TABLE)
+            .insert(basePayload);
+
+          error = retry.error;
+        }
+
+        if (error) {
+          console.error('Failed to save refill request:', error.message);
+          return;
+        }
+
+        await loadRefills();
+
+        setFormData({
+          patient_name: '',
+          phone: '',
+          drug_name: '',
+          quantity_dispensed: '',
+          daily_usage: '',
+          dispense_date: '',
+          notes: '',
+          status: 'Pending',
+        });
+        setDrugSearch('');
+        setShowDrugDropdown(false);
+      } catch (err) {
+        console.error('Refill save error:', err?.message || err);
+      }
     };
 
-    setRefills(prev => [...prev, newRefill]);
-    setFormData({
-      patient_name: '',
-      phone: '',
-      drug_name: '',
-      quantity_dispensed: '',
-      daily_usage: '',
-      dispense_date: '',
-      notes: ''
-    });
+    void submit();
   };
 
   const handleDelete = (id) => {
@@ -224,21 +395,81 @@ function RefillTracker({ onBack }) {
           <div className="form-row">
             <div className="form-group">
               <label htmlFor="drug_name">Drug Name *</label>
+              <div style={{ position: 'relative' }}>
               <input
                 type="text"
                 id="drug_name"
                 name="drug_name"
-                value={formData.drug_name}
-                onChange={handleInputChange}
-                list="medicines"
+                value={drugSearch || formData.drug_name}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDrugSearch(value);
+                  setFormData((prev) => ({ ...prev, drug_name: value }));
+                }}
+                onFocus={() => setShowDrugDropdown(true)}
                 required
               />
-              <datalist id="medicines">
-                {medicines.map((med, index) => [
-                  med.brand && <option key={`brand-${index}`} value={med.brand} />,
-                  med.generic && med.generic !== med.brand && <option key={`generic-${index}`} value={med.generic} />
-                ])}
-              </datalist>
+              {showDrugDropdown && filteredMedicines.length > 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '44px',
+                    left: 0,
+                    right: 0,
+                    background: 'white',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '10px',
+                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.1)',
+                    zIndex: 1000,
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {filteredMedicines.map((med, index) => {
+                    const displayName = med.brand
+                      ? `${med.brand}${med.strength ? ` (${med.strength})` : ''}`
+                      : `${med.generic || 'Unknown'}${med.strength ? ` (${med.strength})` : ''}`;
+
+                    return (
+                      <div
+                        key={`med-${index}`}
+                        style={{
+                          padding: '10px 12px',
+                          borderBottom: '1px solid #f1f5f9',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setFormData((prev) => ({ ...prev, drug_name: displayName }));
+                          setDrugSearch(displayName);
+                          setShowDrugDropdown(false);
+                        }}
+                      >
+                        {displayName}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {showDrugDropdown && drugSearch && filteredMedicines.length === 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '44px',
+                    left: 0,
+                    right: 0,
+                    background: '#f8fafc',
+                    border: '1px solid #cbd5e1',
+                    borderRadius: '10px',
+                    padding: '10px 12px',
+                    color: '#64748b',
+                    fontSize: '14px',
+                    zIndex: 1000,
+                  }}
+                >
+                  No matching drugs found. You can type a manual item name.
+                </div>
+              )}
+              </div>
             </div>
             <div className="form-group">
               <label htmlFor="dispense_date">Dispense Date *</label>
