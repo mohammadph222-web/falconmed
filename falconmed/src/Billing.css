@@ -1,407 +1,461 @@
-import { useMemo, useState } from "react";
-
-export default function Billing() {
-  const [bills, setBills] = useState([
-    {
-      id: 1,
-      customerName: "Ahmed Ali",
-      drugName: "Augmentin 1g",
-      quantity: 2,
-      unitPrice: 45,
-      paymentStatus: "Paid",
-      invoiceDate: "2026-03-25",
-    },
-    {
-      id: 2,
-      customerName: "Sara Hassan",
-      drugName: "Ozempic 1mg",
-      quantity: 1,
-      unitPrice: 380,
-      paymentStatus: "Pending",
-      invoiceDate: "2026-03-25",
-    },
-  ]);
-
-  const [form, setForm] = useState({
-    customerName: "",
-    drugName: "",
-    quantity: "",
-    unitPrice: "",
-    paymentStatus: "Paid",
-    invoiceDate: new Date().toISOString().split("T")[0],
-  });
-
-  const handleChange = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const handleAddBill = (e) => {
-    e.preventDefault();
-
-    if (!form.customerName || !form.drugName || !form.quantity || !form.unitPrice) {
-      return;
-    }
-
-    const newBill = {
-      id: Date.now(),
-      customerName: form.customerName,
-      drugName: form.drugName,
-      quantity: Number(form.quantity),
-      unitPrice: Number(form.unitPrice),
-      paymentStatus: form.paymentStatus,
-      invoiceDate: form.invoiceDate,
-    };
-
-    setBills((prev) => [newBill, ...prev]);
-
-    setForm({
-      customerName: "",
-      drugName: "",
-      quantity: "",
-      unitPrice: "",
-      paymentStatus: "Paid",
-      invoiceDate: new Date().toISOString().split("T")[0],
-    });
-  };
-
-  const updateStatus = (id, status) => {
-    setBills((prev) =>
-      prev.map((bill) => (bill.id === id ? { ...bill, paymentStatus: status } : bill))
-    );
-  };
-
-  const totals = useMemo(() => {
-    let totalRevenue = 0;
-    let paidRevenue = 0;
-    let pendingRevenue = 0;
-
-    bills.forEach((bill) => {
-      const amount = Number(bill.quantity) * Number(bill.unitPrice);
-      totalRevenue += amount;
-
-      if (bill.paymentStatus === "Paid") paidRevenue += amount;
-      if (bill.paymentStatus === "Pending") pendingRevenue += amount;
-    });
-
-    return {
-      totalRevenue,
-      paidRevenue,
-      pendingRevenue,
-      invoiceCount: bills.length,
-    };
-  }, [bills]);
-
-  const getStatusStyle = (status) => {
-    if (status === "Paid") return paidBadge;
-    if (status === "Pending") return pendingBadge;
-    return draftBadge;
-  };
-
-  return (
-    <div>
-      <h1 style={pageTitle}>Billing</h1>
-
-      <div style={cardsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Total Revenue</div>
-          <div style={statValue}>{totals.totalRevenue.toLocaleString()} AED</div>
-        </div>
-
-        <div style={statCard}>
-          <div style={statLabel}>Paid Revenue</div>
-          <div style={statValue}>{totals.paidRevenue.toLocaleString()} AED</div>
-        </div>
-
-        <div style={statCard}>
-          <div style={statLabel}>Pending Revenue</div>
-          <div style={statValue}>{totals.pendingRevenue.toLocaleString()} AED</div>
-        </div>
-
-        <div style={statCard}>
-          <div style={statLabel}>Invoices</div>
-          <div style={statValue}>{totals.invoiceCount}</div>
-        </div>
-      </div>
-
-      <div style={formCard}>
-        <h2 style={sectionTitle}>Create Invoice</h2>
-
-        <form onSubmit={handleAddBill} style={formGrid}>
-          <input
-            style={input}
-            placeholder="Customer Name"
-            value={form.customerName}
-            onChange={(e) => handleChange("customerName", e.target.value)}
-          />
-
-          <input
-            style={input}
-            placeholder="Drug Name"
-            value={form.drugName}
-            onChange={(e) => handleChange("drugName", e.target.value)}
-          />
-
-          <input
-            style={input}
-            type="number"
-            placeholder="Quantity"
-            value={form.quantity}
-            onChange={(e) => handleChange("quantity", e.target.value)}
-          />
-
-          <input
-            style={input}
-            type="number"
-            placeholder="Unit Price"
-            value={form.unitPrice}
-            onChange={(e) => handleChange("unitPrice", e.target.value)}
-          />
-
-          <input
-            style={input}
-            type="date"
-            value={form.invoiceDate}
-            onChange={(e) => handleChange("invoiceDate", e.target.value)}
-          />
-
-          <select
-            style={input}
-            value={form.paymentStatus}
-            onChange={(e) => handleChange("paymentStatus", e.target.value)}
-          >
-            <option value="Paid">Paid</option>
-            <option value="Pending">Pending</option>
-            <option value="Draft">Draft</option>
-          </select>
-
-          <button type="submit" style={primaryBtn}>
-            Add Invoice
-          </button>
-        </form>
-      </div>
-
-      <div style={tableCard}>
-        <h2 style={sectionTitle}>Invoices</h2>
-
-        <div style={tableWrap}>
-          <table style={table}>
-            <thead>
-              <tr>
-                <th style={th}>Customer</th>
-                <th style={th}>Drug</th>
-                <th style={th}>Qty</th>
-                <th style={th}>Unit Price</th>
-                <th style={th}>Total</th>
-                <th style={th}>Date</th>
-                <th style={th}>Status</th>
-                <th style={th}>Action</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {bills.map((bill) => {
-                const total = Number(bill.quantity) * Number(bill.unitPrice);
-
-                return (
-                  <tr key={bill.id}>
-                    <td style={td}>{bill.customerName}</td>
-                    <td style={td}>{bill.drugName}</td>
-                    <td style={td}>{bill.quantity}</td>
-                    <td style={td}>{bill.unitPrice}</td>
-                    <td style={td}>{total.toLocaleString()} AED</td>
-                    <td style={td}>{bill.invoiceDate}</td>
-                    <td style={td}>
-                      <span style={getStatusStyle(bill.paymentStatus)}>
-                        {bill.paymentStatus}
-                      </span>
-                    </td>
-                    <td style={td}>
-                      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                        <button
-                          type="button"
-                          style={smallBtn}
-                          onClick={() => updateStatus(bill.id, "Paid")}
-                        >
-                          Paid
-                        </button>
-                        <button
-                          type="button"
-                          style={smallBtn}
-                          onClick={() => updateStatus(bill.id, "Pending")}
-                        >
-                          Pending
-                        </button>
-                        <button
-                          type="button"
-                          style={smallBtn}
-                          onClick={() => updateStatus(bill.id, "Draft")}
-                        >
-                          Draft
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {bills.length === 0 && (
-                <tr>
-                  <td colSpan="8" style={emptyCell}>
-                    No invoices found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
+:root {
+  --billing-bg: #f3f6fb;
+  --billing-card: #ffffff;
+  --billing-border: #e2e8f0;
+  --billing-text: #0f172a;
+  --billing-muted: #64748b;
+  --billing-primary: #2563eb;
+  --billing-danger: #dc2626;
+  --billing-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
 }
 
-const pageTitle = {
-  fontSize: "26px",
-  marginTop: 0,
-  marginBottom: "22px",
-  color: "#0f172a",
-};
+.billing-page {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  color: var(--billing-text);
+}
 
-const cardsGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "16px",
-  marginBottom: "22px",
-};
+.billing-header-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
 
-const statCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-};
+.billing-header-bar h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+}
 
-const statLabel = {
-  fontSize: "13px",
-  color: "#64748b",
-  marginBottom: "10px",
-};
+.billing-controls {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  margin-bottom: 20px;
+}
 
-const statValue = {
-  fontSize: "24px",
-  fontWeight: "bold",
-  color: "#0f172a",
-};
+.billing-control-card {
+  background: var(--billing-card);
+  border: 1px solid var(--billing-border);
+  border-radius: 16px;
+  padding: 18px;
+  box-shadow: var(--billing-shadow);
+}
 
-const formCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "22px",
-};
+.billing-control-card h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
 
-const sectionTitle = {
-  marginTop: 0,
-  marginBottom: "16px",
-  color: "#0f172a",
-};
+.billing-settings-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.2fr) minmax(180px, 1fr);
+  align-items: end;
+}
 
-const formGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "14px",
-};
+.billing-settings-grid label,
+.billing-customer-grid label,
+.billing-vat-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--billing-muted);
+  font-weight: 600;
+}
 
-const input = {
-  width: "100%",
-  padding: "12px 14px",
-  fontSize: "15px",
-  borderRadius: "10px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-};
+.billing-page input,
+.billing-page select,
+.billing-page textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fff;
+  color: var(--billing-text);
+  font-size: 14px;
+}
 
-const primaryBtn = {
-  padding: "12px 14px",
-  background: "#2563eb",
-  color: "white",
-  border: "none",
-  borderRadius: "10px",
-  cursor: "pointer",
-  fontSize: "15px",
-  fontWeight: "bold",
-};
+.billing-page input:focus,
+.billing-page select:focus,
+.billing-page textarea:focus {
+  outline: none;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.12);
+}
 
-const tableCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "22px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-};
+.billing-search-box {
+  position: relative;
+  width: 100%;
+}
 
-const tableWrap = {
-  overflowX: "auto",
-};
+.billing-search-box input {
+  width: 100%;
+}
 
-const table = {
-  width: "100%",
-  borderCollapse: "collapse",
-};
+.billing-helper-text {
+  margin: 10px 0 0;
+  color: var(--billing-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
 
-const th = {
-  textAlign: "left",
-  padding: "12px",
-  borderBottom: "1px solid #e2e8f0",
-  color: "#334155",
-  fontSize: "14px",
-};
+.billing-suggestions {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 6px;
+  border-radius: 12px;
+  border: 1px solid var(--billing-border);
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+  max-height: 260px;
+  overflow-y: auto;
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  right: 0;
+}
 
-const td = {
-  padding: "12px",
-  borderBottom: "1px solid #f1f5f9",
-  color: "#0f172a",
-  fontSize: "14px",
-  verticalAlign: "top",
-};
+.billing-suggestion-btn {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
 
-const badgeBase = {
-  display: "inline-block",
-  padding: "6px 10px",
-  borderRadius: "999px",
-  fontSize: "12px",
-  fontWeight: "bold",
-};
+.billing-suggestion-btn:hover {
+  background: #eff6ff;
+}
 
-const paidBadge = {
-  ...badgeBase,
-  background: "#dcfce7",
-  color: "#166534",
-};
+.billing-print-area {
+  background: var(--billing-card);
+  border-radius: 16px;
+  border: 1px solid var(--billing-border);
+  box-shadow: var(--billing-shadow);
+}
 
-const pendingBadge = {
-  ...badgeBase,
-  background: "#fef3c7",
-  color: "#92400e",
-};
+.billing-document {
+  padding: 22px;
+}
 
-const draftBadge = {
-  ...badgeBase,
-  background: "#e2e8f0",
-  color: "#334155",
-};
+.billing-doc-header {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.4fr) minmax(240px, 1fr);
+  align-items: start;
+  gap: 18px;
+  margin-bottom: 18px;
+}
 
-const smallBtn = {
-  padding: "8px 10px",
-  background: "#2563eb",
-  color: "white",
-  border: "none",
-  borderRadius: "8px",
-  cursor: "pointer",
-  fontSize: "12px",
-};
+.billing-pharmacy-block {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 14px;
+  align-items: start;
+}
 
-const emptyCell = {
-  padding: "24px",
-  textAlign: "center",
-  color: "#64748b",
-};
+.billing-logo-wrap {
+  width: 96px;
+  height: 96px;
+}
+
+.billing-logo,
+.billing-logo-placeholder {
+  width: 100%;
+  height: 100%;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  object-fit: contain;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--billing-muted);
+  background: #f8fafc;
+}
+
+.billing-pharmacy-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+.billing-pharmacy-fields input:nth-child(1),
+.billing-pharmacy-fields input:nth-child(2) {
+  grid-column: span 1;
+}
+
+.billing-pharmacy-fields input:nth-child(3),
+.billing-pharmacy-fields input:nth-child(4) {
+  grid-column: span 1;
+}
+
+.billing-doc-meta {
+  border: 1px solid var(--billing-border);
+  border-radius: 14px;
+  padding: 14px;
+  text-align: right;
+  background: #f8fafc;
+}
+
+.billing-doc-meta h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.billing-doc-meta p {
+  margin: 4px 0;
+  color: #334155;
+}
+
+.billing-customer-section {
+  margin-top: 4px;
+  margin-bottom: 18px;
+}
+
+.billing-customer-section h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+}
+
+.billing-customer-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+}
+
+.billing-table-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.billing-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.billing-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 860px;
+}
+
+.billing-table th,
+.billing-table td {
+  padding: 10px;
+  border-bottom: 1px solid #edf2f7;
+  text-align: left;
+  vertical-align: top;
+  font-size: 14px;
+}
+
+.billing-table th {
+  color: #475569;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.billing-row-total {
+  font-weight: 700;
+}
+
+.billing-totals-row {
+  margin-top: 16px;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 1fr);
+  align-items: start;
+}
+
+.billing-vat-box {
+  border: 1px solid var(--billing-border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.billing-toggle {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.billing-toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.billing-totals-box {
+  border: 1px solid var(--billing-border);
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.billing-total-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 7px 0;
+  color: #334155;
+}
+
+.billing-total-line.grand {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--billing-border);
+  font-size: 16px;
+  color: #0f172a;
+}
+
+.billing-footer-note {
+  margin-top: 14px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.billing-bottom-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.billing-future-ready {
+  margin-top: 16px;
+  background: var(--billing-card);
+  border: 1px solid var(--billing-border);
+  border-radius: 14px;
+  padding: 14px;
+  color: #475569;
+}
+
+.billing-future-ready h4 {
+  margin: 0 0 6px;
+  color: #0f172a;
+}
+
+.billing-primary-btn,
+.billing-secondary-btn,
+.billing-danger-btn,
+.back-button {
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 10px 14px;
+}
+
+.billing-primary-btn {
+  background: var(--billing-primary);
+  color: #fff;
+}
+
+.billing-secondary-btn,
+.back-button {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.billing-danger-btn {
+  background: #fee2e2;
+  color: var(--billing-danger);
+}
+
+.billing-danger-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.print-only {
+  display: none;
+}
+
+@media (max-width: 1080px) {
+  .billing-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-settings-grid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .billing-doc-header {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-doc-meta {
+    text-align: left;
+  }
+
+  .billing-pharmacy-block {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-logo-wrap {
+    width: 80px;
+    height: 80px;
+  }
+
+  .billing-pharmacy-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-customer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .billing-totals-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .billing-document {
+    padding: 14px;
+  }
+
+  .billing-header-bar h2 {
+    font-size: 22px;
+  }
+
+  .billing-settings-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  .billing-page,
+  .billing-print-area,
+  .billing-document {
+    margin: 0;
+    padding: 0;
+    box-shadow: none;
+    border: none;
+    max-width: 100%;
+  }
+}

@@ -9,12 +9,49 @@ import Reports from "./Reports";
 import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
+import { AuthContext } from "./lib/authContext";
+
+const NAV_ITEMS = [
+  { key: "dashboard", label: "Dashboard" },
+  { key: "drugsearch", label: "Drug Search" },
+  { key: "expiry", label: "Expiry Tracker" },
+  { key: "shortage", label: "Shortage Tracker" },
+  { key: "reports", label: "Reports" },
+  { key: "labels", label: "Label Builder" },
+  { key: "billing", label: "Billing" },
+  { key: "refill", label: "Refill Tracker" },
+];
+
+const ROLE_ACCESS = {
+  admin: NAV_ITEMS.map((x) => x.key),
+  manager: ["dashboard", "drugsearch", "expiry", "shortage"],
+  pharmacist: ["drugsearch", "labels", "shortage"],
+  storekeeper: ["drugsearch", "expiry"],
+};
+
+const getRoleName = (rawRole) => {
+  const normalizedRole = (rawRole || "").toLowerCase();
+  return ROLE_ACCESS[normalizedRole] ? normalizedRole : "admin";
+};
+
+const getPageFromHash = () => {
+  const hash = (window.location.hash || "").replace("#", "").trim();
+  if (!hash) return "dashboard";
+  return NAV_ITEMS.some((x) => x.key === hash) ? hash : "dashboard";
+};
+
+const getSafePage = (requestedPage, allowedPages) => {
+  if (allowedPages.includes(requestedPage)) return requestedPage;
+  if (allowedPages.includes("dashboard")) return "dashboard";
+  return allowedPages[0] || "dashboard";
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [role, setRole] = useState("admin");
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState(getPageFromHash);
 
   const ensureUserProfile = async (authUser) => {
     if (!authUser?.id || !supabase) return;
@@ -172,10 +209,45 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    setRole(getRoleName(profile?.role));
+  }, [profile?.role]);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setPage(getPageFromHash());
+    };
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  const allowedPages = ROLE_ACCESS[role] || ROLE_ACCESS.admin;
+
+  useEffect(() => {
+    const safePage = getSafePage(page, allowedPages);
+    if (safePage !== page) {
+      setPage(safePage);
+    }
+  }, [page, allowedPages]);
+
+  useEffect(() => {
+    if (!page) return;
+    const nextHash = `#${page}`;
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+  }, [page]);
+
+  const navigateTo = (nextPage) => {
+    setPage(getSafePage(nextPage, allowedPages));
+  };
+
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setRole("admin");
   };
 
   if (loading) {
@@ -274,8 +346,11 @@ export default function App() {
     }
   };
 
+  const visibleNavItems = NAV_ITEMS.filter((item) => allowedPages.includes(item.key));
+
   return (
-    <div style={layout}>
+    <AuthContext.Provider value={{ user, profile, role }}>
+      <div style={layout}>
       <aside style={sidebar}>
         <div>
           <div style={brandBox}>
@@ -288,37 +363,15 @@ export default function App() {
             <div style={userEmail}>{user.email}</div>
           </div>
 
-          <button style={page === "dashboard" ? activeBtn : btn} onClick={() => setPage("dashboard")}>
-            Dashboard
-          </button>
-
-          <button style={page === "drugsearch" ? activeBtn : btn} onClick={() => setPage("drugsearch")}>
-            Drug Search
-          </button>
-
-          <button style={page === "expiry" ? activeBtn : btn} onClick={() => setPage("expiry")}>
-            Expiry Tracker
-          </button>
-
-          <button style={page === "shortage" ? activeBtn : btn} onClick={() => setPage("shortage")}>
-            Shortage Tracker
-          </button>
-
-          <button style={page === "reports" ? activeBtn : btn} onClick={() => setPage("reports")}>
-            Reports
-          </button>
-
-          <button style={page === "labels" ? activeBtn : btn} onClick={() => setPage("labels")}>
-            Label Builder
-          </button>
-
-          <button style={page === "billing" ? activeBtn : btn} onClick={() => setPage("billing")}>
-            Billing
-          </button>
-
-          <button style={page === "refill" ? activeBtn : btn} onClick={() => setPage("refill")}>
-            Refill Tracker
-          </button>
+          {visibleNavItems.map((item) => (
+            <button
+              key={item.key}
+              style={page === item.key ? activeBtn : btn}
+              onClick={() => navigateTo(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
 
         <button style={logoutBtn} onClick={logout}>
@@ -327,7 +380,8 @@ export default function App() {
       </aside>
 
       <main style={main}>{renderPage()}</main>
-    </div>
+      </div>
+    </AuthContext.Provider>
   );
 }
 
