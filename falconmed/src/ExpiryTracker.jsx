@@ -3,6 +3,50 @@ import { supabase } from "./lib/supabaseClient";
 
 const EXPIRY_TABLE = "expiry_records";
 
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function normalizeKey(key) {
+  return String(key || "")
+    .toLowerCase()
+    .replace(/[\s/_-]+/g, "")
+    .trim();
+}
+
+function getValue(row, possibleKeys) {
+  for (const key of possibleKeys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
+
 const mapDbToUi = (row) => ({
   id: row.id,
   drugName: row.drug_name,
@@ -11,12 +55,19 @@ const mapDbToUi = (row) => ({
   expiryDate: row.expiry_date,
   unitPrice: Number(row.unit_price || 0),
   location: row.location,
+  notes: row.notes || "",
 });
 
 export default function ExpiryTracker({ user, profile }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+
+  // Drug search and dropdown state
+  const [allDrugs, setAllDrugs] = useState([]);
+  const [drugSearch, setDrugSearch] = useState("");
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
+  const [selectedDrug, setSelectedDrug] = useState(null);
 
   const [form, setForm] = useState({
     drugName: "",
@@ -25,6 +76,7 @@ export default function ExpiryTracker({ user, profile }) {
     expiryDate: "",
     unitPrice: "",
     location: "",
+    notes: "",
   });
 
   const today = new Date();
@@ -57,14 +109,101 @@ export default function ExpiryTracker({ user, profile }) {
         return badgeOk;
     }
   };
+  // Load drugs CSV for dropdown
+  useEffect(() => {
+    const loadDrugs = async () => {
+      try {
+        const res = await fetch("/src/data/drugs_master.csv");
+        const text = await res.text();
+
+        const lines = text
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== "");
+
+        if (lines.length < 2) {
+          setAllDrugs([]);
+          return;
+        }
+
+        const rawHeaders = parseCSVLine(lines[0]);
+        const headers = rawHeaders.map((h) => normalizeKey(h));
+
+        const parsed = lines.slice(1).map((line) => {
+          const cols = parseCSVLine(line);
+          const rawRow = {};
+
+          headers.forEach((header, index) => {
+            rawRow[header] = cols[index] ?? "";
+          });
+
+          return {
+            brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
+            generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
+            strength: getValue(rawRow, ["strength"]),
+            dosage_form: getValue(rawRow, ["dosageform", "dosage", "form"]),
+            public_price: getValue(rawRow, ["publicprice", "price", "unitprice"]),
+          };
+        });
+
+        setAllDrugs(parsed);
+      } catch (error) {
+        console.error("Error loading drugs CSV for expiry tracker:", error);
+        setAllDrugs([]);
+      }
+    };
+
+    loadDrugs();
+  }, []);
+
+  // Filter drugs based on search
+  const filteredDrugs = useMemo(() => {
+    if (!drugSearch.trim() || !showDrugDropdown) return [];
+
+    const q = drugSearch.toLowerCase().trim();
+    return allDrugs
+      .filter((drug) => {
+        return (
+          drug.brand?.toLowerCase().includes(q) ||
+          drug.generic?.toLowerCase().includes(q) ||
+          drug.strength?.toLowerCase().includes(q) ||
+          drug.dosage_form?.toLowerCase().includes(q)
+        );
+      });
+  }, [allDrugs, drugSearch, showDrugDropdown]);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleDrugSelect = (drug) => {
+    const displayName = drug.brand
+      ? `${drug.brand}${drug.strength ? " " + drug.strength : ""}`
+      : `${drug.generic || "Unknown"}${drug.strength ? " " + drug.strength : ""}`;
+
+    if (!displayName || displayName === "Unknown") {
+      console.error("Failed mapping selected drug to form name:", drug);
+    }
+
+    const parsedPrice = Number.parseFloat(String(drug.public_price || "").replace(/[^0-9.]/g, ""));
+    const safePrice = Number.isFinite(parsedPrice) ? String(parsedPrice) : "";
+
+    if (drug.public_price && !safePrice) {
+      console.error("Failed mapping selected drug price to form unitPrice:", drug);
+    }
+
+    setSelectedDrug(drug);
+    setForm((prev) => ({
+      ...prev,
+      drugName: displayName,
+      unitPrice: safePrice || prev.unitPrice,
+    }));
+    setDrugSearch(displayName);
+    setShowDrugDropdown(false);
+  };
+
+  // Load expiry records on mount
   useEffect(() => {
     const loadItems = async () => {
-      setLoading(true);
       setMessage("");
 
       if (!profile?.organization_id) {
@@ -108,6 +247,7 @@ export default function ExpiryTracker({ user, profile }) {
               batch_no: item.batchNo,
               quantity: item.quantity,
               expiry_date: item.expiryDate,
+              notes: item.notes || "",
               status: getStatus(item.expiryDate),
               created_at: item.expiryDate,
             }))
@@ -133,15 +273,8 @@ export default function ExpiryTracker({ user, profile }) {
       !form.drugName ||
       !form.batchNo ||
       !form.quantity ||
-      !form.expiryDate ||
-      !form.unitPrice ||
-      !form.location
+      !form.expiryDate
     ) {
-      return;
-    }
-
-    if (!profile?.organization_id || !profile?.site_id || !user?.id) {
-      setMessage("Cannot save yet. User organization/site is not ready.");
       return;
     }
 
@@ -153,11 +286,7 @@ export default function ExpiryTracker({ user, profile }) {
           batch_no: form.batchNo,
           quantity: Number(form.quantity),
           expiry_date: form.expiryDate,
-          unit_price: Number(form.unitPrice),
-          location: form.location,
-          organization_id: profile.organization_id,
-          site_id: profile.site_id,
-          created_by: user.id,
+          notes: form.notes,
         })
         .select("*")
         .single();
@@ -169,24 +298,48 @@ export default function ExpiryTracker({ user, profile }) {
       }
 
       const newItem = mapDbToUi(data);
-      setItems((prev) => {
-        const next = [newItem, ...prev];
-        localStorage.setItem(
-          "falconmed_expiries",
-          JSON.stringify(
-            next.map((item) => ({
-              id: item.id,
-              drug_name: item.drugName,
-              batch_no: item.batchNo,
-              quantity: item.quantity,
-              expiry_date: item.expiryDate,
-              status: getStatus(item.expiryDate),
-              created_at: item.expiryDate,
-            }))
-          )
-        );
-        return next;
-      });
+      const refreshItems = async () => {
+        try {
+          const { data: refreshed, error: refreshError } = await supabase
+            .from(EXPIRY_TABLE)
+            .select("*")
+            .order("created_at", { ascending: false });
+
+          if (refreshError) {
+            console.error("Failed to refresh expiry records after insert:", refreshError.message);
+            setItems((prev) => [newItem, ...prev]);
+            return;
+          }
+
+          const mapped = (refreshed || []).map(mapDbToUi);
+          setItems(mapped);
+          localStorage.setItem(
+            "falconmed_expiries",
+            JSON.stringify(
+              mapped.map((item) => ({
+                id: item.id,
+                drug_name: item.drugName,
+                batch_no: item.batchNo,
+                quantity: item.quantity,
+                expiry_date: item.expiryDate,
+                notes: item.notes || "",
+                status: getStatus(item.expiryDate),
+                created_at: item.expiryDate,
+              }))
+            )
+          );
+        } catch (refreshCatchErr) {
+          console.error(
+            "Failed to refresh expiry records after insert:",
+            refreshCatchErr?.message || "Unknown error"
+          );
+          setItems((prev) => [newItem, ...prev]);
+        }
+      };
+
+      await refreshItems();
+
+      setMessage("Item added successfully.");
     } catch (err) {
       setMessage("Failed to save expiry item.");
       console.error("Expiry save error:", err?.message || "Unknown error");
@@ -199,8 +352,12 @@ export default function ExpiryTracker({ user, profile }) {
       quantity: "",
       expiryDate: "",
       unitPrice: "",
+      notes: "",
       location: "",
     });
+    setSelectedDrug(null);
+    setDrugSearch("");
+    setShowDrugDropdown(false);
   };
 
   const totals = useMemo(() => {
@@ -259,11 +416,41 @@ export default function ExpiryTracker({ user, profile }) {
         {message && <div style={messageBox}>{message}</div>}
 
         <form onSubmit={handleAdd} style={formGrid}>
+          <div style={drugSearchContainer}>
+            <input
+              style={input}
+              placeholder="Search drug by brand, generic, strength..."
+              value={drugSearch}
+              onChange={(e) => {
+                setDrugSearch(e.target.value);
+                setSelectedDrug(null);
+              }}
+              onFocus={() => setShowDrugDropdown(true)}
+            />
+            {showDrugDropdown && filteredDrugs.length > 0 && (
+              <div style={drugDropdown}>
+                {filteredDrugs.map((drug, idx) => (
+                  <div
+                    key={idx}
+                    style={drugOption}
+                    onClick={() => handleDrugSelect(drug)}
+                  >
+                    {drug.brand ? `${drug.brand}` : drug.generic}
+                    {drug.strength && ` (${drug.strength})`}
+                  </div>
+                ))}
+              </div>
+            )}
+            {drugSearch && filteredDrugs.length === 0 && showDrugDropdown && (
+              <div style={drugDropdownEmpty}>No matching drugs found</div>
+            )}
+          </div>
           <input
             style={input}
-            placeholder="Drug Name"
+            placeholder="Drug Name (selected above)"
             value={form.drugName}
             onChange={(e) => handleChange("drugName", e.target.value)}
+            readOnly
           />
           <input
             style={input}
@@ -297,6 +484,12 @@ export default function ExpiryTracker({ user, profile }) {
             value={form.location}
             onChange={(e) => handleChange("location", e.target.value)}
           />
+          <textarea
+            style={textarea}
+            placeholder="Notes (e.g., storage conditions, supplier info)"
+            value={form.notes}
+            onChange={(e) => handleChange("notes", e.target.value)}
+          />
 
           <button type="submit" style={primaryBtn}>
             Add Item
@@ -318,13 +511,14 @@ export default function ExpiryTracker({ user, profile }) {
                 <th style={th}>Value</th>
                 <th style={th}>Expiry Date</th>
                 <th style={th}>Location</th>
+                <th style={th}>Notes</th>
                 <th style={th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="8" style={emptyCell}>
+                  <td colSpan="9" style={emptyCell}>
                     Loading expiry records...
                   </td>
                 </tr>
@@ -342,6 +536,7 @@ export default function ExpiryTracker({ user, profile }) {
                     <td style={td}>{item.unitPrice}</td>
                     <td style={td}>{value.toLocaleString()} AED</td>
                     <td style={td}>{item.expiryDate}</td>
+                    <td style={td}>{item.notes}</td>
                     <td style={td}>{item.location}</td>
                     <td style={td}>
                       <span style={getStatusStyle(status)}>{status}</span>
@@ -352,7 +547,7 @@ export default function ExpiryTracker({ user, profile }) {
 
               {!loading && items.length === 0 && (
                 <tr>
-                  <td colSpan="8" style={emptyCell}>
+                  <td colSpan="9" style={emptyCell}>
                     No expiry items found.
                   </td>
                 </tr>
@@ -435,6 +630,57 @@ const input = {
   borderRadius: "10px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
+};
+
+const drugSearchContainer = {
+  position: "relative",
+  gridColumn: "1 / -1",
+};
+
+const drugDropdown = {
+  position: "absolute",
+  top: "48px",
+  left: 0,
+  right: 0,
+  background: "white",
+  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.1)",
+  zIndex: 1000,
+  maxHeight: "250px",
+  overflowY: "auto",
+};
+
+const drugOption = {
+  padding: "10px 14px",
+  cursor: "pointer",
+  borderBottom: "1px solid #f1f5f9",
+  fontSize: "14px",
+  color: "#0f172a",
+};
+
+const drugDropdownEmpty = {
+  padding: "10px 14px",
+  color: "#64748b",
+  fontSize: "14px",
+  textAlign: "center",
+  background: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  marginTop: "4px",
+};
+
+const textarea = {
+  width: "100%",
+  padding: "12px 14px",
+  fontSize: "15px",
+  borderRadius: "10px",
+  border: "1px solid #cbd5e1",
+  boxSizing: "border-box",
+  gridColumn: "1 / -1",
+  fontFamily: "inherit",
+  resize: "vertical",
+  minHeight: "80px",
 };
 
 const primaryBtn = {
