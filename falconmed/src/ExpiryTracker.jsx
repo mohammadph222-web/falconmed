@@ -49,13 +49,15 @@ function getValue(row, possibleKeys) {
 
 const mapDbToUi = (row) => ({
   id: row.id,
-  drugName: row.drug_name,
-  batchNo: row.batch_no,
+  drugName: row.drug_name || "",
+  batchNo: row.batch_no || "",
   quantity: Number(row.quantity || 0),
-  expiryDate: row.expiry_date,
+  expiryDate: row.expiry_date || "",
   unitPrice: Number(row.unit_price || 0),
-  location: row.location,
+  location: row.location || "-",
   notes: row.notes || "",
+  status: row.status || "Active",
+  value: Number(row.value || 0),
 });
 
 export default function ExpiryTracker({ user, profile }) {
@@ -89,6 +91,7 @@ export default function ExpiryTracker({ user, profile }) {
   };
 
   const getStatus = (dateStr) => {
+    if (!dateStr) return "Active";
     const monthsLeft = getMonthsLeft(dateStr);
 
     if (monthsLeft < 0) return "Expired";
@@ -206,26 +209,11 @@ export default function ExpiryTracker({ user, profile }) {
     const loadItems = async () => {
       setMessage("");
 
-      if (!profile?.organization_id) {
-        setItems([]);
-        setLoading(false);
-        setMessage("Organization is still being set up. Please refresh shortly.");
-        localStorage.setItem("falconmed_expiries", JSON.stringify([]));
-        return;
-      }
-
       try {
-        let query = supabase
+        const { data, error } = await supabase
           .from(EXPIRY_TABLE)
           .select("*")
-          .eq("organization_id", profile.organization_id)
           .order("created_at", { ascending: false });
-
-        if (profile.site_id) {
-          query = query.eq("site_id", profile.site_id);
-        }
-
-        const { data, error } = await query;
 
         if (error) {
           setItems([]);
@@ -263,7 +251,7 @@ export default function ExpiryTracker({ user, profile }) {
     };
 
     void loadItems();
-  }, [profile?.organization_id, profile?.site_id]);
+  }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -525,7 +513,7 @@ export default function ExpiryTracker({ user, profile }) {
               )}
 
               {items.map((item) => {
-                const status = getStatus(item.expiryDate);
+                const status = item.expiryDate ? getStatus(item.expiryDate) : item.status || "Active";
                 const value = Number(item.quantity) * Number(item.unitPrice);
 
                 return (
@@ -536,8 +524,8 @@ export default function ExpiryTracker({ user, profile }) {
                     <td style={td}>{item.unitPrice}</td>
                     <td style={td}>{value.toLocaleString()} AED</td>
                     <td style={td}>{item.expiryDate}</td>
-                    <td style={td}>{item.notes}</td>
                     <td style={td}>{item.location}</td>
+                    <td style={td}>{item.notes}</td>
                     <td style={td}>
                       <span style={getStatusStyle(status)}>{status}</span>
                     </td>
