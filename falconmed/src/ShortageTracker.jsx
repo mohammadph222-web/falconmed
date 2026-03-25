@@ -1,38 +1,32 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabaseClient";
 
-export default function ShortageTracker() {
-  const [items, setItems] = useState([
-    {
-      id: 1,
-      drugName: "Ozempic 1mg",
-      quantityRequested: 3,
-      patientName: "Ahmed Ali",
-      contactNumber: "0501234567",
-      requestDate: "2026-03-24",
-      status: "Pending",
-      notes: "Patient will return tomorrow",
-    },
-    {
-      id: 2,
-      drugName: "Augmentin 1g",
-      quantityRequested: 2,
-      patientName: "Sara Hassan",
-      contactNumber: "0559876543",
-      requestDate: "2026-03-23",
-      status: "Ordered",
-      notes: "Supplier contacted",
-    },
-    {
-      id: 3,
-      drugName: "Enoxaparin 40mg",
-      quantityRequested: 5,
-      patientName: "Mariam Khaled",
-      contactNumber: "0521112233",
-      requestDate: "2026-03-22",
-      status: "Completed",
-      notes: "Patient notified",
-    },
-  ]);
+const SHORTAGE_TABLE = "shortage_records";
+
+const mapDbToUi = (row) => ({
+  id: row.id,
+  drugName: row.drug_name,
+  quantityRequested: Number(row.quantity_requested || 0),
+  patientName: row.patient_name,
+  contactNumber: row.contact_number,
+  requestDate: row.request_date,
+  status: row.status || "Pending",
+  notes: row.notes || "",
+});
+
+const toReportRecord = (item) => ({
+  id: item.id,
+  drug_name: item.drugName,
+  quantity: item.quantityRequested,
+  requested_at: item.requestDate,
+  status: item.status,
+  created_at: item.requestDate,
+});
+
+export default function ShortageTracker({ user, profile }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
   const [form, setForm] = useState({
     drugName: "",
@@ -48,8 +42,61 @@ export default function ShortageTracker() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleAdd = (e) => {
+  useEffect(() => {
+    const loadItems = async () => {
+      setLoading(true);
+      setMessage("");
+
+      if (!profile?.organization_id) {
+        setItems([]);
+        setLoading(false);
+        setMessage("Organization is still being set up. Please refresh shortly.");
+        localStorage.setItem("falconmed_shortages", JSON.stringify([]));
+        return;
+      }
+
+      try {
+        let query = supabase
+          .from(SHORTAGE_TABLE)
+          .select("*")
+          .eq("organization_id", profile.organization_id)
+          .order("created_at", { ascending: false });
+
+        if (profile.site_id) {
+          query = query.eq("site_id", profile.site_id);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          setItems([]);
+          setMessage("Failed to load shortage records.");
+          console.error("Failed to load shortage records:", error.message);
+          localStorage.setItem("falconmed_shortages", JSON.stringify([]));
+          return;
+        }
+
+        const mapped = (data || []).map(mapDbToUi);
+        setItems(mapped);
+        localStorage.setItem(
+          "falconmed_shortages",
+          JSON.stringify(mapped.map(toReportRecord))
+        );
+      } catch (err) {
+        setItems([]);
+        setMessage("Failed to load shortage records.");
+        console.error("Shortage load error:", err?.message || "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadItems();
+  }, [profile?.organization_id, profile?.site_id]);
+
+  const handleAdd = async (e) => {
     e.preventDefault();
+    setMessage("");
 
     if (
       !form.drugName ||
@@ -61,18 +108,50 @@ export default function ShortageTracker() {
       return;
     }
 
-    const newItem = {
-      id: Date.now(),
-      drugName: form.drugName,
-      quantityRequested: Number(form.quantityRequested),
-      patientName: form.patientName,
-      contactNumber: form.contactNumber,
-      requestDate: form.requestDate,
-      status: form.status,
-      notes: form.notes,
-    };
+    if (!profile?.organization_id || !profile?.site_id || !user?.id) {
+      setMessage("Cannot save yet. User organization/site is not ready.");
+      return;
+    }
 
-    setItems((prev) => [newItem, ...prev]);
+    try {
+      const { data, error } = await supabase
+        .from(SHORTAGE_TABLE)
+        .insert({
+          drug_name: form.drugName,
+          quantity_requested: Number(form.quantityRequested),
+          patient_name: form.patientName,
+          contact_number: form.contactNumber,
+          request_date: form.requestDate,
+          status: form.status,
+          notes: form.notes,
+          organization_id: profile.organization_id,
+          site_id: profile.site_id,
+          created_by: user.id,
+        })
+        .select("*")
+        .single();
+
+      if (error) {
+        setMessage("Failed to save shortage request.");
+        console.error("Failed to save shortage request:", error.message);
+        return;
+      }
+
+      const newItem = mapDbToUi(data);
+      setItems((prev) => {
+        const next = [newItem, ...prev];
+        localStorage.setItem(
+          "falconmed_shortages",
+          JSON.stringify(next.map(toReportRecord))
+        );
+        return next;
+      });
+    } catch (err) {
+      setMessage("Failed to save shortage request.");
+      console.error("Shortage save error:", err?.message || "Unknown error");
+      return;
+    }
+
     setForm({
       drugName: "",
       quantityRequested: "",
@@ -84,12 +163,47 @@ export default function ShortageTracker() {
     });
   };
 
-  const updateStatus = (id, newStatus) => {
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === id ? { ...item, status: newStatus } : item
-      )
-    );
+  const updateStatus = async (id, newStatus) => {
+    setMessage("");
+
+    if (!profile?.organization_id) {
+      setMessage("Cannot update status because organization is missing.");
+      return;
+    }
+
+    try {
+      let query = supabase
+        .from(SHORTAGE_TABLE)
+        .update({ status: newStatus })
+        .eq("id", id)
+        .eq("organization_id", profile.organization_id);
+
+      if (profile.site_id) {
+        query = query.eq("site_id", profile.site_id);
+      }
+
+      const { error } = await query;
+
+      if (error) {
+        setMessage("Failed to update status.");
+        console.error("Failed to update shortage status:", error.message);
+        return;
+      }
+
+      setItems((prev) => {
+        const next = prev.map((item) =>
+          item.id === id ? { ...item, status: newStatus } : item
+        );
+        localStorage.setItem(
+          "falconmed_shortages",
+          JSON.stringify(next.map(toReportRecord))
+        );
+        return next;
+      });
+    } catch (err) {
+      setMessage("Failed to update status.");
+      console.error("Shortage status update error:", err?.message || "Unknown error");
+    }
   };
 
   const totals = useMemo(() => {
@@ -145,6 +259,8 @@ export default function ShortageTracker() {
 
       <div style={formCard}>
         <h2 style={sectionTitle}>Add Shortage Request</h2>
+
+        {message && <div style={messageBox}>{message}</div>}
 
         <form onSubmit={handleAdd} style={formGrid}>
           <input
@@ -225,6 +341,14 @@ export default function ShortageTracker() {
             </thead>
 
             <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan="8" style={emptyCell}>
+                    Loading shortage requests...
+                  </td>
+                </tr>
+              )}
+
               {items.map((item) => (
                 <tr key={item.id}>
                   <td style={td}>{item.drugName}</td>
@@ -264,7 +388,7 @@ export default function ShortageTracker() {
                 </tr>
               ))}
 
-              {items.length === 0 && (
+              {!loading && items.length === 0 && (
                 <tr>
                   <td colSpan="8" style={emptyCell}>
                     No shortage requests found.
@@ -330,6 +454,16 @@ const formGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "14px",
+};
+
+const messageBox = {
+  marginBottom: "12px",
+  padding: "10px 12px",
+  borderRadius: "10px",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: "14px",
 };
 
 const input = {

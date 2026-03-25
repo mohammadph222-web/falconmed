@@ -203,13 +203,13 @@ export default function App() {
       case "expiry":
         return (
           <div style={contentCard}>
-            <ExpiryTracker />
+            <ExpiryTracker user={user} profile={profile} />
           </div>
         );
       case "shortage":
         return (
           <div style={contentCard}>
-            <ShortageTracker />
+            <ShortageTracker user={user} profile={profile} />
           </div>
         );
       case "reports":

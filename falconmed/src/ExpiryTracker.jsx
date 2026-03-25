@@ -1,35 +1,22 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "./lib/supabaseClient";
 
-export default function ExpiryTracker() {
-  const [items, setItems] = useState([
-    {
-      id: 1,
-      drugName: "Meropenem 1g Injection",
-      batchNo: "MER-2401",
-      quantity: 120,
-      expiryDate: "2026-06-15",
-      unitPrice: 18,
-      location: "Main Store",
-    },
-    {
-      id: 2,
-      drugName: "Enoxaparin 40mg",
-      batchNo: "ENO-2219",
-      quantity: 75,
-      expiryDate: "2026-04-10",
-      unitPrice: 22,
-      location: "Inpatient Pharmacy",
-    },
-    {
-      id: 3,
-      drugName: "Insulin Glargine",
-      batchNo: "INS-903",
-      quantity: 44,
-      expiryDate: "2026-02-01",
-      unitPrice: 95,
-      location: "Fridge A",
-    },
-  ]);
+const EXPIRY_TABLE = "expiry_records";
+
+const mapDbToUi = (row) => ({
+  id: row.id,
+  drugName: row.drug_name,
+  batchNo: row.batch_no,
+  quantity: Number(row.quantity || 0),
+  expiryDate: row.expiry_date,
+  unitPrice: Number(row.unit_price || 0),
+  location: row.location,
+});
+
+export default function ExpiryTracker({ user, profile }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [message, setMessage] = useState("");
 
   const [form, setForm] = useState({
     drugName: "",
@@ -75,8 +62,72 @@ export default function ExpiryTracker() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const handleAdd = (e) => {
+  useEffect(() => {
+    const loadItems = async () => {
+      setLoading(true);
+      setMessage("");
+
+      if (!profile?.organization_id) {
+        setItems([]);
+        setLoading(false);
+        setMessage("Organization is still being set up. Please refresh shortly.");
+        localStorage.setItem("falconmed_expiries", JSON.stringify([]));
+        return;
+      }
+
+      try {
+        let query = supabase
+          .from(EXPIRY_TABLE)
+          .select("*")
+          .eq("organization_id", profile.organization_id)
+          .order("created_at", { ascending: false });
+
+        if (profile.site_id) {
+          query = query.eq("site_id", profile.site_id);
+        }
+
+        const { data, error } = await query;
+
+        if (error) {
+          setItems([]);
+          setMessage("Failed to load expiry records.");
+          console.error("Failed to load expiry records:", error.message);
+          localStorage.setItem("falconmed_expiries", JSON.stringify([]));
+          return;
+        }
+
+        const mapped = (data || []).map(mapDbToUi);
+        setItems(mapped);
+
+        localStorage.setItem(
+          "falconmed_expiries",
+          JSON.stringify(
+            mapped.map((item) => ({
+              id: item.id,
+              drug_name: item.drugName,
+              batch_no: item.batchNo,
+              quantity: item.quantity,
+              expiry_date: item.expiryDate,
+              status: getStatus(item.expiryDate),
+              created_at: item.expiryDate,
+            }))
+          )
+        );
+      } catch (err) {
+        setItems([]);
+        setMessage("Failed to load expiry records.");
+        console.error("Expiry load error:", err?.message || "Unknown error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void loadItems();
+  }, [profile?.organization_id, profile?.site_id]);
+
+  const handleAdd = async (e) => {
     e.preventDefault();
+    setMessage("");
 
     if (
       !form.drugName ||
@@ -89,17 +140,59 @@ export default function ExpiryTracker() {
       return;
     }
 
-    const newItem = {
-      id: Date.now(),
-      drugName: form.drugName,
-      batchNo: form.batchNo,
-      quantity: Number(form.quantity),
-      expiryDate: form.expiryDate,
-      unitPrice: Number(form.unitPrice),
-      location: form.location,
-    };
+    if (!profile?.organization_id || !profile?.site_id || !user?.id) {
+      setMessage("Cannot save yet. User organization/site is not ready.");
+      return;
+    }
 
-    setItems((prev) => [newItem, ...prev]);
+    try {
+      const { data, error } = await supabase
+        .from(EXPIRY_TABLE)
+        .insert({
+          drug_name: form.drugName,
+          batch_no: form.batchNo,
+          quantity: Number(form.quantity),
+          expiry_date: form.expiryDate,
+          unit_price: Number(form.unitPrice),
+          location: form.location,
+          organization_id: profile.organization_id,
+          site_id: profile.site_id,
+          created_by: user.id,
+        })
+        .select("*")
+        .single();
+
+      if (error) {
+        setMessage("Failed to save expiry item.");
+        console.error("Failed to save expiry item:", error.message);
+        return;
+      }
+
+      const newItem = mapDbToUi(data);
+      setItems((prev) => {
+        const next = [newItem, ...prev];
+        localStorage.setItem(
+          "falconmed_expiries",
+          JSON.stringify(
+            next.map((item) => ({
+              id: item.id,
+              drug_name: item.drugName,
+              batch_no: item.batchNo,
+              quantity: item.quantity,
+              expiry_date: item.expiryDate,
+              status: getStatus(item.expiryDate),
+              created_at: item.expiryDate,
+            }))
+          )
+        );
+        return next;
+      });
+    } catch (err) {
+      setMessage("Failed to save expiry item.");
+      console.error("Expiry save error:", err?.message || "Unknown error");
+      return;
+    }
+
     setForm({
       drugName: "",
       batchNo: "",
@@ -162,6 +255,8 @@ export default function ExpiryTracker() {
 
       <div style={formCard}>
         <h2 style={sectionTitle}>Add Expiry Item</h2>
+
+        {message && <div style={messageBox}>{message}</div>}
 
         <form onSubmit={handleAdd} style={formGrid}>
           <input
@@ -227,6 +322,14 @@ export default function ExpiryTracker() {
               </tr>
             </thead>
             <tbody>
+              {loading && (
+                <tr>
+                  <td colSpan="8" style={emptyCell}>
+                    Loading expiry records...
+                  </td>
+                </tr>
+              )}
+
               {items.map((item) => {
                 const status = getStatus(item.expiryDate);
                 const value = Number(item.quantity) * Number(item.unitPrice);
@@ -247,7 +350,7 @@ export default function ExpiryTracker() {
                 );
               })}
 
-              {items.length === 0 && (
+              {!loading && items.length === 0 && (
                 <tr>
                   <td colSpan="8" style={emptyCell}>
                     No expiry items found.
@@ -313,6 +416,16 @@ const formGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "14px",
+};
+
+const messageBox = {
+  marginBottom: "12px",
+  padding: "10px 12px",
+  borderRadius: "10px",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  color: "#334155",
+  fontSize: "14px",
 };
 
 const input = {
