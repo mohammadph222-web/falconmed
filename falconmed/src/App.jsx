@@ -9,6 +9,7 @@ import Reports from "./Reports";
 import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
+import HomeDeliveryTracker from "./HomeDeliveryTracker";
 import AdminPanel from "./AdminPanel";
 import { AuthContext } from "./lib/authContext";
 import drugsMasterCsv from "./data/drugs_master.csv?raw";
@@ -23,13 +24,14 @@ const NAV_ITEMS = [
   { key: "labels", label: "Label Builder" },
   { key: "billing", label: "Billing" },
   { key: "refill", label: "Refill Tracker" },
+  { key: "delivery", label: "Home Delivery Tracker" },
 ];
 
 const ROLE_ACCESS = {
   admin: NAV_ITEMS.map((x) => x.key),
-  manager: ["dashboard", "drugsearch", "expiry", "shortage"],
-  pharmacist: ["drugsearch", "labels", "shortage"],
-  storekeeper: ["drugsearch", "expiry"],
+  manager: ["dashboard", "drugsearch", "expiry", "shortage", "delivery"],
+  pharmacist: ["drugsearch", "labels", "shortage", "delivery"],
+  storekeeper: ["drugsearch", "expiry", "delivery"],
 };
 
 const getRoleName = (rawRole) => {
@@ -504,6 +506,12 @@ export default function App() {
         return (
           <div style={contentCard}>
             <RefillTracker />
+          </div>
+        );
+      case "delivery":
+        return (
+          <div style={contentCard}>
+            <HomeDeliveryTracker />
           </div>
         );
       default:
