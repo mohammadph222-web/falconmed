@@ -81,6 +81,7 @@ export default function App() {
     nearExpiryItems: 0,
     shortageToday: 0,
     activeSites: 0,
+    recentActivity: [],
   });
 
   const ensureUserProfile = async (authUser) => {
@@ -333,12 +334,39 @@ export default function App() {
         return null;
       };
 
+      const getRecentActivity = async (tables, type) => {
+        for (const table of tables) {
+          try {
+            const { data, error } = await applyScope(
+              supabase.from(table).select("*").order("created_at", { ascending: false }).limit(5)
+            );
+
+            if (error) continue;
+
+            return (data || []).map((item) => ({
+              id: `${type}-${item.id || item.created_at || Math.random().toString(36).slice(2, 8)}`,
+              type,
+              title: type === "shortage" ? "Shortage request created" : "Expiry item added",
+              subtitle:
+                item.drug_name || item.drugName || item.item || item.batch_no || item.status || "Record updated",
+              timestamp: item.created_at || item.request_date || item.expiry_date || "",
+            }));
+          } catch (_err) {
+            // Ignore and continue to fallback table.
+          }
+        }
+
+        return [];
+      };
+
       try {
         const [
           totalDrugsCount,
           nearExpiryCount,
           shortageTodayCount,
           activeSitesCount,
+          recentShortages,
+          recentExpiries,
         ] = await Promise.all([
           getCountFromTables(["drugs", "drugs_master", "drug_search"], (base) =>
             base.select("*", { count: "exact", head: true })
@@ -367,12 +395,18 @@ export default function App() {
               : base.select("*", { count: "exact", head: true });
             return scoped;
           }),
+          getRecentActivity(["shortage_tracker", "shortage_records"], "shortage"),
+          getRecentActivity(["expiry_tracker", "expiry_records"], "expiry"),
         ]);
 
         const fallbackShortageToday = await getCountFromTables(
           ["shortage_tracker", "shortage_records"],
           (base) => applyScope(base.select("*", { count: "exact", head: true }).eq("request_date", todayStr))
         );
+
+        const recentActivity = [...recentShortages, ...recentExpiries]
+          .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
+          .slice(0, 5);
 
         setDashboardData({
           totalDrugs: CSV_TOTAL_DRUGS,
@@ -382,12 +416,14 @@ export default function App() {
               ? shortageTodayCount
               : fallbackShortageToday || 0,
           activeSites: activeSitesCount ?? 0,
+          recentActivity,
         });
       } catch (err) {
         console.error("Failed to load dashboard metrics:", err?.message || "Unknown error");
         setDashboardData((prev) => ({
           ...prev,
           totalDrugs: CSV_TOTAL_DRUGS,
+          recentActivity: [],
         }));
       } finally {
         setDashboardLoading(false);
@@ -472,44 +508,82 @@ export default function App() {
         );
       default:
         return (
-          <>
-            <div style={headerCard}>
-              <h1 style={headerTitle}>FalconMed Dashboard</h1>
-              <p style={headerText}>Welcome back, {user.email}</p>
-            </div>
-
-            <div style={cardsGrid}>
-              <div style={statCard}>
-                <div style={statLabel}>Total Drugs in Database</div>
-                <div style={statValue}>{dashboardData.totalDrugs.toLocaleString()}</div>
-              </div>
-
-              <div style={statCard}>
-                <div style={statLabel}>Near Expiry Items</div>
-                <div style={statValue}>{dashboardData.nearExpiryItems.toLocaleString()}</div>
-              </div>
-
-              <div style={statCard}>
-                <div style={statLabel}>Shortage Requests Today</div>
-                <div style={statValue}>{dashboardData.shortageToday.toLocaleString()}</div>
-              </div>
-
-              <div style={statCard}>
-                <div style={statLabel}>Active Sites</div>
-                <div style={statValue}>{dashboardData.activeSites.toLocaleString()}</div>
+          <div style={dashboardPageWrap}>
+            <div style={dashboardHeaderCard}>
+              <div style={dashboardHeaderInner}>
+                <h1 style={dashboardHeaderTitle}>FalconMed Dashboard</h1>
+                <p style={dashboardHeaderText}>Welcome back, {user.email}</p>
               </div>
             </div>
 
-            <div style={contentCard}>
-              <h3 style={sectionTitle}>Overview</h3>
-              <p style={sectionText}>
+            <div style={dashboardCardsGrid}>
+              <div style={dashboardStatCard}>
+                <div style={dashboardStatAccent} />
+                <div style={dashboardStatContent}>
+                  <div style={dashboardStatLabel}>Total Drugs in Database</div>
+                  <div style={dashboardStatValue}>{dashboardData.totalDrugs.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div style={dashboardStatCard}>
+                <div style={dashboardStatAccent} />
+                <div style={dashboardStatContent}>
+                  <div style={dashboardStatLabel}>Near Expiry Items</div>
+                  <div style={dashboardStatValue}>{dashboardData.nearExpiryItems.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div style={dashboardStatCard}>
+                <div style={dashboardStatAccent} />
+                <div style={dashboardStatContent}>
+                  <div style={dashboardStatLabel}>Shortage Requests Today</div>
+                  <div style={dashboardStatValue}>{dashboardData.shortageToday.toLocaleString()}</div>
+                </div>
+              </div>
+
+              <div style={dashboardStatCard}>
+                <div style={dashboardStatAccent} />
+                <div style={dashboardStatContent}>
+                  <div style={dashboardStatLabel}>Active Sites</div>
+                  <div style={dashboardStatValue}>{dashboardData.activeSites.toLocaleString()}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={dashboardActivityCard}>
+              <h3 style={dashboardActivityTitle}>Recent Activity</h3>
+
+              {dashboardData.recentActivity.length === 0 && !dashboardLoading && (
+                <p style={dashboardActivityEmpty}>No recent activity yet.</p>
+              )}
+
+              {dashboardData.recentActivity.length > 0 && (
+                <div style={dashboardActivityList}>
+                  {dashboardData.recentActivity.map((item) => (
+                    <div key={item.id} style={dashboardActivityItem}>
+                      <div style={dashboardActivityTextWrap}>
+                        <div style={dashboardActivityItemTitle}>{item.title}</div>
+                        <div style={dashboardActivityItemSub}>{item.subtitle}</div>
+                      </div>
+                      <div style={dashboardActivityTime}>{item.timestamp || "-"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div style={dashboardOverviewCard}>
+              <h3 style={dashboardOverviewTitle}>Overview</h3>
+              <p style={dashboardOverviewText}>
                 Operational view powered by available live records. Dashboard
                 metrics are scoped safely and fall back gracefully when some
                 tables are unavailable.
               </p>
-              {dashboardLoading && <p style={sectionText}>Loading latest dashboard data...</p>}
+              {dashboardLoading && (
+                <p style={dashboardOverviewLoadingText}>Loading latest dashboard data...</p>
+              )}
             </div>
-          </>
+          </div>
         );
     }
   };
@@ -642,49 +716,183 @@ const main = {
   padding: "28px",
 };
 
-const headerCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "24px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "20px",
+const dashboardPageWrap = {
+  display: "grid",
+  gap: "14px",
 };
 
-const headerTitle = {
+const dashboardHeaderCard = {
+  background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+  borderRadius: "20px",
+  padding: "22px 24px",
+  border: "1px solid #dbe5f0",
+  boxShadow: "0 10px 24px rgba(15, 23, 42, 0.06)",
+  position: "relative",
+  overflow: "hidden",
+};
+
+const dashboardHeaderInner = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "6px",
+};
+
+const dashboardHeaderTitle = {
   margin: 0,
-  fontSize: "30px",
+  fontSize: "34px",
+  fontWeight: "700",
+  color: "#0f172a",
+  letterSpacing: "-0.02em",
+  lineHeight: 1.05,
+};
+
+const dashboardHeaderText = {
+  marginTop: 0,
+  marginBottom: 0,
+  color: "#64748b",
+  fontSize: "14px",
+  lineHeight: 1.5,
+};
+
+const dashboardCardsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: "12px",
+};
+
+const dashboardStatCard = {
+  background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+  borderRadius: "18px",
+  padding: "0",
+  border: "1px solid #e2e8f0",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.06)",
+  minHeight: "132px",
+  display: "flex",
+  flexDirection: "column",
+  overflow: "hidden",
+};
+
+const dashboardStatAccent = {
+  height: "4px",
+  width: "100%",
+  background: "linear-gradient(90deg, #2563eb, #60a5fa)",
+};
+
+const dashboardStatContent = {
+  padding: "16px 18px 18px",
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+  gap: "14px",
+  flex: 1,
+};
+
+const dashboardStatLabel = {
+  fontSize: "11px",
+  fontWeight: "700",
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#64748b",
+  lineHeight: 1.4,
+};
+
+const dashboardStatValue = {
+  fontSize: "34px",
+  fontWeight: "700",
+  lineHeight: 1,
+  color: "#0f172a",
+  letterSpacing: "-0.03em",
+};
+
+const dashboardOverviewCard = {
+  background: "white",
+  borderRadius: "18px",
+  padding: "18px 20px",
+  border: "1px solid #e2e8f0",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
+};
+
+const dashboardOverviewTitle = {
+  marginTop: 0,
+  marginBottom: "6px",
+  color: "#0f172a",
+  fontSize: "17px",
+  fontWeight: "700",
+};
+
+const dashboardOverviewText = {
+  color: "#475569",
+  lineHeight: 1.55,
+  marginBottom: 0,
+  fontSize: "14px",
+};
+
+const dashboardActivityCard = {
+  background: "white",
+  borderRadius: "18px",
+  padding: "18px 20px",
+  border: "1px solid #e2e8f0",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.05)",
+};
+
+const dashboardActivityTitle = {
+  marginTop: 0,
+  marginBottom: "10px",
+  color: "#0f172a",
+  fontSize: "17px",
+  fontWeight: "700",
+};
+
+const dashboardActivityEmpty = {
+  margin: 0,
+  color: "#64748b",
+  fontSize: "14px",
+  lineHeight: 1.5,
+};
+
+const dashboardActivityList = {
+  display: "grid",
+  gap: "10px",
+};
+
+const dashboardActivityItem = {
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  gap: "12px",
+  alignItems: "center",
+  padding: "12px 0",
+  borderTop: "1px solid #eef2f7",
+};
+
+const dashboardActivityTextWrap = {
+  minWidth: 0,
+};
+
+const dashboardActivityItemTitle = {
+  fontSize: "14px",
+  fontWeight: "600",
   color: "#0f172a",
 };
 
-const headerText = {
-  marginTop: "8px",
-  color: "#475569",
-};
-
-const cardsGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "16px",
-  marginBottom: "20px",
-};
-
-const statCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-};
-
-const statLabel = {
+const dashboardActivityItemSub = {
+  marginTop: "4px",
   fontSize: "13px",
   color: "#64748b",
-  marginBottom: "10px",
+  wordBreak: "break-word",
 };
 
-const statValue = {
-  fontSize: "28px",
-  fontWeight: "bold",
-  color: "#0f172a",
+const dashboardActivityTime = {
+  fontSize: "12px",
+  color: "#94a3b8",
+  whiteSpace: "nowrap",
+};
+
+const dashboardOverviewLoadingText = {
+  color: "#64748b",
+  lineHeight: 1.5,
+  marginTop: "8px",
+  marginBottom: 0,
+  fontSize: "13px",
 };
 
 const contentCard = {
