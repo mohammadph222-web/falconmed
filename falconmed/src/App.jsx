@@ -650,7 +650,8 @@ const sidebar = {
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
-  boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+  boxShadow: "2px 0 10px rgba(2, 6, 23, 0.22)",
+  borderRight: "1px solid rgba(148, 163, 184, 0.16)",
 };
 
 const brandBox = {
@@ -698,12 +699,15 @@ const btn = {
   cursor: "pointer",
   textAlign: "left",
   fontSize: "14px",
+  fontWeight: 600,
+  transition: "all 0.18s ease",
 };
 
 const activeBtn = {
   ...btn,
   background: "#2563eb",
   border: "1px solid #2563eb",
+  boxShadow: "0 0 0 1px rgba(255,255,255,0.16) inset",
 };
 
 const logoutBtn = {
@@ -717,6 +721,8 @@ const logoutBtn = {
   cursor: "pointer",
   textAlign: "left",
   fontSize: "14px",
+  fontWeight: 600,
+  transition: "all 0.18s ease",
 };
 
 const main = {
@@ -907,7 +913,7 @@ const contentCard = {
   background: "white",
   borderRadius: "16px",
   padding: "18px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
+  boxShadow: "0 2px 8px rgba(15, 23, 42, 0.045)",
   border: "1px solid #e5eaf1",
 };
 

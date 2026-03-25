@@ -1168,8 +1168,8 @@ button:active {
   background: white;
   padding: 1.1rem;
   border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-  border: 1px solid #e5eaf1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.045);
+  border: 1px solid #e8edf4;
   text-align: center;
 }
 
@@ -1503,6 +1503,11 @@ button:active {
   font-size: 0.92rem;
   font-family: inherit;
   transition: border-color 0.2s ease-in-out;
+  min-height: 40px;
+}
+
+.form-group textarea {
+  min-height: 78px;
 }
 
 .form-group input:focus,
@@ -1519,6 +1524,8 @@ button:active {
   padding: 0.62rem 1.1rem !important;
   border-radius: 8px !important;
   font-size: 0.85rem !important;
+  min-height: 38px;
+  font-weight: 600;
 }
 
 .submit-button:hover {
@@ -1529,8 +1536,8 @@ button:active {
   background: white;
   padding: 1.3rem;
   border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-  border: 1px solid #e5eaf1;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.045);
+  border: 1px solid #e8edf4;
 }
 
 .table-container h3 {
@@ -1562,6 +1569,7 @@ button:active {
   border-bottom: 1px solid #f1f5f9;
   color: #64748b;
   font-size: 0.9rem;
+  vertical-align: top;
 }
 
 .shortages-table tbody tr:hover {
@@ -1623,6 +1631,8 @@ button:active {
   padding: 0.45rem 0.85rem !important;
   font-size: 0.8rem !important;
   border-radius: 7px !important;
+  min-height: 36px;
+  font-weight: 600;
 }
 
 .export-button:hover {
