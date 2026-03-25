@@ -11,6 +11,7 @@ import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import AdminPanel from "./AdminPanel";
 import { AuthContext } from "./lib/authContext";
+import drugsMasterCsv from "./data/drugs_master.csv?raw";
 
 const NAV_ITEMS = [
   { key: "dashboard", label: "Dashboard" },
@@ -53,6 +54,21 @@ const getSafePage = (requestedPage, allowedPages) => {
   return allowedPages[0] || "dashboard";
 };
 
+const getTotalDrugsFromCsv = () => {
+  try {
+    const lines = String(drugsMasterCsv || "")
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== "");
+
+    if (lines.length < 2) return 0;
+    return Math.max(lines.length - 1, 0);
+  } catch (_err) {
+    return 0;
+  }
+};
+
+const CSV_TOTAL_DRUGS = getTotalDrugsFromCsv();
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -61,11 +77,10 @@ export default function App() {
   const [page, setPage] = useState(getPageFromLocation);
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [dashboardData, setDashboardData] = useState({
-    totalDrugs: 22451,
+    totalDrugs: 0,
     nearExpiryItems: 0,
     shortageToday: 0,
     activeSites: 0,
-    recentActivity: [],
   });
 
   const ensureUserProfile = async (authUser) => {
@@ -318,54 +333,12 @@ export default function App() {
         return null;
       };
 
-      const getRecentFromTables = async (tables, kind) => {
-        for (const table of tables) {
-          try {
-            const scopedQuery = applyScope(
-              supabase.from(table).select("*").order("created_at", { ascending: false }).limit(5)
-            );
-
-            const { data, error } = await scopedQuery;
-            if (error) continue;
-
-            return (data || []).map((row) => {
-              const timestamp = row.created_at || row.request_date || row.expiry_date || "";
-              const timeValue = timestamp ? new Date(timestamp).getTime() : 0;
-
-              if (kind === "shortage") {
-                return {
-                  type: "Shortage",
-                  title: row.drug_name || row.drugName || row.item || "Shortage record",
-                  subtitle: row.status || row.patient_name || row.patientName || "-",
-                  timeLabel: timestamp,
-                  sortKey: Number.isFinite(timeValue) ? timeValue : 0,
-                };
-              }
-
-              return {
-                type: "Expiry",
-                title: row.drug_name || row.drugName || row.item || "Expiry record",
-                subtitle: row.expiry_date || row.batch_no || row.status || "-",
-                timeLabel: timestamp,
-                sortKey: Number.isFinite(timeValue) ? timeValue : 0,
-              };
-            });
-          } catch (_err) {
-            // Ignore table/column mismatches and keep trying fallbacks.
-          }
-        }
-
-        return [];
-      };
-
       try {
         const [
           totalDrugsCount,
           nearExpiryCount,
           shortageTodayCount,
           activeSitesCount,
-          recentShortages,
-          recentExpiries,
         ] = await Promise.all([
           getCountFromTables(["drugs", "drugs_master", "drug_search"], (base) =>
             base.select("*", { count: "exact", head: true })
@@ -394,8 +367,6 @@ export default function App() {
               : base.select("*", { count: "exact", head: true });
             return scoped;
           }),
-          getRecentFromTables(["shortage_tracker", "shortage_records"], "shortage"),
-          getRecentFromTables(["expiry_tracker", "expiry_records"], "expiry"),
         ]);
 
         const fallbackShortageToday = await getCountFromTables(
@@ -403,22 +374,21 @@ export default function App() {
           (base) => applyScope(base.select("*", { count: "exact", head: true }).eq("request_date", todayStr))
         );
 
-        const mergedRecent = [...recentShortages, ...recentExpiries]
-          .sort((a, b) => b.sortKey - a.sortKey)
-          .slice(0, 8);
-
         setDashboardData({
-          totalDrugs: totalDrugsCount ?? 22451,
+          totalDrugs: CSV_TOTAL_DRUGS,
           nearExpiryItems: nearExpiryCount ?? 0,
           shortageToday:
             shortageTodayCount !== null && shortageTodayCount !== undefined
               ? shortageTodayCount
               : fallbackShortageToday || 0,
           activeSites: activeSitesCount ?? 0,
-          recentActivity: mergedRecent,
         });
       } catch (err) {
         console.error("Failed to load dashboard metrics:", err?.message || "Unknown error");
+        setDashboardData((prev) => ({
+          ...prev,
+          totalDrugs: CSV_TOTAL_DRUGS,
+        }));
       } finally {
         setDashboardLoading(false);
       }
@@ -538,28 +508,6 @@ export default function App() {
                 tables are unavailable.
               </p>
               {dashboardLoading && <p style={sectionText}>Loading latest dashboard data...</p>}
-            </div>
-
-            <div style={contentCard}>
-              <h3 style={sectionTitle}>Recent Activity</h3>
-              {dashboardData.recentActivity.length === 0 && !dashboardLoading && (
-                <p style={sectionText}>No recent shortage or expiry activity found.</p>
-              )}
-
-              {dashboardData.recentActivity.length > 0 && (
-                <div style={activityList}>
-                  {dashboardData.recentActivity.map((item, index) => (
-                    <div key={`${item.type}-${item.title}-${index}`} style={activityItem}>
-                      <div style={activityType}>{item.type}</div>
-                      <div style={activityMain}>
-                        <div style={activityTitle}>{item.title}</div>
-                        <div style={activitySub}>{item.subtitle || "-"}</div>
-                      </div>
-                      <div style={activityTime}>{item.timeLabel || "-"}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </>
         );
@@ -754,52 +702,6 @@ const sectionTitle = {
 const sectionText = {
   color: "#475569",
   lineHeight: 1.7,
-};
-
-const activityList = {
-  display: "grid",
-  gap: "10px",
-};
-
-const activityItem = {
-  display: "grid",
-  gridTemplateColumns: "110px 1fr 170px",
-  gap: "12px",
-  alignItems: "start",
-  padding: "12px",
-  border: "1px solid #e2e8f0",
-  borderRadius: "12px",
-  background: "#f8fafc",
-};
-
-const activityType = {
-  fontSize: "12px",
-  fontWeight: "bold",
-  color: "#1d4ed8",
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-};
-
-const activityMain = {
-  minWidth: 0,
-};
-
-const activityTitle = {
-  fontSize: "14px",
-  fontWeight: "bold",
-  color: "#0f172a",
-};
-
-const activitySub = {
-  marginTop: "3px",
-  fontSize: "13px",
-  color: "#475569",
-};
-
-const activityTime = {
-  fontSize: "12px",
-  color: "#64748b",
-  textAlign: "right",
 };
 
 const loadingWrap = {
