@@ -1,4 +1,5 @@
 import { useState } from "react";
+import LandingPage from "./LandingPage";
 import DrugSearch from "./DrugSearch";
 import ExpiryTracker from "./ExpiryTracker";
 import ShortageTracker from "./ShortageTracker";
@@ -8,7 +9,12 @@ import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [page, setPage] = useState("dashboard");
+
+  if (showLanding) {
+    return <LandingPage onAccess={() => setShowLanding(false)} />;
+  }
 
   const renderPage = () => {
     switch (page) {
