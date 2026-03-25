@@ -12,6 +12,7 @@ import RefillTracker from "./RefillTracker";
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState("dashboard");
 
@@ -21,7 +22,9 @@ export default function App() {
     try {
       const { data: profile, error: fetchError } = await supabase
         .from("profiles")
-        .select("id")
+        .select(
+          "id, full_name, role, organization_id, site_id, organizations:organization_id(id, name), sites:site_id(id, name)"
+        )
         .eq("id", authUser.id)
         .maybeSingle();
 
@@ -31,16 +34,119 @@ export default function App() {
       }
 
       if (!profile) {
-        const { error: insertError } = await supabase.from("profiles").insert({
-          id: authUser.id,
-          full_name: authUser.user_metadata?.full_name ?? null,
-          role: "admin",
-        });
+        const defaultOrgName = `${authUser.email || "User"} Organization`;
+        const defaultSiteName = "Main Site";
+
+        const { data: newOrg, error: orgError } = await supabase
+          .from("organizations")
+          .insert({ name: defaultOrgName })
+          .select("id, name")
+          .single();
+
+        if (orgError) {
+          console.error("Failed to create default organization:", orgError.message);
+          return;
+        }
+
+        const { data: newSite, error: siteError } = await supabase
+          .from("sites")
+          .insert({
+            organization_id: newOrg.id,
+            name: defaultSiteName,
+          })
+          .select("id, name")
+          .single();
+
+        if (siteError) {
+          console.error("Failed to create default site:", siteError.message);
+          return;
+        }
+
+        const { data: newProfile, error: insertError } = await supabase
+          .from("profiles")
+          .insert({
+            id: authUser.id,
+            full_name: authUser.user_metadata?.full_name ?? null,
+            role: "admin",
+            organization_id: newOrg.id,
+            site_id: newSite.id,
+          })
+          .select(
+            "id, full_name, role, organization_id, site_id, organizations:organization_id(id, name), sites:site_id(id, name)"
+          )
+          .single();
 
         if (insertError) {
           console.error("Failed to create profile:", insertError.message);
+          return;
         }
+
+        setProfile(newProfile);
+        return;
       }
+
+      if (!profile.organization_id || !profile.site_id) {
+        const defaultOrgName = `${authUser.email || "User"} Organization`;
+        const defaultSiteName = "Main Site";
+
+        let organizationId = profile.organization_id;
+        let siteId = profile.site_id;
+
+        if (!organizationId) {
+          const { data: newOrg, error: orgError } = await supabase
+            .from("organizations")
+            .insert({ name: defaultOrgName })
+            .select("id")
+            .single();
+
+          if (orgError) {
+            console.error("Failed to create default organization:", orgError.message);
+            return;
+          }
+
+          organizationId = newOrg.id;
+        }
+
+        if (!siteId) {
+          const { data: newSite, error: siteError } = await supabase
+            .from("sites")
+            .insert({
+              organization_id: organizationId,
+              name: defaultSiteName,
+            })
+            .select("id")
+            .single();
+
+          if (siteError) {
+            console.error("Failed to create default site:", siteError.message);
+            return;
+          }
+
+          siteId = newSite.id;
+        }
+
+        const { data: updatedProfile, error: updateError } = await supabase
+          .from("profiles")
+          .update({
+            organization_id: organizationId,
+            site_id: siteId,
+          })
+          .eq("id", authUser.id)
+          .select(
+            "id, full_name, role, organization_id, site_id, organizations:organization_id(id, name), sites:site_id(id, name)"
+          )
+          .single();
+
+        if (updateError) {
+          console.error("Failed to link profile to organization/site:", updateError.message);
+          return;
+        }
+
+        setProfile(updatedProfile);
+        return;
+      }
+
+      setProfile(profile);
     } catch (err) {
       console.error("Profile setup error:", err?.message || "Unknown error");
     }
@@ -69,6 +175,7 @@ export default function App() {
   const logout = async () => {
     await supabase.auth.signOut();
     setUser(null);
+    setProfile(null);
   };
 
   if (loading) {
