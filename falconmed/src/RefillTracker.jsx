@@ -283,6 +283,20 @@ function RefillTracker({ onBack }) {
           return;
         }
 
+        try {
+          const { error: activityError } = await supabase.from("activity_log").insert({
+            module: "Refill",
+            action: "Created",
+            description: `Refill request created: ${formData.patient_name} - ${formData.drug_name}`,
+          });
+
+          if (activityError) {
+            console.error("Failed to log refill activity:", activityError.message);
+          }
+        } catch (activityErr) {
+          console.error("Refill activity log error:", activityErr?.message || "Unknown error");
+        }
+
         await loadRefills();
 
         setFormData({

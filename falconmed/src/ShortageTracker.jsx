@@ -270,6 +270,20 @@ export default function ShortageTracker({ user, profile }) {
           return next;
         });
       }
+
+      try {
+        const { error: activityError } = await supabase.from("activity_log").insert({
+          module: "Shortage",
+          action: "Created",
+          description: `Shortage request created: ${form.drugName} (${form.quantityRequested})`,
+        });
+
+        if (activityError) {
+          console.error("Failed to log shortage activity:", activityError.message);
+        }
+      } catch (activityErr) {
+        console.error("Shortage activity log error:", activityErr?.message || "Unknown error");
+      }
     } catch (err) {
       setMessage("Failed to save shortage request.");
       console.error("Shortage save error:", err?.message || "Unknown error");

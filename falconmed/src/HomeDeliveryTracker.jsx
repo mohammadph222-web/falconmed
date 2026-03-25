@@ -219,6 +219,20 @@ export default function HomeDeliveryTracker() {
         return;
       }
 
+      try {
+        const { error: activityError } = await supabase.from("activity_log").insert({
+          module: "Delivery",
+          action: "Created",
+          description: `Delivery request created: ${form.patientName} - ${form.itemName}`,
+        });
+
+        if (activityError) {
+          console.error("Failed to log delivery activity:", activityError.message);
+        }
+      } catch (activityErr) {
+        console.error("Delivery activity log error:", activityErr?.message || "Unknown error");
+      }
+
       await loadItems();
       setMessage("Delivery request added successfully.");
       setForm({

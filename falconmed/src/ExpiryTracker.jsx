@@ -327,6 +327,20 @@ export default function ExpiryTracker({ user, profile }) {
 
       await refreshItems();
 
+      try {
+        const { error: activityError } = await supabase.from("activity_log").insert({
+          module: "Expiry",
+          action: "Added",
+          description: `Expiry item added: ${form.drugName}`,
+        });
+
+        if (activityError) {
+          console.error("Failed to log expiry activity:", activityError.message);
+        }
+      } catch (activityErr) {
+        console.error("Expiry activity log error:", activityErr?.message || "Unknown error");
+      }
+
       setMessage("Item added successfully.");
     } catch (err) {
       setMessage("Failed to save expiry item.");

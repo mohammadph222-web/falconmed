@@ -69,6 +69,28 @@ const getTotalDrugsFromCsv = () => {
   }
 };
 
+const getActivityColor = (moduleName) => {
+  switch (String(moduleName || "").toLowerCase()) {
+    case "expiry":
+      return "#f59e0b";
+    case "shortage":
+      return "#ef4444";
+    case "refill":
+      return "#3b82f6";
+    case "delivery":
+      return "#10b981";
+    default:
+      return "#94a3b8";
+  }
+};
+
+const formatActivityTime = (value) => {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value);
+  return d.toLocaleString();
+};
+
 const CSV_TOTAL_DRUGS = getTotalDrugsFromCsv();
 
 export default function App() {
@@ -336,39 +358,12 @@ export default function App() {
         return null;
       };
 
-      const getRecentActivity = async (tables, type) => {
-        for (const table of tables) {
-          try {
-            const { data, error } = await applyScope(
-              supabase.from(table).select("*").order("created_at", { ascending: false }).limit(5)
-            );
-
-            if (error) continue;
-
-            return (data || []).map((item) => ({
-              id: `${type}-${item.id || item.created_at || Math.random().toString(36).slice(2, 8)}`,
-              type,
-              title: type === "shortage" ? "Shortage request created" : "Expiry item added",
-              subtitle:
-                item.drug_name || item.drugName || item.item || item.batch_no || item.status || "Record updated",
-              timestamp: item.created_at || item.request_date || item.expiry_date || "",
-            }));
-          } catch (_err) {
-            // Ignore and continue to fallback table.
-          }
-        }
-
-        return [];
-      };
-
       try {
         const [
           totalDrugsCount,
           nearExpiryCount,
           shortageTodayCount,
           activeSitesCount,
-          recentShortages,
-          recentExpiries,
         ] = await Promise.all([
           getCountFromTables(["drugs", "drugs_master", "drug_search"], (base) =>
             base.select("*", { count: "exact", head: true })
@@ -397,8 +392,6 @@ export default function App() {
               : base.select("*", { count: "exact", head: true });
             return scoped;
           }),
-          getRecentActivity(["shortage_tracker", "shortage_records"], "shortage"),
-          getRecentActivity(["expiry_tracker", "expiry_records"], "expiry"),
         ]);
 
         const fallbackShortageToday = await getCountFromTables(
@@ -406,9 +399,29 @@ export default function App() {
           (base) => applyScope(base.select("*", { count: "exact", head: true }).eq("request_date", todayStr))
         );
 
-        const recentActivity = [...recentShortages, ...recentExpiries]
-          .sort((a, b) => new Date(b.timestamp || 0).getTime() - new Date(a.timestamp || 0).getTime())
-          .slice(0, 5);
+        let recentActivity = [];
+        try {
+          const { data: activityRows, error: activityError } = await supabase
+            .from("activity_log")
+            .select("id,module,action,description,created_at")
+            .order("created_at", { ascending: false })
+            .limit(10);
+
+          if (activityError) {
+            console.error("Failed to load activity timeline:", activityError.message);
+          } else {
+            recentActivity = (activityRows || []).map((row) => ({
+              id: `activity-${row.id || row.created_at || Math.random().toString(36).slice(2, 8)}`,
+              module: row.module || "General",
+              action: row.action || "Updated",
+              title: `${row.module || "Activity"} ${row.action || "Updated"}`,
+              subtitle: row.description || "Record updated",
+              timestamp: row.created_at || "",
+            }));
+          }
+        } catch (activityCatchErr) {
+          console.error("Activity timeline load error:", activityCatchErr?.message || "Unknown error");
+        }
 
         setDashboardData({
           totalDrugs: CSV_TOTAL_DRUGS,
@@ -569,11 +582,17 @@ export default function App() {
                 <div style={dashboardActivityList}>
                   {dashboardData.recentActivity.map((item) => (
                     <div key={item.id} style={dashboardActivityItem}>
+                      <div
+                        style={{
+                          ...dashboardActivityDot,
+                          background: getActivityColor(item.module),
+                        }}
+                      />
                       <div style={dashboardActivityTextWrap}>
                         <div style={dashboardActivityItemTitle}>{item.title}</div>
                         <div style={dashboardActivityItemSub}>{item.subtitle}</div>
                       </div>
-                      <div style={dashboardActivityTime}>{item.timestamp || "-"}</div>
+                      <div style={dashboardActivityTime}>{formatActivityTime(item.timestamp)}</div>
                     </div>
                   ))}
                 </div>
@@ -871,11 +890,17 @@ const dashboardActivityList = {
 
 const dashboardActivityItem = {
   display: "grid",
-  gridTemplateColumns: "1fr auto",
-  gap: "12px",
+  gridTemplateColumns: "8px 1fr auto",
+  gap: "10px",
   alignItems: "center",
   padding: "12px 0",
   borderTop: "1px solid #eef2f7",
+};
+
+const dashboardActivityDot = {
+  width: "8px",
+  height: "28px",
+  borderRadius: "99px",
 };
 
 const dashboardActivityTextWrap = {
