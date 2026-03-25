@@ -1,15 +1,59 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 
-const SHORTAGE_TABLE = "shortage_records";
+const SHORTAGE_TABLE = "shortage_requests";
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function normalizeKey(key) {
+  return String(key || "")
+    .toLowerCase()
+    .replace(/[\s/_-]+/g, "")
+    .trim();
+}
+
+function getValue(row, possibleKeys) {
+  for (const key of possibleKeys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
 
 const mapDbToUi = (row) => ({
   id: row.id,
-  drugName: row.drug_name,
+  drugName: row.drug_name || "",
   quantityRequested: Number(row.quantity_requested || 0),
-  patientName: row.patient_name,
-  contactNumber: row.contact_number,
-  requestDate: row.request_date,
+  patientName: row.patient_name || "",
+  contactNumber: row.contact_number || "",
+  requestDate: row.request_date || "",
   status: row.status || "Pending",
   notes: row.notes || "",
 });
@@ -28,6 +72,10 @@ export default function ShortageTracker({ user, profile }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
+  const [allDrugs, setAllDrugs] = useState([]);
+  const [drugSearch, setDrugSearch] = useState("");
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
+
   const [form, setForm] = useState({
     drugName: "",
     quantityRequested: "",
@@ -43,30 +91,83 @@ export default function ShortageTracker({ user, profile }) {
   };
 
   useEffect(() => {
+    const loadDrugs = async () => {
+      try {
+        const res = await fetch("/src/data/drugs_master.csv");
+        const text = await res.text();
+
+        const lines = text
+          .split(/\r?\n/)
+          .filter((line) => line.trim() !== "");
+
+        if (lines.length < 2) {
+          setAllDrugs([]);
+          return;
+        }
+
+        const rawHeaders = parseCSVLine(lines[0]);
+        const headers = rawHeaders.map((h) => normalizeKey(h));
+
+        const parsed = lines.slice(1).map((line) => {
+          const cols = parseCSVLine(line);
+          const rawRow = {};
+
+          headers.forEach((header, index) => {
+            rawRow[header] = cols[index] ?? "";
+          });
+
+          return {
+            brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
+            generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
+            strength: getValue(rawRow, ["strength"]),
+            dosage_form: getValue(rawRow, ["dosageform", "dosage", "form"]),
+          };
+        });
+
+        setAllDrugs(parsed);
+      } catch (error) {
+        console.error("Error loading drugs CSV for shortage tracker:", error);
+        setAllDrugs([]);
+      }
+    };
+
+    void loadDrugs();
+  }, []);
+
+  const filteredDrugs = useMemo(() => {
+    if (!drugSearch.trim() || !showDrugDropdown) return [];
+
+    const q = drugSearch.toLowerCase().trim();
+    return allDrugs.filter((drug) => {
+      return (
+        drug.brand?.toLowerCase().includes(q) ||
+        drug.generic?.toLowerCase().includes(q) ||
+        drug.strength?.toLowerCase().includes(q) ||
+        drug.dosage_form?.toLowerCase().includes(q)
+      );
+    });
+  }, [allDrugs, drugSearch, showDrugDropdown]);
+
+  const handleDrugSelect = (drug) => {
+    const displayName = drug.brand
+      ? `${drug.brand}${drug.strength ? " " + drug.strength : ""}`
+      : `${drug.generic || "Unknown"}${drug.strength ? " " + drug.strength : ""}`;
+
+    setForm((prev) => ({ ...prev, drugName: displayName }));
+    setDrugSearch(displayName);
+    setShowDrugDropdown(false);
+  };
+
+  useEffect(() => {
     const loadItems = async () => {
       setLoading(true);
       setMessage("");
 
-      if (!profile?.organization_id) {
-        setItems([]);
-        setLoading(false);
-        setMessage("Organization is still being set up. Please refresh shortly.");
-        localStorage.setItem("falconmed_shortages", JSON.stringify([]));
-        return;
-      }
-
       try {
-        let query = supabase
+        const { data, error } = await supabase
           .from(SHORTAGE_TABLE)
           .select("*")
-          .eq("organization_id", profile.organization_id)
           .order("created_at", { ascending: false });
-
-        if (profile.site_id) {
-          query = query.eq("site_id", profile.site_id);
-        }
-
-        const { data, error } = await query;
 
         if (error) {
           setItems([]);
@@ -92,7 +193,7 @@ export default function ShortageTracker({ user, profile }) {
     };
 
     void loadItems();
-  }, [profile?.organization_id, profile?.site_id]);
+  }, []);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -108,11 +209,6 @@ export default function ShortageTracker({ user, profile }) {
       return;
     }
 
-    if (!profile?.organization_id || !profile?.site_id || !user?.id) {
-      setMessage("Cannot save yet. User organization/site is not ready.");
-      return;
-    }
-
     try {
       const { data, error } = await supabase
         .from(SHORTAGE_TABLE)
@@ -124,9 +220,6 @@ export default function ShortageTracker({ user, profile }) {
           request_date: form.requestDate,
           status: form.status,
           notes: form.notes,
-          organization_id: profile.organization_id,
-          site_id: profile.site_id,
-          created_by: user.id,
         })
         .select("*")
         .single();
@@ -138,14 +231,45 @@ export default function ShortageTracker({ user, profile }) {
       }
 
       const newItem = mapDbToUi(data);
-      setItems((prev) => {
-        const next = [newItem, ...prev];
-        localStorage.setItem(
-          "falconmed_shortages",
-          JSON.stringify(next.map(toReportRecord))
+
+      try {
+        const { data: refreshed, error: refreshError } = await supabase
+          .from(SHORTAGE_TABLE)
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (refreshError) {
+          console.error("Failed to refresh shortage requests after insert:", refreshError.message);
+          setItems((prev) => {
+            const next = [newItem, ...prev];
+            localStorage.setItem(
+              "falconmed_shortages",
+              JSON.stringify(next.map(toReportRecord))
+            );
+            return next;
+          });
+        } else {
+          const mapped = (refreshed || []).map(mapDbToUi);
+          setItems(mapped);
+          localStorage.setItem(
+            "falconmed_shortages",
+            JSON.stringify(mapped.map(toReportRecord))
+          );
+        }
+      } catch (refreshErr) {
+        console.error(
+          "Failed to refresh shortage requests after insert:",
+          refreshErr?.message || "Unknown error"
         );
-        return next;
-      });
+        setItems((prev) => {
+          const next = [newItem, ...prev];
+          localStorage.setItem(
+            "falconmed_shortages",
+            JSON.stringify(next.map(toReportRecord))
+          );
+          return next;
+        });
+      }
     } catch (err) {
       setMessage("Failed to save shortage request.");
       console.error("Shortage save error:", err?.message || "Unknown error");
@@ -166,23 +290,11 @@ export default function ShortageTracker({ user, profile }) {
   const updateStatus = async (id, newStatus) => {
     setMessage("");
 
-    if (!profile?.organization_id) {
-      setMessage("Cannot update status because organization is missing.");
-      return;
-    }
-
     try {
-      let query = supabase
+      const { error } = await supabase
         .from(SHORTAGE_TABLE)
         .update({ status: newStatus })
-        .eq("id", id)
-        .eq("organization_id", profile.organization_id);
-
-      if (profile.site_id) {
-        query = query.eq("site_id", profile.site_id);
-      }
-
-      const { error } = await query;
+        .eq("id", id);
 
       if (error) {
         setMessage("Failed to update status.");
@@ -263,6 +375,36 @@ export default function ShortageTracker({ user, profile }) {
         {message && <div style={messageBox}>{message}</div>}
 
         <form onSubmit={handleAdd} style={formGrid}>
+          <div style={drugSearchContainer}>
+            <input
+              style={input}
+              placeholder="Search drug by brand, generic, strength..."
+              value={drugSearch}
+              onChange={(e) => {
+                setDrugSearch(e.target.value);
+                handleChange("drugName", e.target.value);
+              }}
+              onFocus={() => setShowDrugDropdown(true)}
+            />
+            {showDrugDropdown && filteredDrugs.length > 0 && (
+              <div style={drugDropdown}>
+                {filteredDrugs.map((drug, idx) => (
+                  <div
+                    key={idx}
+                    style={drugOption}
+                    onClick={() => handleDrugSelect(drug)}
+                  >
+                    {drug.brand ? `${drug.brand}` : drug.generic}
+                    {drug.strength && ` (${drug.strength})`}
+                  </div>
+                ))}
+              </div>
+            )}
+            {drugSearch && filteredDrugs.length === 0 && showDrugDropdown && (
+              <div style={drugDropdownEmpty}>No matching drugs found</div>
+            )}
+          </div>
+
           <input
             style={input}
             placeholder="Drug Name"
@@ -473,6 +615,44 @@ const input = {
   borderRadius: "10px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
+};
+
+const drugSearchContainer = {
+  position: "relative",
+  gridColumn: "1 / -1",
+};
+
+const drugDropdown = {
+  position: "absolute",
+  top: "48px",
+  left: 0,
+  right: 0,
+  background: "white",
+  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.1)",
+  zIndex: 1000,
+  maxHeight: "250px",
+  overflowY: "auto",
+};
+
+const drugOption = {
+  padding: "10px 14px",
+  cursor: "pointer",
+  borderBottom: "1px solid #f1f5f9",
+  fontSize: "14px",
+  color: "#0f172a",
+};
+
+const drugDropdownEmpty = {
+  padding: "10px 14px",
+  color: "#64748b",
+  fontSize: "14px",
+  textAlign: "center",
+  background: "#f8fafc",
+  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  marginTop: "4px",
 };
 
 const primaryBtn = {
