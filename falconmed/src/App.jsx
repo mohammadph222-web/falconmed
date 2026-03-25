@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import DrugSearch from "./DrugSearch";
 import ExpiryTracker from "./ExpiryTracker";
 import ShortageTracker from "./ShortageTracker";
@@ -12,91 +12,397 @@ export default function App() {
 
   const renderPage = () => {
     switch (page) {
-      case "drug":
-        return <DrugSearch />;
+      case "drugsearch":
+        return (
+          <div style={contentCard}>
+            <DrugSearch />
+          </div>
+        );
       case "expiry":
-        return <ExpiryTracker />;
+        return (
+          <div style={contentCard}>
+            <ExpiryTracker />
+          </div>
+        );
       case "shortage":
-        return <ShortageTracker />;
-      case "label":
-        return <LabelBuilder />;
-      case "billing":
-        return <Billing />;
-      case "refill":
-        return <RefillTracker />;
+        return (
+          <div style={contentCard}>
+            <ShortageTracker />
+          </div>
+        );
       case "reports":
-        return <Reports />;
+        return (
+          <div style={contentCard}>
+            <Reports />
+          </div>
+        );
+      case "labels":
+        return (
+          <div style={contentCard}>
+            <LabelBuilder />
+          </div>
+        );
+      case "billing":
+        return (
+          <div style={contentCard}>
+            <Billing />
+          </div>
+        );
+      case "refill":
+        return (
+          <div style={contentCard}>
+            <RefillTracker />
+          </div>
+        );
       default:
         return (
-          <div style={{ padding: "20px" }}>
-            <h1>Welcome to FalconMed</h1>
-            <p>Pharmacy Operations & Clinical Intelligence Platform</p>
-          </div>
+          <>
+            <div style={headerCard}>
+              <h1 style={headerTitle}>FalconMed Dashboard</h1>
+              <p style={headerText}>
+                Pharmacy Operations & Clinical Intelligence Platform
+              </p>
+            </div>
+
+            <div style={cardsGrid}>
+              <div style={statCard}>
+                <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
+                <div style={statValue}>22,463</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>NEAR EXPIRY ITEMS</div>
+                <div style={statValue}>0</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
+                <div style={statValue}>0</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>ACTIVE SITES</div>
+                <div style={statValue}>0</div>
+              </div>
+            </div>
+
+            <div style={contentCard}>
+              <h3 style={sectionTitle}>Recent Activity</h3>
+
+              <div style={activityItem}>
+                <div style={activityBarBlue}></div>
+                <div style={activityContent}>
+                  <div style={activityTitle}>Refill Created</div>
+                  <div style={activityText}>
+                    Refill request created: sample medicine entry
+                  </div>
+                </div>
+              </div>
+
+              <div style={activityItem}>
+                <div style={activityBarRed}></div>
+                <div style={activityContent}>
+                  <div style={activityTitle}>Shortage Created</div>
+                  <div style={activityText}>
+                    Shortage request created: sample shortage item
+                  </div>
+                </div>
+              </div>
+
+              <div style={activityItem}>
+                <div style={activityBarOrange}></div>
+                <div style={activityContent}>
+                  <div style={activityTitle}>Expiry Added</div>
+                  <div style={activityText}>
+                    Expiry item added: sample expiry medicine
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style={contentCard}>
+              <h3 style={sectionTitle}>Overview</h3>
+              <p style={sectionText}>
+                FalconMed is a pharmacy operations and clinical intelligence
+                platform designed for hospitals and community pharmacies.
+              </p>
+            </div>
+          </>
         );
     }
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", fontFamily: "Arial" }}>
-      <div
-        style={{
-          width: "240px",
-          background: "#1e293b",
-          color: "white",
-          padding: "20px",
-        }}
-      >
-        <h2 style={{ marginBottom: "30px" }}>FalconMed</h2>
+    <div style={layout}>
+      <aside style={sidebar}>
+        <div>
+          <div style={brandBox}>
+            <h2 style={brandTitle}>FalconMed</h2>
+            <p style={brandSub}>Pharmacy Intelligence Platform</p>
+          </div>
 
-        <button style={menuBtn} onClick={() => setPage("dashboard")}>
-          Dashboard
-        </button>
+          <div style={userCard}>
+            <div style={userLabel}>Demo Mode</div>
+            <div style={userEmail}>falconmed.demo@preview</div>
+          </div>
 
-        <button style={menuBtn} onClick={() => setPage("drug")}>
-          Drug Search
-        </button>
+          <button
+            style={page === "dashboard" ? activeBtn : btn}
+            onClick={() => setPage("dashboard")}
+          >
+            Dashboard
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("expiry")}>
-          Expiry Tracker
-        </button>
+          <button
+            style={page === "drugsearch" ? activeBtn : btn}
+            onClick={() => setPage("drugsearch")}
+          >
+            Drug Search
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("shortage")}>
-          Shortage Tracker
-        </button>
+          <button
+            style={page === "expiry" ? activeBtn : btn}
+            onClick={() => setPage("expiry")}
+          >
+            Expiry Tracker
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("label")}>
-          Label Builder
-        </button>
+          <button
+            style={page === "shortage" ? activeBtn : btn}
+            onClick={() => setPage("shortage")}
+          >
+            Shortage Tracker
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("billing")}>
-          Billing
-        </button>
+          <button
+            style={page === "reports" ? activeBtn : btn}
+            onClick={() => setPage("reports")}
+          >
+            Reports
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("refill")}>
-          Refill Tracker
-        </button>
+          <button
+            style={page === "labels" ? activeBtn : btn}
+            onClick={() => setPage("labels")}
+          >
+            Label Builder
+          </button>
 
-        <button style={menuBtn} onClick={() => setPage("reports")}>
-          Reports
-        </button>
-      </div>
+          <button
+            style={page === "billing" ? activeBtn : btn}
+            onClick={() => setPage("billing")}
+          >
+            Billing
+          </button>
 
-      <div style={{ flex: 1, background: "#f1f5f9", padding: "30px" }}>
-        {renderPage()}
-      </div>
+          <button
+            style={page === "refill" ? activeBtn : btn}
+            onClick={() => setPage("refill")}
+          >
+            Refill Tracker
+          </button>
+        </div>
+
+        <div style={demoFooter}>Demo Preview</div>
+      </aside>
+
+      <main style={main}>{renderPage()}</main>
     </div>
   );
 }
 
-const menuBtn = {
+const layout = {
+  display: "flex",
+  minHeight: "100vh",
+  background: "#f3f6fb",
+  fontFamily: "Arial, sans-serif",
+};
+
+const sidebar = {
+  width: "270px",
+  background: "#0f172a",
+  color: "white",
+  padding: "24px 18px",
+  display: "flex",
+  flexDirection: "column",
+  justifyContent: "space-between",
+  boxShadow: "2px 0 12px rgba(0,0,0,0.08)",
+};
+
+const brandBox = {
+  marginBottom: "24px",
+};
+
+const brandTitle = {
+  margin: 0,
+  fontSize: "28px",
+};
+
+const brandSub = {
+  marginTop: "6px",
+  fontSize: "13px",
+  color: "#cbd5e1",
+};
+
+const userCard = {
+  background: "rgba(255,255,255,0.08)",
+  borderRadius: "12px",
+  padding: "14px",
+  marginBottom: "20px",
+};
+
+const userLabel = {
+  fontSize: "12px",
+  color: "#cbd5e1",
+  marginBottom: "6px",
+};
+
+const userEmail = {
+  fontSize: "13px",
+  wordBreak: "break-word",
+};
+
+const btn = {
   display: "block",
   width: "100%",
-  padding: "12px",
-  marginBottom: "10px",
-  background: "#334155",
-  border: "none",
+  padding: "12px 14px",
+  marginTop: "10px",
+  background: "#1e293b",
   color: "white",
+  border: "1px solid #334155",
+  borderRadius: "10px",
   cursor: "pointer",
-  borderRadius: "6px",
   textAlign: "left",
+  fontSize: "15px",
+};
+
+const activeBtn = {
+  ...btn,
+  background: "#2563eb",
+  border: "1px solid #2563eb",
+};
+
+const main = {
+  flex: 1,
+  padding: "28px",
+};
+
+const headerCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "24px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  marginBottom: "20px",
+  textAlign: "center",
+};
+
+const headerTitle = {
+  margin: 0,
+  fontSize: "30px",
+  color: "#0f172a",
+};
+
+const headerText = {
+  marginTop: "8px",
+  color: "#475569",
+  fontSize: "18px",
+};
+
+const cardsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "16px",
+  marginBottom: "20px",
+};
+
+const statCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  borderTop: "4px solid #3b82f6",
+  textAlign: "center",
+};
+
+const statLabel = {
+  fontSize: "13px",
+  color: "#64748b",
+  marginBottom: "16px",
+  fontWeight: "bold",
+};
+
+const statValue = {
+  fontSize: "28px",
+  fontWeight: "bold",
+  color: "#0f172a",
+};
+
+const contentCard = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "22px",
+  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
+  marginBottom: "20px",
+};
+
+const sectionTitle = {
+  marginTop: 0,
+  color: "#0f172a",
+  textAlign: "center",
+};
+
+const sectionText = {
+  color: "#475569",
+  lineHeight: 1.7,
+  textAlign: "center",
+};
+
+const activityItem = {
+  display: "flex",
+  gap: "14px",
+  alignItems: "center",
+  padding: "16px 0",
+  borderBottom: "1px solid #e5e7eb",
+};
+
+const activityBarBlue = {
+  width: "8px",
+  height: "32px",
+  borderRadius: "8px",
+  background: "#3b82f6",
+};
+
+const activityBarRed = {
+  width: "8px",
+  height: "32px",
+  borderRadius: "8px",
+  background: "#ef4444",
+};
+
+const activityBarOrange = {
+  width: "8px",
+  height: "32px",
+  borderRadius: "8px",
+  background: "#f59e0b",
+};
+
+const activityContent = {
+  flex: 1,
+};
+
+const activityTitle = {
+  fontWeight: "bold",
+  color: "#0f172a",
+  marginBottom: "6px",
+};
+
+const activityText = {
+  color: "#64748b",
+};
+
+const demoFooter = {
+  color: "#cbd5e1",
+  fontSize: "13px",
+  textAlign: "center",
+  paddingTop: "20px",
 };
