@@ -241,6 +241,31 @@ export default function HomeDeliveryTracker() {
     }
   };
 
+  const handleDelete = async (id) => {
+    setMessage("");
+
+    const confirmed = window.confirm("Are you sure you want to delete this delivery request?");
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase.from(DELIVERY_TABLE).delete().eq("id", id);
+
+      if (error) {
+        setMessage("Failed to delete delivery request.");
+        console.error("Failed to delete delivery request:", error.message);
+        return;
+      }
+
+      setItems((prev) => prev.filter((item) => item.id !== id));
+      setMessage("Delivery request deleted successfully.");
+    } catch (error) {
+      setMessage("Failed to delete delivery request.");
+      console.error("Delivery delete error:", error?.message || error);
+    }
+  };
+
   return (
     <div>
       <h1 style={pageTitle}>Home Delivery Tracker</h1>
@@ -370,18 +395,19 @@ export default function HomeDeliveryTracker() {
                 <th style={th}>Payment</th>
                 <th style={th}>Status</th>
                 <th style={th}>Notes</th>
+                <th style={th}>Action</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="10" style={emptyCell}>Loading delivery requests...</td>
+                  <td colSpan="11" style={emptyCell}>Loading delivery requests...</td>
                 </tr>
               )}
 
               {!loading && items.length === 0 && (
                 <tr>
-                  <td colSpan="10" style={emptyCell}>No delivery requests found.</td>
+                  <td colSpan="11" style={emptyCell}>No delivery requests found.</td>
                 </tr>
               )}
 
@@ -397,6 +423,11 @@ export default function HomeDeliveryTracker() {
                   <td style={td}>{item.paymentMethod}</td>
                   <td style={td}><span style={getStatusStyle(item.status)}>{item.status}</span></td>
                   <td style={td}>{item.notes || "-"}</td>
+                  <td style={td}>
+                    <button type="button" style={deleteBtn} onClick={() => handleDelete(item.id)}>
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -598,4 +629,14 @@ const emptyCell = {
   padding: "24px",
   textAlign: "center",
   color: "#64748b",
+};
+
+const deleteBtn = {
+  padding: "8px 10px",
+  background: "#dc2626",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  cursor: "pointer",
+  fontSize: "12px",
 };
