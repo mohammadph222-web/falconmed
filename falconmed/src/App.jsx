@@ -15,10 +15,42 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState("dashboard");
 
+  const ensureUserProfile = async (authUser) => {
+    if (!authUser?.id || !supabase) return;
+
+    try {
+      const { data: profile, error: fetchError } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", authUser.id)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error("Failed to fetch profile:", fetchError.message);
+        return;
+      }
+
+      if (!profile) {
+        const { error: insertError } = await supabase.from("profiles").insert({
+          id: authUser.id,
+          full_name: authUser.user_metadata?.full_name ?? null,
+          role: "admin",
+        });
+
+        if (insertError) {
+          console.error("Failed to create profile:", insertError.message);
+        }
+      }
+    } catch (err) {
+      console.error("Profile setup error:", err?.message || "Unknown error");
+    }
+  };
+
   useEffect(() => {
     const getSession = async () => {
       const { data } = await supabase.auth.getSession();
       setUser(data.session?.user ?? null);
+      void ensureUserProfile(data.session?.user);
       setLoading(false);
     };
 
@@ -28,6 +60,7 @@ export default function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      void ensureUserProfile(session?.user);
     });
 
     return () => subscription.unsubscribe();
