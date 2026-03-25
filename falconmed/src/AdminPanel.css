@@ -1,0 +1,125 @@
+.admin-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-head h1 {
+  margin: 0;
+  font-size: 28px;
+  color: #0f172a;
+}
+
+.admin-head p {
+  margin: 8px 0 0;
+  color: #64748b;
+}
+
+.admin-message {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #334155;
+  font-size: 14px;
+}
+
+.admin-card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
+  padding: 18px;
+}
+
+.admin-card-title-row {
+  margin-bottom: 12px;
+}
+
+.admin-card h2 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.admin-form-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.admin-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.admin-form-grid.users-grid {
+  grid-template-columns: repeat(5, minmax(160px, 1fr));
+}
+
+.admin-panel input,
+.admin-panel select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #fff;
+}
+
+.admin-panel button {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+}
+
+.admin-table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 600px;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px;
+  border-bottom: 1px solid #eef2f7;
+  text-align: left;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.admin-table th {
+  color: #475569;
+}
+
+.empty-cell {
+  text-align: center;
+  color: #64748b !important;
+}
+
+@media (max-width: 1080px) {
+  .admin-form-grid,
+  .admin-form-grid.users-grid {
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .admin-form-row,
+  .admin-form-grid,
+  .admin-form-grid.users-grid {
+    grid-template-columns: 1fr;
+  }
+}

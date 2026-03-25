@@ -9,6 +9,7 @@ import Reports from "./Reports";
 import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
+import AdminPanel from "./AdminPanel";
 import { AuthContext } from "./lib/authContext";
 
 const NAV_ITEMS = [
@@ -17,6 +18,7 @@ const NAV_ITEMS = [
   { key: "expiry", label: "Expiry Tracker" },
   { key: "shortage", label: "Shortage Tracker" },
   { key: "reports", label: "Reports" },
+  { key: "admin", label: "Super Admin" },
   { key: "labels", label: "Label Builder" },
   { key: "billing", label: "Billing" },
   { key: "refill", label: "Refill Tracker" },
@@ -40,6 +42,11 @@ const getPageFromHash = () => {
   return NAV_ITEMS.some((x) => x.key === hash) ? hash : "dashboard";
 };
 
+const getPageFromLocation = () => {
+  if (window.location.pathname === "/admin") return "admin";
+  return getPageFromHash();
+};
+
 const getSafePage = (requestedPage, allowedPages) => {
   if (allowedPages.includes(requestedPage)) return requestedPage;
   if (allowedPages.includes("dashboard")) return "dashboard";
@@ -51,7 +58,15 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [role, setRole] = useState("admin");
   const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState(getPageFromHash);
+  const [page, setPage] = useState(getPageFromLocation);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardData, setDashboardData] = useState({
+    totalDrugs: 22451,
+    nearExpiryItems: 0,
+    shortageToday: 0,
+    activeSites: 0,
+    recentActivity: [],
+  });
 
   const ensureUserProfile = async (authUser) => {
     if (!authUser?.id || !supabase) return;
@@ -214,15 +229,26 @@ export default function App() {
   }, [profile?.role]);
 
   useEffect(() => {
-    const handleHashChange = () => {
-      setPage(getPageFromHash());
+    const handleLocationChange = () => {
+      setPage(getPageFromLocation());
     };
 
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    window.addEventListener("hashchange", handleLocationChange);
+    window.addEventListener("popstate", handleLocationChange);
+
+    return () => {
+      window.removeEventListener("hashchange", handleLocationChange);
+      window.removeEventListener("popstate", handleLocationChange);
+    };
   }, []);
 
   const allowedPages = ROLE_ACCESS[role] || ROLE_ACCESS.admin;
+
+  useEffect(() => {
+    if (page === "admin" && profile && role !== "admin") {
+      setPage("dashboard");
+    }
+  }, [page, profile, role]);
 
   useEffect(() => {
     const safePage = getSafePage(page, allowedPages);
@@ -233,15 +259,175 @@ export default function App() {
 
   useEffect(() => {
     if (!page) return;
-    const nextHash = `#${page}`;
-    if (window.location.hash !== nextHash) {
-      window.location.hash = nextHash;
+
+    if (page === "admin") {
+      if (window.location.pathname !== "/admin") {
+        window.history.pushState({}, "", "/admin");
+      }
+      return;
+    }
+
+    const targetUrl = `/#${page}`;
+    const currentUrl = `${window.location.pathname}${window.location.hash}`;
+    if (currentUrl !== targetUrl) {
+      window.history.pushState({}, "", targetUrl);
     }
   }, [page]);
 
   const navigateTo = (nextPage) => {
     setPage(getSafePage(nextPage, allowedPages));
   };
+
+  useEffect(() => {
+    const loadDashboardData = async () => {
+      if (!user?.id || !supabase) return;
+
+      setDashboardLoading(true);
+
+      const today = new Date();
+      const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const tomorrowStart = new Date(todayStart);
+      tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+      const todayStr = todayStart.toISOString().slice(0, 10);
+      const nearExpiryDate = new Date(todayStart);
+      nearExpiryDate.setDate(nearExpiryDate.getDate() + 90);
+      const nearExpiryStr = nearExpiryDate.toISOString().slice(0, 10);
+
+      const applyScope = (query) => {
+        let next = query;
+        if (profile?.organization_id) {
+          next = next.eq("organization_id", profile.organization_id);
+        }
+        if (profile?.site_id) {
+          next = next.eq("site_id", profile.site_id);
+        }
+        return next;
+      };
+
+      const getCountFromTables = async (tables, queryBuilder) => {
+        for (const table of tables) {
+          try {
+            const query = queryBuilder(supabase.from(table));
+            const { count, error } = await query;
+            if (!error) return count || 0;
+          } catch (_err) {
+            // Ignore table/column mismatches and keep trying fallbacks.
+          }
+        }
+        return null;
+      };
+
+      const getRecentFromTables = async (tables, kind) => {
+        for (const table of tables) {
+          try {
+            const scopedQuery = applyScope(
+              supabase.from(table).select("*").order("created_at", { ascending: false }).limit(5)
+            );
+
+            const { data, error } = await scopedQuery;
+            if (error) continue;
+
+            return (data || []).map((row) => {
+              const timestamp = row.created_at || row.request_date || row.expiry_date || "";
+              const timeValue = timestamp ? new Date(timestamp).getTime() : 0;
+
+              if (kind === "shortage") {
+                return {
+                  type: "Shortage",
+                  title: row.drug_name || row.drugName || row.item || "Shortage record",
+                  subtitle: row.status || row.patient_name || row.patientName || "-",
+                  timeLabel: timestamp,
+                  sortKey: Number.isFinite(timeValue) ? timeValue : 0,
+                };
+              }
+
+              return {
+                type: "Expiry",
+                title: row.drug_name || row.drugName || row.item || "Expiry record",
+                subtitle: row.expiry_date || row.batch_no || row.status || "-",
+                timeLabel: timestamp,
+                sortKey: Number.isFinite(timeValue) ? timeValue : 0,
+              };
+            });
+          } catch (_err) {
+            // Ignore table/column mismatches and keep trying fallbacks.
+          }
+        }
+
+        return [];
+      };
+
+      try {
+        const [
+          totalDrugsCount,
+          nearExpiryCount,
+          shortageTodayCount,
+          activeSitesCount,
+          recentShortages,
+          recentExpiries,
+        ] = await Promise.all([
+          getCountFromTables(["drugs", "drugs_master", "drug_search"], (base) =>
+            base.select("*", { count: "exact", head: true })
+          ),
+          getCountFromTables(["expiry_tracker", "expiry_records"], (base) =>
+            applyScope(
+              base
+                .select("*", { count: "exact", head: true })
+                .gte("expiry_date", todayStr)
+                .lte("expiry_date", nearExpiryStr)
+            )
+          ),
+          getCountFromTables(["shortage_tracker", "shortage_records"], (base) =>
+            applyScope(
+              base
+                .select("*", { count: "exact", head: true })
+                .gte("created_at", todayStart.toISOString())
+                .lt("created_at", tomorrowStart.toISOString())
+            )
+          ),
+          getCountFromTables(["sites"], (base) => {
+            const scoped = profile?.organization_id
+              ? base
+                  .select("*", { count: "exact", head: true })
+                  .eq("organization_id", profile.organization_id)
+              : base.select("*", { count: "exact", head: true });
+            return scoped;
+          }),
+          getRecentFromTables(["shortage_tracker", "shortage_records"], "shortage"),
+          getRecentFromTables(["expiry_tracker", "expiry_records"], "expiry"),
+        ]);
+
+        const fallbackShortageToday = await getCountFromTables(
+          ["shortage_tracker", "shortage_records"],
+          (base) => applyScope(base.select("*", { count: "exact", head: true }).eq("request_date", todayStr))
+        );
+
+        const mergedRecent = [...recentShortages, ...recentExpiries]
+          .sort((a, b) => b.sortKey - a.sortKey)
+          .slice(0, 8);
+
+        setDashboardData({
+          totalDrugs: totalDrugsCount ?? 22451,
+          nearExpiryItems: nearExpiryCount ?? 0,
+          shortageToday:
+            shortageTodayCount !== null && shortageTodayCount !== undefined
+              ? shortageTodayCount
+              : fallbackShortageToday || 0,
+          activeSites: activeSitesCount ?? 0,
+          recentActivity: mergedRecent,
+        });
+      } catch (err) {
+        console.error("Failed to load dashboard metrics:", err?.message || "Unknown error");
+      } finally {
+        setDashboardLoading(false);
+      }
+    };
+
+    if (page === "dashboard") {
+      void loadDashboardData();
+    }
+  }, [page, user?.id, profile?.organization_id, profile?.site_id]);
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -290,6 +476,12 @@ export default function App() {
             <Reports />
           </div>
         );
+      case "admin":
+        return (
+          <div style={contentCard}>
+            <AdminPanel />
+          </div>
+        );
       case "labels":
         return (
           <div style={contentCard}>
@@ -318,28 +510,56 @@ export default function App() {
 
             <div style={cardsGrid}>
               <div style={statCard}>
-                <div style={statLabel}>System Status</div>
-                <div style={statValue}>Active</div>
+                <div style={statLabel}>Total Drugs in Database</div>
+                <div style={statValue}>{dashboardData.totalDrugs.toLocaleString()}</div>
               </div>
 
               <div style={statCard}>
-                <div style={statLabel}>Main Module</div>
-                <div style={statValue}>Drug Search</div>
+                <div style={statLabel}>Near Expiry Items</div>
+                <div style={statValue}>{dashboardData.nearExpiryItems.toLocaleString()}</div>
               </div>
 
               <div style={statCard}>
-                <div style={statLabel}>Records Loaded</div>
-                <div style={statValue}>22,451</div>
+                <div style={statLabel}>Shortage Requests Today</div>
+                <div style={statValue}>{dashboardData.shortageToday.toLocaleString()}</div>
+              </div>
+
+              <div style={statCard}>
+                <div style={statLabel}>Active Sites</div>
+                <div style={statValue}>{dashboardData.activeSites.toLocaleString()}</div>
               </div>
             </div>
 
             <div style={contentCard}>
               <h3 style={sectionTitle}>Overview</h3>
               <p style={sectionText}>
-                Stable FalconMed version with secure login and restored modules.
-                You can now navigate between dashboard, drug search, expiry,
-                shortage, reports, labels, billing, and refill tracker.
+                Operational view powered by available live records. Dashboard
+                metrics are scoped safely and fall back gracefully when some
+                tables are unavailable.
               </p>
+              {dashboardLoading && <p style={sectionText}>Loading latest dashboard data...</p>}
+            </div>
+
+            <div style={contentCard}>
+              <h3 style={sectionTitle}>Recent Activity</h3>
+              {dashboardData.recentActivity.length === 0 && !dashboardLoading && (
+                <p style={sectionText}>No recent shortage or expiry activity found.</p>
+              )}
+
+              {dashboardData.recentActivity.length > 0 && (
+                <div style={activityList}>
+                  {dashboardData.recentActivity.map((item, index) => (
+                    <div key={`${item.type}-${item.title}-${index}`} style={activityItem}>
+                      <div style={activityType}>{item.type}</div>
+                      <div style={activityMain}>
+                        <div style={activityTitle}>{item.title}</div>
+                        <div style={activitySub}>{item.subtitle || "-"}</div>
+                      </div>
+                      <div style={activityTime}>{item.timeLabel || "-"}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </>
         );
@@ -534,6 +754,52 @@ const sectionTitle = {
 const sectionText = {
   color: "#475569",
   lineHeight: 1.7,
+};
+
+const activityList = {
+  display: "grid",
+  gap: "10px",
+};
+
+const activityItem = {
+  display: "grid",
+  gridTemplateColumns: "110px 1fr 170px",
+  gap: "12px",
+  alignItems: "start",
+  padding: "12px",
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  background: "#f8fafc",
+};
+
+const activityType = {
+  fontSize: "12px",
+  fontWeight: "bold",
+  color: "#1d4ed8",
+  textTransform: "uppercase",
+  letterSpacing: "0.05em",
+};
+
+const activityMain = {
+  minWidth: 0,
+};
+
+const activityTitle = {
+  fontSize: "14px",
+  fontWeight: "bold",
+  color: "#0f172a",
+};
+
+const activitySub = {
+  marginTop: "3px",
+  fontSize: "13px",
+  color: "#475569",
+};
+
+const activityTime = {
+  fontSize: "12px",
+  color: "#64748b",
+  textAlign: "right",
 };
 
 const loadingWrap = {
