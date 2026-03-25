@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import drugsMasterCsv from "./data/drugs_master.csv?raw";
 
 function parseCSVLine(line) {
   const result = [];
@@ -61,8 +62,11 @@ export default function DrugSearch() {
   useEffect(() => {
     const loadCSV = async () => {
       try {
-        const res = await fetch("/src/data/drugs_master.csv");
-        const text = await res.text();
+        const text = String(drugsMasterCsv || "");
+
+        if (!text.trim()) {
+          throw new Error("Drug dataset is empty or failed to import");
+        }
 
         const lines = text
           .split(/\r?\n/)
