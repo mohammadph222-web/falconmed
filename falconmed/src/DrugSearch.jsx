@@ -51,6 +51,39 @@ function formatCoverageValue(value) {
   return text;
 }
 
+function parseNumber(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-") return null;
+  const normalized = text.replace(/[^0-9.-]/g, "");
+  if (!normalized) return null;
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : null;
+}
+
+function resolveUnitPrice(unitPrice, packagePrice, packageSize) {
+  const explicitUnitPrice = parseNumber(unitPrice);
+  if (explicitUnitPrice !== null) return explicitUnitPrice;
+
+  const packagePriceNum = parseNumber(packagePrice);
+  const packageSizeNum = parseNumber(packageSize);
+
+  if (
+    packagePriceNum === null ||
+    packageSizeNum === null ||
+    packageSizeNum <= 0
+  ) {
+    return null;
+  }
+
+  return packagePriceNum / packageSizeNum;
+}
+
+function formatPrice(value) {
+  const num = parseNumber(value);
+  if (num === null) return "-";
+  return num.toFixed(2);
+}
+
 export default function DrugSearch() {
   const [allDrugs, setAllDrugs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -108,6 +141,25 @@ export default function DrugSearch() {
             thiqa_abm: getValue(rawRow, ["thiqaabmcoverage", "thiqaabm", "thiqa"]),
             basic_coverage: getValue(rawRow, ["basiccoverage", "basic"]),
             public_price: getValue(rawRow, ["publicprice", "price", "unitprice"]),
+            package_size: getValue(rawRow, ["packagesize", "packsize", "packqty"]),
+            package_price_to_pharmacy: getValue(rawRow, [
+              "packagepricetopharmacy",
+              "packpricetopharmacy",
+              "packagepricepharmacy",
+            ]),
+            package_price_to_public: getValue(rawRow, [
+              "packagepricetopublic",
+              "packpricetopublic",
+              "packagepricepublic",
+            ]),
+            unit_price_to_pharmacy: getValue(rawRow, [
+              "unitpricetopharmacy",
+              "unitpricepharmacy",
+            ]),
+            unit_price_to_public: getValue(rawRow, [
+              "unitpricetopublic",
+              "unitpricepublic",
+            ]),
           };
         });
 
@@ -188,6 +240,22 @@ export default function DrugSearch() {
   ]);
 
   const displayedDrugs = filteredDrugs.slice(0, 750);
+
+  const calculatedUnitPriceToPharmacy = selectedDrug
+    ? resolveUnitPrice(
+        selectedDrug.unit_price_to_pharmacy,
+        selectedDrug.package_price_to_pharmacy,
+        selectedDrug.package_size
+      )
+    : null;
+
+  const calculatedUnitPriceToPublic = selectedDrug
+    ? resolveUnitPrice(
+        selectedDrug.unit_price_to_public,
+        selectedDrug.package_price_to_public,
+        selectedDrug.package_size
+      )
+    : null;
 
   return (
     <div>
@@ -403,6 +471,45 @@ export default function DrugSearch() {
               <div style={detailItem}>
                 <div style={detailLabel}>Public Price</div>
                 <div style={detailValue}>{selectedDrug.public_price || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Package Size</div>
+                <div style={detailValue}>{selectedDrug.package_size || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Package Price to Pharmacy</div>
+                <div style={detailValue}>
+                  {selectedDrug.package_price_to_pharmacy || "-"}
+                </div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Package Price to Public</div>
+                <div style={detailValue}>{selectedDrug.package_price_to_public || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Unit Price to Pharmacy</div>
+                <div style={detailValue}>
+                  {selectedDrug.unit_price_to_pharmacy || "-"}
+                </div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Unit Price to Public</div>
+                <div style={detailValue}>{selectedDrug.unit_price_to_public || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Calculated Unit Price to Pharmacy</div>
+                <div style={detailValue}>{formatPrice(calculatedUnitPriceToPharmacy)}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Calculated Unit Price to Public</div>
+                <div style={detailValue}>{formatPrice(calculatedUnitPriceToPublic)}</div>
               </div>
 
               <div style={detailItem}>
