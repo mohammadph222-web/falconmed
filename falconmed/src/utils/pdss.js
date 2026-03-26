@@ -670,3 +670,63 @@ export function topUrgentActions(actions = [], limit = 5) {
     })
     .slice(0, limit);
 }
+
+// ─── Financial Intelligence v1 ───────────────────────────────────────────────
+
+function lookupPriceFromMap(drugName, priceMap) {
+  if (!priceMap) return null;
+  const key = String(drugName || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+  return priceMap.get(key)?.pharmacyUnitPrice ?? null;
+}
+
+/**
+ * Calculate the three Financial Intelligence KPIs.
+ *   estimatedExpiryLoss       — at-risk units × pharmacy unit price
+ *   atRiskInventoryValue      — total quantity of high/medium expiry rows × pharmacy unit price
+ *   highRiskShortageExposure  — suggested reorder qty for high-risk shortage rows × pharmacy unit price
+ *
+ * Items whose drug name cannot be matched in the price map are silently skipped
+ * so a missing price entry never breaks the UI (Req D).
+ *
+ * @param {Object} params
+ * @param {Array}  params.expiryRows   — output of calculateExpiryIntelligence()
+ * @param {Array}  params.shortageRows — output of calculateShortagePredictions()
+ * @param {Map}    params.drugPriceMap — output of buildDrugPriceMap() from drugPricing.js
+ * @returns {{ estimatedExpiryLoss: number, atRiskInventoryValue: number, highRiskShortageExposure: number }}
+ */
+export function calculateFinancialKpis({
+  expiryRows = [],
+  shortageRows = [],
+  drugPriceMap,
+}) {
+  let estimatedExpiryLoss = 0;
+  let atRiskInventoryValue = 0;
+  let highRiskShortageExposure = 0;
+
+  for (const row of expiryRows) {
+    const unitPrice = lookupPriceFromMap(row.drugName, drugPriceMap);
+    if (unitPrice === null) continue;
+
+    estimatedExpiryLoss += (row.estimatedAtRiskQuantity || 0) * unitPrice;
+
+    if (row.expiryRiskLevel === "high" || row.expiryRiskLevel === "medium") {
+      atRiskInventoryValue += (row.quantity || 0) * unitPrice;
+    }
+  }
+
+  for (const row of shortageRows) {
+    if (row.shortageRiskLevel !== "high") continue;
+    const unitPrice = lookupPriceFromMap(row.drugName, drugPriceMap);
+    if (unitPrice === null) continue;
+    highRiskShortageExposure += (row.suggestedReorderQuantity || 0) * unitPrice;
+  }
+
+  return {
+    estimatedExpiryLoss: Math.round(estimatedExpiryLoss),
+    atRiskInventoryValue: Math.round(atRiskInventoryValue),
+    highRiskShortageExposure: Math.round(highRiskShortageExposure),
+  };
+}

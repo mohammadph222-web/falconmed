@@ -3,9 +3,12 @@ import { supabase } from "../../lib/supabaseClient";
 import {
   buildExecutiveMetrics,
   buildExecutiveNarrative,
+  calculateExpiryIntelligence,
+  calculateFinancialKpis,
   calculateShortagePredictions,
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
+import { buildDrugPriceMap } from "../../utils/drugPricing";
 
 async function safeFetch(table, columns) {
   if (!supabase) return { data: [], error: null };
@@ -46,6 +49,11 @@ const riskStyles = {
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
   const [transferRows, setTransferRows] = useState([]);
+  const [financialKpis, setFinancialKpis] = useState({
+    estimatedExpiryLoss: 0,
+    atRiskInventoryValue: 0,
+    highRiskShortageExposure: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -63,7 +71,7 @@ export default function ExecutiveDashboard() {
           "refill_requests",
           "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
         ),
-        safeFetch("expiry_records", "drug_name,quantity,location,created_at"),
+        safeFetch("expiry_records", "drug_name,quantity,location,batch_no,expiry_date,created_at"),
       ]);
 
       const shortages = [
@@ -76,19 +84,28 @@ export default function ExecutiveDashboard() {
       ];
       const expiryRecords = expiryRes.data || [];
 
-      setShortageRows(
-        calculateShortagePredictions({
-          shortages,
-          refills,
-          expiryRecords,
-        })
-      );
+      const computedShortageRows = calculateShortagePredictions({
+        shortages,
+        refills,
+        expiryRecords,
+      });
+      const computedTransferRows = calculateSmartTransferRecommendations({
+        shortages,
+        refills,
+        expiryRecords,
+      });
+      const computedExpiryRows = calculateExpiryIntelligence({
+        expiryRecords,
+        refills,
+      });
 
-      setTransferRows(
-        calculateSmartTransferRecommendations({
-          shortages,
-          refills,
-          expiryRecords,
+      setShortageRows(computedShortageRows);
+      setTransferRows(computedTransferRows);
+      setFinancialKpis(
+        calculateFinancialKpis({
+          expiryRows: computedExpiryRows,
+          shortageRows: computedShortageRows,
+          drugPriceMap: buildDrugPriceMap(),
         })
       );
 
@@ -163,6 +180,27 @@ export default function ExecutiveDashboard() {
         <div style={statCard}>
           <div style={statLabel}>Suggested Transfer Qty</div>
           <div style={statValue}>{metrics.totalSuggestedTransferQuantity}</div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+          <div style={{ ...statLabel, color: "#92400e" }}>Expiry Loss (Est.)</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+            {loading ? "—" : `AED ${financialKpis.estimatedExpiryLoss.toLocaleString()}`}
+          </div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+          <div style={{ ...statLabel, color: "#92400e" }}>At-Risk Inventory</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+            {loading ? "—" : `AED ${financialKpis.atRiskInventoryValue.toLocaleString()}`}
+          </div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
+          <div style={{ ...statLabel, color: "#991b1b" }}>Shortage Exposure (High)</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
+            {loading ? "—" : `AED ${financialKpis.highRiskShortageExposure.toLocaleString()}`}
+          </div>
         </div>
       </div>
 

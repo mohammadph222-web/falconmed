@@ -60,22 +60,30 @@ function parseNumber(value) {
   return Number.isFinite(num) ? num : null;
 }
 
-function resolveUnitPrice(unitPrice, packagePrice, packageSize) {
-  const explicitUnitPrice = parseNumber(unitPrice);
-  if (explicitUnitPrice !== null) return explicitUnitPrice;
+function extractPackageUnits(packageSize) {
+  const text = String(packageSize ?? "").trim();
+  const match = text.match(/\d+(?:\.\d+)?/);
+  if (!match) return 1;
+  const units = Number(match[0]);
+  if (!Number.isFinite(units) || units <= 0) {
+    return 1;
+  }
+  return units;
+}
 
+function calculateUnitPrice(packagePrice, packageUnits) {
   const packagePriceNum = parseNumber(packagePrice);
-  const packageSizeNum = parseNumber(packageSize);
+  const packageUnitsNum = parseNumber(packageUnits);
 
   if (
     packagePriceNum === null ||
-    packageSizeNum === null ||
-    packageSizeNum <= 0
+    packageUnitsNum === null ||
+    packageUnitsNum <= 0
   ) {
     return null;
   }
 
-  return packagePriceNum / packageSizeNum;
+  return packagePriceNum / packageUnitsNum;
 }
 
 function formatPrice(value) {
@@ -129,6 +137,23 @@ export default function DrugSearch() {
             rawRow[header] = cols[index] ?? "";
           });
 
+          const packageSizeValue = getValue(rawRow, ["packagesize", "packsize", "packqty"]);
+          const priceToPharmacyValue = getValue(rawRow, [
+            "pharmacyprice",
+            "pricetopharmacy",
+            "packagepricetopharmacy",
+            "packpricetopharmacy",
+            "packagepricepharmacy",
+          ]);
+          const priceToPublicValue = getValue(rawRow, [
+            "publicprice",
+            "pricetopublic",
+            "packagepricetopublic",
+            "packpricetopublic",
+            "packagepricepublic",
+          ]);
+          const packageUnitsValue = extractPackageUnits(packageSizeValue);
+
           return {
             brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
             generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
@@ -141,17 +166,12 @@ export default function DrugSearch() {
             thiqa_abm: getValue(rawRow, ["thiqaabmcoverage", "thiqaabm", "thiqa"]),
             basic_coverage: getValue(rawRow, ["basiccoverage", "basic"]),
             public_price: getValue(rawRow, ["publicprice", "price", "unitprice"]),
-            package_size: getValue(rawRow, ["packagesize", "packsize", "packqty"]),
-            package_price_to_pharmacy: getValue(rawRow, [
-              "packagepricetopharmacy",
-              "packpricetopharmacy",
-              "packagepricepharmacy",
-            ]),
-            package_price_to_public: getValue(rawRow, [
-              "packagepricetopublic",
-              "packpricetopublic",
-              "packagepricepublic",
-            ]),
+            package_size: packageSizeValue,
+            package_units: packageUnitsValue,
+            price_to_pharmacy: priceToPharmacyValue,
+            price_to_public: priceToPublicValue,
+            package_price_to_pharmacy: priceToPharmacyValue,
+            package_price_to_public: priceToPublicValue,
             unit_price_to_pharmacy: getValue(rawRow, [
               "unitpricetopharmacy",
               "unitpricepharmacy",
@@ -160,6 +180,14 @@ export default function DrugSearch() {
               "unitpricetopublic",
               "unitpricepublic",
             ]),
+            calculated_unit_price_to_pharmacy: calculateUnitPrice(
+              priceToPharmacyValue,
+              packageUnitsValue
+            ),
+            calculated_unit_price_to_public: calculateUnitPrice(
+              priceToPublicValue,
+              packageUnitsValue
+            ),
           };
         });
 
@@ -240,22 +268,6 @@ export default function DrugSearch() {
   ]);
 
   const displayedDrugs = filteredDrugs.slice(0, 750);
-
-  const calculatedUnitPriceToPharmacy = selectedDrug
-    ? resolveUnitPrice(
-        selectedDrug.unit_price_to_pharmacy,
-        selectedDrug.package_price_to_pharmacy,
-        selectedDrug.package_size
-      )
-    : null;
-
-  const calculatedUnitPriceToPublic = selectedDrug
-    ? resolveUnitPrice(
-        selectedDrug.unit_price_to_public,
-        selectedDrug.package_price_to_public,
-        selectedDrug.package_size
-      )
-    : null;
 
   return (
     <div>
@@ -479,6 +491,11 @@ export default function DrugSearch() {
               </div>
 
               <div style={detailItem}>
+                <div style={detailLabel}>Package Units</div>
+                <div style={detailValue}>{selectedDrug.package_units ?? 1}</div>
+              </div>
+
+              <div style={detailItem}>
                 <div style={detailLabel}>Package Price to Pharmacy</div>
                 <div style={detailValue}>
                   {selectedDrug.package_price_to_pharmacy || "-"}
@@ -504,12 +521,16 @@ export default function DrugSearch() {
 
               <div style={detailItem}>
                 <div style={detailLabel}>Calculated Unit Price to Pharmacy</div>
-                <div style={detailValue}>{formatPrice(calculatedUnitPriceToPharmacy)}</div>
+                <div style={detailValue}>
+                  {formatPrice(selectedDrug.calculated_unit_price_to_pharmacy)}
+                </div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Calculated Unit Price to Public</div>
-                <div style={detailValue}>{formatPrice(calculatedUnitPriceToPublic)}</div>
+                <div style={detailValue}>
+                  {formatPrice(selectedDrug.calculated_unit_price_to_public)}
+                </div>
               </div>
 
               <div style={detailItem}>
