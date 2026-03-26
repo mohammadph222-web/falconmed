@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import drugsMasterCsv from "../../data/drugs_master.csv?raw";
+import { supabase } from "../../lib/supabaseClient";
 
 function parseCSVLine(line) {
   const result = [];
@@ -62,6 +63,8 @@ export default function ScenarioSimulator() {
     transferQuantity: "",
   });
   const [result, setResult] = useState(null);
+  const [creatingReorder, setCreatingReorder] = useState(false);
+  const [reorderMsg, setReorderMsg] = useState("");
 
   useEffect(() => {
     const text = String(drugsMasterCsv || "");
@@ -144,6 +147,30 @@ export default function ScenarioSimulator() {
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleCreateReorderRequest = async () => {
+    if (!result) return;
+    setCreatingReorder(true);
+    setReorderMsg("");
+    try {
+      if (!supabase) throw new Error("Supabase not configured.");
+      const { error } = await supabase.from("reorder_requests").insert([
+        {
+          drug_name: form.drugName,
+          suggested_qty: Math.ceil(result.recommendedReorderQty),
+          risk_level: result.shortageRisk,
+          reason: result.decisionReason,
+          status: "pending",
+        },
+      ]);
+      if (error) throw error;
+      setReorderMsg("Reorder request created successfully.");
+    } catch (err) {
+      setReorderMsg(`Error: ${err.message || "Failed to create reorder request."}`);
+    } finally {
+      setCreatingReorder(false);
+    }
   };
 
   const handleRunSimulation = () => {
@@ -332,6 +359,28 @@ export default function ScenarioSimulator() {
             {result.bestAction === "REORDER NOW" ? (
               <div style={decisionHint}>Suggested Reorder Qty: {Math.ceil(result.recommendedReorderQty)}</div>
             ) : null}
+
+            <div style={{ marginTop: "16px", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                style={reorderBtn}
+                onClick={handleCreateReorderRequest}
+                disabled={creatingReorder}
+              >
+                {creatingReorder ? "Creating..." : "Create Reorder Request"}
+              </button>
+              {reorderMsg ? (
+                <span
+                  style={{
+                    fontSize: "13px",
+                    fontWeight: 600,
+                    color: reorderMsg.startsWith("Error") ? "#b91c1c" : "#166534",
+                  }}
+                >
+                  {reorderMsg}
+                </span>
+              ) : null}
+            </div>
           </div>
         </>
       ) : null}
@@ -483,4 +532,15 @@ const decisionHint = {
   color: "#0f172a",
   fontSize: "14px",
   fontWeight: 700,
+};
+
+const reorderBtn = {
+  padding: "10px 18px",
+  background: "#0f172a",
+  color: "white",
+  border: "none",
+  borderRadius: "10px",
+  fontSize: "14px",
+  fontWeight: 700,
+  cursor: "pointer",
 };

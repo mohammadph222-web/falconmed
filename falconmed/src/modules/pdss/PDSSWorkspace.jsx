@@ -73,8 +73,12 @@ const wrap = {
 
 const tabBar = {
   display: "flex",
-  gap: "10px",
+  gap: "8px",
   flexWrap: "wrap",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "14px",
+  padding: "8px 10px",
 };
 
 const tab = {
@@ -93,5 +97,5 @@ const activeTab = {
   background: "#2563eb",
   border: "1px solid #2563eb",
   color: "#ffffff",
-  boxShadow: "0 8px 20px rgba(37, 99, 235, 0.18)",
+  boxShadow: "0 4px 16px rgba(37, 99, 235, 0.30)",
 };
