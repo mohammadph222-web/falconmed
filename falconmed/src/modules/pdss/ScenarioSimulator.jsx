@@ -122,9 +122,7 @@ export default function ScenarioSimulator() {
       form.drugName.trim() &&
       form.currentStock !== "" &&
       form.averageDailyUsage !== "" &&
-      form.supplierLeadTimeDays !== "" &&
-      form.demandIncreasePercent !== "" &&
-      form.transferQuantity !== ""
+      form.supplierLeadTimeDays !== ""
     );
   }, [form]);
 
@@ -164,11 +162,24 @@ export default function ScenarioSimulator() {
 
     const shortageRisk = projectedDaysLeft < leadTimeDays ? "HIGH" : "LOW";
 
+    let bestAction = "MONITOR";
+    let decisionReason = "Stock coverage exceeds supplier lead time.";
+
+    if (projectedDaysLeft < leadTimeDays && transferQty < reorderQuantity) {
+      bestAction = "REORDER NOW";
+      decisionReason = "Remaining stock will not cover supplier lead time.";
+    } else if (projectedDaysLeft >= leadTimeDays) {
+      bestAction = "TRANSFER STOCK";
+      decisionReason = "Transfer quantity removes immediate shortage risk.";
+    }
+
     setResult({
       projectedDailyUsage: adjustedUsage,
       projectedDaysLeft,
       recommendedReorderQty: reorderQuantity,
       shortageRisk,
+      bestAction,
+      decisionReason,
     });
   };
 
@@ -235,14 +246,14 @@ export default function ScenarioSimulator() {
           <input
             style={input}
             type="number"
-            placeholder="Demand Increase %"
+            placeholder="Demand Increase % (optional)"
             value={form.demandIncreasePercent}
             onChange={(e) => handleChange("demandIncreasePercent", e.target.value)}
           />
           <input
             style={input}
             type="number"
-            placeholder="Transfer Quantity"
+            placeholder="Transfer Quantity (optional)"
             value={form.transferQuantity}
             onChange={(e) => handleChange("transferQuantity", e.target.value)}
           />
@@ -254,41 +265,75 @@ export default function ScenarioSimulator() {
       </div>
 
       {result ? (
-        <div style={statsGrid}>
-          <div style={statCard}>
-            <div style={statLabel}>Projected Daily Usage</div>
-            <div style={statValue}>{result.projectedDailyUsage.toFixed(2)}</div>
-          </div>
-          <div style={statCard}>
-            <div style={statLabel}>Projected Days Left</div>
-            <div style={statValue}>
-              {Number.isFinite(result.projectedDaysLeft)
-                ? result.projectedDaysLeft.toFixed(1)
-                : "Infinity"}
+        <>
+          <div style={statsGrid}>
+            <div style={statCard}>
+              <div style={statLabel}>Projected Daily Usage</div>
+              <div style={statValue}>{result.projectedDailyUsage.toFixed(2)}</div>
+            </div>
+            <div style={statCard}>
+              <div style={statLabel}>Projected Days Left</div>
+              <div style={statValue}>
+                {Number.isFinite(result.projectedDaysLeft)
+                  ? result.projectedDaysLeft.toFixed(1)
+                  : "Infinity"}
+              </div>
+            </div>
+            <div style={statCard}>
+              <div style={statLabel}>Recommended Reorder Qty</div>
+              <div style={statValue}>{Math.ceil(result.recommendedReorderQty)}</div>
+            </div>
+            <div
+              style={{
+                ...statCard,
+                borderTop:
+                  result.shortageRisk === "HIGH" ? "3px solid #ef4444" : "3px solid #16a34a",
+              }}
+            >
+              <div style={statLabel}>Shortage Risk</div>
+              <div
+                style={{
+                  ...statValue,
+                  color: result.shortageRisk === "HIGH" ? "#b91c1c" : "#166534",
+                }}
+              >
+                {result.shortageRisk}
+              </div>
             </div>
           </div>
-          <div style={statCard}>
-            <div style={statLabel}>Recommended Reorder Qty</div>
-            <div style={statValue}>{Math.ceil(result.recommendedReorderQty)}</div>
-          </div>
+
           <div
             style={{
               ...statCard,
               borderTop:
-                result.shortageRisk === "HIGH" ? "3px solid #ef4444" : "3px solid #16a34a",
+                result.bestAction === "REORDER NOW"
+                  ? "3px solid #ef4444"
+                  : result.bestAction === "TRANSFER STOCK"
+                    ? "3px solid #2563eb"
+                    : "3px solid #16a34a",
             }}
           >
-            <div style={statLabel}>Shortage Risk</div>
+            <div style={statLabel}>Best Operational Decision</div>
             <div
               style={{
                 ...statValue,
-                color: result.shortageRisk === "HIGH" ? "#b91c1c" : "#166534",
+                fontSize: "24px",
+                color:
+                  result.bestAction === "REORDER NOW"
+                    ? "#b91c1c"
+                    : result.bestAction === "TRANSFER STOCK"
+                      ? "#1d4ed8"
+                      : "#166534",
               }}
             >
-              {result.shortageRisk}
+              {result.bestAction}
             </div>
+            <p style={decisionReasonText}>{result.decisionReason}</p>
+            {result.bestAction === "REORDER NOW" ? (
+              <div style={decisionHint}>Suggested Reorder Qty: {Math.ceil(result.recommendedReorderQty)}</div>
+            ) : null}
           </div>
-        </div>
+        </>
       ) : null}
     </div>
   );
@@ -422,5 +467,20 @@ const statValue = {
   marginTop: "10px",
   color: "#0f172a",
   fontSize: "28px",
+  fontWeight: 700,
+};
+
+const decisionReasonText = {
+  marginTop: "10px",
+  marginBottom: 0,
+  color: "#475569",
+  lineHeight: 1.6,
+  fontSize: "14px",
+};
+
+const decisionHint = {
+  marginTop: "10px",
+  color: "#0f172a",
+  fontSize: "14px",
   fontWeight: 700,
 };
