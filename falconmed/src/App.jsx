@@ -80,22 +80,22 @@ export default function App() {
             </div>
 
             <div style={cardsGrid}>
-              <div style={statCard}>
+              <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
                 <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
                 <div style={statValue}>22,463</div>
               </div>
 
-              <div style={statCard}>
+              <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
                 <div style={statLabel}>NEAR EXPIRY ITEMS</div>
                 <div style={statValue}>0</div>
               </div>
 
-              <div style={statCard}>
+              <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
                 <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
                 <div style={statValue}>0</div>
               </div>
 
-              <div style={statCard}>
+              <div style={{ ...statCard, borderTop: "4px solid #10b981" }}>
                 <div style={statLabel}>ACTIVE SITES</div>
                 <div style={statValue}>0</div>
               </div>
@@ -352,17 +352,18 @@ const cardsGrid = {
 const statCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  borderTop: "4px solid #3b82f6",
+  padding: "22px 20px",
+  boxShadow: "0 4px 20px rgba(15, 23, 42, 0.08)",
   textAlign: "center",
 };
 
 const statLabel = {
-  fontSize: "13px",
+  fontSize: "11px",
   color: "#64748b",
-  marginBottom: "16px",
-  fontWeight: "bold",
+  marginBottom: "14px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
 };
 
 const statValue = {
