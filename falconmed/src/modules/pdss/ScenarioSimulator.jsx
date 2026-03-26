@@ -1,4 +1,49 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import drugsMasterCsv from "../../data/drugs_master.csv?raw";
+
+function parseCSVLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    const next = line[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  result.push(current.trim());
+  return result;
+}
+
+function normalizeKey(key) {
+  return String(key || "")
+    .toLowerCase()
+    .replace(/[\s/_-]+/g, "")
+    .trim();
+}
+
+function getValue(row, possibleKeys) {
+  for (const key of possibleKeys) {
+    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
 
 function toNumber(value) {
   const parsed = Number(value);
@@ -6,6 +51,8 @@ function toNumber(value) {
 }
 
 export default function ScenarioSimulator() {
+  const [allDrugs, setAllDrugs] = useState([]);
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
   const [form, setForm] = useState({
     drugName: "",
     currentStock: "",
@@ -15,6 +62,60 @@ export default function ScenarioSimulator() {
     transferQuantity: "",
   });
   const [result, setResult] = useState(null);
+
+  useEffect(() => {
+    const text = String(drugsMasterCsv || "");
+
+    if (!text.trim()) {
+      setAllDrugs([]);
+      return;
+    }
+
+    const lines = text
+      .split(/\r?\n/)
+      .filter((line) => line.trim() !== "");
+
+    if (lines.length < 2) {
+      setAllDrugs([]);
+      return;
+    }
+
+    const rawHeaders = parseCSVLine(lines[0]);
+    const headers = rawHeaders.map((h) => normalizeKey(h));
+
+    const parsed = lines.slice(1).map((line) => {
+      const cols = parseCSVLine(line);
+      const rawRow = {};
+
+      headers.forEach((header, index) => {
+        rawRow[header] = cols[index] ?? "";
+      });
+
+      const brand = getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]);
+      const generic = getValue(rawRow, ["generic", "genericname", "scientificname"]);
+      const strength = getValue(rawRow, ["strength"]);
+
+      const label = brand
+        ? `${brand}${strength ? ` ${strength}` : ""}`
+        : `${generic || "Unknown"}${strength ? ` ${strength}` : ""}`;
+
+      return {
+        label: label.trim(),
+        brand,
+        generic,
+      };
+    });
+
+    const unique = Array.from(
+      new Map(
+        parsed
+          .filter((d) => d.label && d.label !== "Unknown")
+          .map((d) => [d.label.toLowerCase(), d])
+      ).values()
+    );
+
+    setAllDrugs(unique);
+  }, []);
 
   const canRun = useMemo(() => {
     return (
@@ -26,6 +127,22 @@ export default function ScenarioSimulator() {
       form.transferQuantity !== ""
     );
   }, [form]);
+
+  const filteredDrugs = useMemo(() => {
+    if (!showDrugDropdown) return [];
+    const q = form.drugName.toLowerCase().trim();
+    if (!q) return allDrugs.slice(0, 20);
+
+    return allDrugs
+      .filter((drug) => {
+        return (
+          drug.label.toLowerCase().includes(q) ||
+          drug.brand?.toLowerCase().includes(q) ||
+          drug.generic?.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 20);
+  }, [allDrugs, form.drugName, showDrugDropdown]);
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -67,12 +184,33 @@ export default function ScenarioSimulator() {
 
       <div style={formCard}>
         <div style={formGrid}>
-          <input
-            style={input}
-            placeholder="Drug Name"
-            value={form.drugName}
-            onChange={(e) => handleChange("drugName", e.target.value)}
-          />
+          <div style={drugSearchContainer}>
+            <input
+              style={input}
+              placeholder="Drug Name"
+              value={form.drugName}
+              onChange={(e) => handleChange("drugName", e.target.value)}
+              onFocus={() => setShowDrugDropdown(true)}
+            />
+
+            {showDrugDropdown && filteredDrugs.length > 0 ? (
+              <div style={drugDropdown}>
+                {filteredDrugs.map((drug) => (
+                  <button
+                    key={drug.label}
+                    type="button"
+                    style={drugOption}
+                    onClick={() => {
+                      handleChange("drugName", drug.label);
+                      setShowDrugDropdown(false);
+                    }}
+                  >
+                    {drug.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <input
             style={input}
             type="number"
@@ -216,6 +354,37 @@ const input = {
   borderRadius: "9px",
   border: "1px solid #cbd5e1",
   boxSizing: "border-box",
+};
+
+const drugSearchContainer = {
+  position: "relative",
+};
+
+const drugDropdown = {
+  position: "absolute",
+  top: "44px",
+  left: 0,
+  right: 0,
+  background: "white",
+  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.08)",
+  zIndex: 20,
+  maxHeight: "220px",
+  overflowY: "auto",
+};
+
+const drugOption = {
+  display: "block",
+  width: "100%",
+  textAlign: "left",
+  padding: "10px 12px",
+  border: "none",
+  borderBottom: "1px solid #f1f5f9",
+  background: "white",
+  color: "#0f172a",
+  fontSize: "13px",
+  cursor: "pointer",
 };
 
 const runBtn = {
