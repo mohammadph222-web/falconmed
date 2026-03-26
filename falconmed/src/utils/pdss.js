@@ -728,3 +728,56 @@ export function calculateFinancialKpis({
     highRiskShortageExposure: Math.round(highRiskShortageExposure),
   };
 }
+
+function parseDaysToExpiry(row) {
+  if (Number.isFinite(row?.daysToExpiry)) {
+    return row.daysToExpiry;
+  }
+
+  const rawDate = row?.expiryDate || row?.expiry_date;
+  if (!rawDate) return null;
+
+  const date = new Date(rawDate);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const now = new Date();
+  const ms = date.getTime() - now.getTime();
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Inventory Financial Intelligence KPIs
+ * - totalInventoryValue: all expiry rows quantity × pharmacy unit price
+ * - nearExpiryRiskValue: rows expiring in <= 60 days quantity × pharmacy unit price
+ * - deadStockValue: rows already expired quantity × pharmacy unit price
+ */
+export function calculateInventoryFinancials({ expiryRows = [], drugPriceMap }) {
+  let totalInventoryValue = 0;
+  let nearExpiryRiskValue = 0;
+  let deadStockValue = 0;
+
+  for (const row of expiryRows) {
+    const unitPrice = lookupPriceFromMap(row.drugName || row.drug_name, drugPriceMap);
+    if (unitPrice === null) continue;
+
+    const qty = Math.max(0, Number(row.quantity || 0));
+    if (!Number.isFinite(qty) || qty <= 0) continue;
+
+    const rowValue = qty * unitPrice;
+    totalInventoryValue += rowValue;
+
+    const daysToExpiry = parseDaysToExpiry(row);
+    if (daysToExpiry != null && daysToExpiry <= 60) {
+      nearExpiryRiskValue += rowValue;
+    }
+    if (daysToExpiry != null && daysToExpiry < 0) {
+      deadStockValue += rowValue;
+    }
+  }
+
+  return {
+    totalInventoryValue: Math.round(totalInventoryValue),
+    nearExpiryRiskValue: Math.round(nearExpiryRiskValue),
+    deadStockValue: Math.round(deadStockValue),
+  };
+}

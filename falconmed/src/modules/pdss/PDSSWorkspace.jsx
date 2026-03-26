@@ -2,6 +2,7 @@ import { useState } from "react";
 import ActionCenter from "./ActionCenter";
 import ExecutiveDashboard from "./ExecutiveDashboard";
 import ExpiryIntelligence from "./ExpiryIntelligence";
+import ScenarioSimulator from "./ScenarioSimulator";
 import ShortageIntelligence from "./ShortageIntelligence";
 import SmartTransfers from "./SmartTransfers";
 
@@ -46,11 +47,19 @@ export default function PDSSWorkspace({ initialView = "executive-dashboard" }) {
         >
           Smart Transfers
         </button>
+        <button
+          type="button"
+          style={activeView === "scenario-simulator" ? activeTab : tab}
+          onClick={() => setActiveView("scenario-simulator")}
+        >
+          Scenario Simulator
+        </button>
       </div>
 
       {activeView === "action-center" ? <ActionCenter /> : null}
       {activeView === "executive-dashboard" ? <ExecutiveDashboard /> : null}
       {activeView === "expiry-intelligence" ? <ExpiryIntelligence /> : null}
+      {activeView === "scenario-simulator" ? <ScenarioSimulator /> : null}
       {activeView === "smart-transfers" ? <SmartTransfers /> : null}
       {activeView === "shortage-intelligence" ? <ShortageIntelligence /> : null}
     </div>

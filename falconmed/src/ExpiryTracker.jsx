@@ -64,6 +64,7 @@ export default function ExpiryTracker({ user, profile }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [generatingTestData, setGeneratingTestData] = useState(false);
 
   // Drug search and dropdown state
   const [allDrugs, setAllDrugs] = useState([]);
@@ -202,6 +203,116 @@ export default function ExpiryTracker({ user, profile }) {
     }));
     setDrugSearch(displayName);
     setShowDrugDropdown(false);
+  };
+
+  const buildDrugDisplayName = (drug) => {
+    return drug.brand
+      ? `${drug.brand}${drug.strength ? " " + drug.strength : ""}`
+      : `${drug.generic || "Unknown"}${drug.strength ? " " + drug.strength : ""}`;
+  };
+
+  const formatDateInput = (date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const randomInt = (min, max) => {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  };
+
+  const randomBatchNo = () => {
+    return `BATCH-${randomInt(10000, 99999)}`;
+  };
+
+  const randomExpiryDate = () => {
+    const now = new Date();
+    const roll = Math.random();
+    let offsetDays = 0;
+
+    if (roll < 0.4) {
+      offsetDays = randomInt(1, 30);
+    } else if (roll < 0.7) {
+      offsetDays = randomInt(31, 60);
+    } else if (roll < 0.9) {
+      offsetDays = randomInt(61, 120);
+    } else {
+      offsetDays = -randomInt(1, 120);
+    }
+
+    const target = new Date(now);
+    target.setDate(now.getDate() + offsetDays);
+    return formatDateInput(target);
+  };
+
+  const handleGenerateTestInventory = async () => {
+    if (!supabase) return;
+
+    if (!allDrugs.length) {
+      setMessage("Unable to generate test inventory: drug list is not loaded yet.");
+      return;
+    }
+
+    setGeneratingTestData(true);
+    setMessage("");
+
+    try {
+      const rows = Array.from({ length: 20 }).map(() => {
+        const picked = allDrugs[randomInt(0, allDrugs.length - 1)] || {};
+        const pickedName = buildDrugDisplayName(picked);
+
+        return {
+          drug_name: pickedName && pickedName !== "Unknown" ? pickedName : "Unknown",
+          batch_no: randomBatchNo(),
+          expiry_date: randomExpiryDate(),
+          quantity: randomInt(5, 120),
+          notes: "test_stock",
+        };
+      });
+
+      const { error } = await supabase.from(EXPIRY_TABLE).insert(rows);
+
+      if (error) {
+        console.error("Failed to generate test inventory:", error.message);
+        setMessage("Failed to generate test inventory.");
+        return;
+      }
+
+      const { data: refreshed, error: refreshError } = await supabase
+        .from(EXPIRY_TABLE)
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (refreshError) {
+        console.error("Failed to refresh after test inventory generation:", refreshError.message);
+      } else {
+        const mapped = (refreshed || []).map(mapDbToUi);
+        setItems(mapped);
+        localStorage.setItem(
+          "falconmed_expiries",
+          JSON.stringify(
+            mapped.map((item) => ({
+              id: item.id,
+              drug_name: item.drugName,
+              batch_no: item.batchNo,
+              quantity: item.quantity,
+              expiry_date: item.expiryDate,
+              notes: item.notes || "",
+              status: getStatus(item.expiryDate),
+              created_at: item.expiryDate,
+            }))
+          )
+        );
+      }
+
+      setMessage("Test inventory generated successfully.");
+    } catch (error) {
+      console.error("Test inventory generation error:", error?.message || "Unknown error");
+      setMessage("Failed to generate test inventory.");
+    } finally {
+      setGeneratingTestData(false);
+    }
   };
 
   // Load expiry records on mount
@@ -388,7 +499,18 @@ export default function ExpiryTracker({ user, profile }) {
 
   return (
     <div>
-      <h1 style={pageTitle}>Expiry Tracker</h1>
+      <div style={pageHeaderRow}>
+        <h1 style={pageTitle}>Expiry Tracker</h1>
+        <button
+          type="button"
+          style={testBtn}
+          onClick={handleGenerateTestInventory}
+          disabled={generatingTestData || loading}
+          title="TEST ONLY"
+        >
+          {generatingTestData ? "Generating..." : "Generate Test Inventory"}
+        </button>
+      </div>
 
       <div style={cardsGrid}>
         <div style={statCard}>
@@ -565,9 +687,28 @@ export default function ExpiryTracker({ user, profile }) {
 const pageTitle = {
   fontSize: "28px",
   fontWeight: 700,
-  marginTop: 0,
-  marginBottom: "18px",
+  margin: 0,
   color: "#0f172a",
+};
+
+const pageHeaderRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  marginBottom: "18px",
+  flexWrap: "wrap",
+};
+
+const testBtn = {
+  padding: "10px 12px",
+  background: "#f59e0b",
+  color: "white",
+  border: "none",
+  borderRadius: "9px",
+  cursor: "pointer",
+  fontSize: "13px",
+  fontWeight: "bold",
 };
 
 const cardsGrid = {

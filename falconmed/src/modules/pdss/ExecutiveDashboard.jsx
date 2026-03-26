@@ -5,6 +5,7 @@ import {
   buildExecutiveNarrative,
   calculateExpiryIntelligence,
   calculateFinancialKpis,
+  calculateInventoryFinancials,
   calculateShortagePredictions,
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
@@ -54,6 +55,11 @@ export default function ExecutiveDashboard() {
     atRiskInventoryValue: 0,
     highRiskShortageExposure: 0,
   });
+  const [inventoryFinancials, setInventoryFinancials] = useState({
+    totalInventoryValue: 0,
+    nearExpiryRiskValue: 0,
+    deadStockValue: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -98,6 +104,7 @@ export default function ExecutiveDashboard() {
         expiryRecords,
         refills,
       });
+      const drugPriceMap = buildDrugPriceMap();
 
       setShortageRows(computedShortageRows);
       setTransferRows(computedTransferRows);
@@ -105,7 +112,13 @@ export default function ExecutiveDashboard() {
         calculateFinancialKpis({
           expiryRows: computedExpiryRows,
           shortageRows: computedShortageRows,
-          drugPriceMap: buildDrugPriceMap(),
+          drugPriceMap,
+        })
+      );
+      setInventoryFinancials(
+        calculateInventoryFinancials({
+          expiryRows: computedExpiryRows,
+          drugPriceMap,
         })
       );
 
@@ -200,6 +213,27 @@ export default function ExecutiveDashboard() {
           <div style={{ ...statLabel, color: "#991b1b" }}>Shortage Exposure (High)</div>
           <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
             {loading ? "—" : `AED ${financialKpis.highRiskShortageExposure.toLocaleString()}`}
+          </div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}>
+          <div style={{ ...statLabel, color: "#0369a1" }}>Total Inventory Value</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#075985" }}>
+            {loading ? "—" : `AED ${inventoryFinancials.totalInventoryValue.toLocaleString()}`}
+          </div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+          <div style={{ ...statLabel, color: "#92400e" }}>Near-Expiry Risk Value</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+            {loading ? "—" : `AED ${inventoryFinancials.nearExpiryRiskValue.toLocaleString()}`}
+          </div>
+        </div>
+
+        <div style={{ ...statCard, borderTop: "3px solid #dc2626" }}>
+          <div style={{ ...statLabel, color: "#991b1b" }}>Dead Stock Value</div>
+          <div style={{ ...statValue, fontSize: "22px", color: "#991b1b" }}>
+            {loading ? "—" : `AED ${inventoryFinancials.deadStockValue.toLocaleString()}`}
           </div>
         </div>
       </div>
