@@ -1,3 +1,5 @@
+import { resolvePharmacyUnitPrice } from "./drugPricing";
+
 const DEFAULT_COVERAGE_DAYS = 30;
 
 function toNumber(value, fallback = 0) {
@@ -675,11 +677,7 @@ export function topUrgentActions(actions = [], limit = 5) {
 
 function lookupPriceFromMap(drugName, priceMap) {
   if (!priceMap) return null;
-  const key = String(drugName || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-  return priceMap.get(key)?.pharmacyUnitPrice ?? null;
+  return resolvePharmacyUnitPrice(drugName);
 }
 
 /**
