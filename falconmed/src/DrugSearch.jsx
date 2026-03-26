@@ -45,6 +45,12 @@ function getValue(row, possibleKeys) {
   return "";
 }
 
+function formatCoverageValue(value) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "-") return "No";
+  return text;
+}
+
 export default function DrugSearch() {
   const [allDrugs, setAllDrugs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -406,12 +412,12 @@ export default function DrugSearch() {
 
               <div style={detailItem}>
                 <div style={detailLabel}>Thiqa/ABM Coverage</div>
-                <div style={detailValue}>{selectedDrug.thiqa_abm || "-"}</div>
+                <div style={detailValue}>{formatCoverageValue(selectedDrug.thiqa_abm)}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Basic Coverage</div>
-                <div style={detailValue}>{selectedDrug.basic_coverage || "-"}</div>
+                <div style={detailValue}>{formatCoverageValue(selectedDrug.basic_coverage)}</div>
               </div>
             </div>
           </div>
