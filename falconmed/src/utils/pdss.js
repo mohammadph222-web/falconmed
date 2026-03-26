@@ -326,3 +326,48 @@ export function calculateSmartTransferRecommendations({
     return b.suggestedTransferQuantity - a.suggestedTransferQuantity;
   });
 }
+
+export function buildExecutiveMetrics(shortageRows = [], transferRows = []) {
+  const shortageSummary = buildPdssSummary(shortageRows);
+  const totalSuggestedTransferQuantity = transferRows.reduce(
+    (sum, row) => sum + Number(row.suggestedTransferQuantity || 0),
+    0
+  );
+
+  return {
+    trackedDrugs: shortageSummary.total,
+    highRiskShortages: shortageSummary.high,
+    mediumRiskShortages: shortageSummary.medium,
+    lowRiskShortages: shortageSummary.low,
+    transferOpportunities: transferRows.length,
+    totalSuggestedTransferQuantity,
+  };
+}
+
+export function buildExecutiveNarrative(metrics) {
+  const {
+    trackedDrugs = 0,
+    highRiskShortages = 0,
+    mediumRiskShortages = 0,
+    transferOpportunities = 0,
+    totalSuggestedTransferQuantity = 0,
+  } = metrics || {};
+
+  if (trackedDrugs === 0) {
+    return "Executive visibility is limited because there is not enough operational history yet. As refill, shortage, and branch stock records accumulate, this dashboard will surface shortage pressure and internal balancing opportunities automatically.";
+  }
+
+  if (highRiskShortages > 0 && transferOpportunities > 0) {
+    return `FalconMed is currently tracking ${trackedDrugs} active drugs, with ${highRiskShortages} high-risk shortages requiring immediate attention. The system has identified ${transferOpportunities} internal transfer opportunities covering ${totalSuggestedTransferQuantity} units, which can reduce urgent supply pressure before external procurement is needed.`;
+  }
+
+  if (highRiskShortages > 0) {
+    return `FalconMed is currently tracking ${trackedDrugs} active drugs, including ${highRiskShortages} high-risk shortages and ${mediumRiskShortages} medium-risk items. Executive focus should remain on replenishment speed and inventory visibility because internal balancing options are limited at the moment.`;
+  }
+
+  if (transferOpportunities > 0) {
+    return `Current shortage pressure is relatively controlled across ${trackedDrugs} tracked drugs. The main operational opportunity is proactive redistribution: ${transferOpportunities} transfer suggestions are available, representing ${totalSuggestedTransferQuantity} units that can be repositioned to protect continuity of care.`;
+  }
+
+  return `Current portfolio risk is stable across ${trackedDrugs} tracked drugs, with no immediate internal transfer recommendations. Executive attention can remain focused on maintaining data quality and monitoring emerging medium-risk items before they escalate.`;
+}

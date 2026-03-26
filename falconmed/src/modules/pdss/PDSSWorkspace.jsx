@@ -1,13 +1,21 @@
 import { useState } from "react";
+import ExecutiveDashboard from "./ExecutiveDashboard";
 import ShortageIntelligence from "./ShortageIntelligence";
 import SmartTransfers from "./SmartTransfers";
 
 export default function PDSSWorkspace() {
-  const [activeView, setActiveView] = useState("shortage-intelligence");
+  const [activeView, setActiveView] = useState("executive-dashboard");
 
   return (
     <div style={wrap}>
       <div style={tabBar}>
+        <button
+          type="button"
+          style={activeView === "executive-dashboard" ? activeTab : tab}
+          onClick={() => setActiveView("executive-dashboard")}
+        >
+          Executive Dashboard
+        </button>
         <button
           type="button"
           style={activeView === "shortage-intelligence" ? activeTab : tab}
@@ -24,7 +32,9 @@ export default function PDSSWorkspace() {
         </button>
       </div>
 
-      {activeView === "smart-transfers" ? <SmartTransfers /> : <ShortageIntelligence />}
+      {activeView === "executive-dashboard" ? <ExecutiveDashboard /> : null}
+      {activeView === "smart-transfers" ? <SmartTransfers /> : null}
+      {activeView === "shortage-intelligence" ? <ShortageIntelligence /> : null}
     </div>
   );
 }
