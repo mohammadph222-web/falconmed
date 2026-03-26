@@ -27,14 +27,17 @@ const priorityStyles = {
   high: {
     background: "#fee2e2",
     color: "#991b1b",
+    border: "1px solid #fecaca",
   },
   medium: {
     background: "#fef3c7",
     color: "#92400e",
+    border: "1px solid #fde68a",
   },
   low: {
     background: "#dcfce7",
     color: "#166534",
+    border: "1px solid #bbf7d0",
   },
 };
 
@@ -108,19 +111,19 @@ export default function SmartTransfers() {
       <div style={statsGrid}>
         <div style={statCard}>
           <div style={statLabel}>Suggestions</div>
-          <div style={statValue}>{summary.total}</div>
+          <div style={statValue}>{summary.total ?? 0}</div>
         </div>
         <div style={statCard}>
           <div style={statLabel}>High Priority</div>
-          <div style={{ ...statValue, color: "#b91c1c" }}>{summary.high}</div>
+          <div style={{ ...statValue, color: "#b91c1c" }}>{summary.high ?? 0}</div>
         </div>
         <div style={statCard}>
           <div style={statLabel}>Medium Priority</div>
-          <div style={{ ...statValue, color: "#b45309" }}>{summary.medium}</div>
+          <div style={{ ...statValue, color: "#b45309" }}>{summary.medium ?? 0}</div>
         </div>
         <div style={statCard}>
           <div style={statLabel}>Total Transfer Qty</div>
-          <div style={statValue}>{summary.quantity}</div>
+          <div style={statValue}>{summary.quantity ?? 0}</div>
         </div>
       </div>
 
@@ -220,15 +223,20 @@ const statsGrid = {
 
 const statCard = {
   background: "white",
-  borderRadius: "14px",
-  padding: "16px",
-  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.05)",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 4px 14px rgba(15, 23, 42, 0.05)",
   border: "1px solid #e2e8f0",
+  borderTop: "3px solid #e2e8f0",
 };
 
 const statLabel = {
   color: "#64748b",
-  fontSize: "13px",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  marginBottom: "8px",
 };
 
 const statValue = {
@@ -259,16 +267,19 @@ const table = {
 
 const th = {
   textAlign: "left",
-  fontSize: "13px",
-  color: "#334155",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  color: "#64748b",
   background: "#f8fafc",
-  borderBottom: "1px solid #e2e8f0",
-  padding: "12px",
+  borderBottom: "2px solid #e2e8f0",
+  padding: "12px 14px",
 };
 
 const td = {
   color: "#334155",
-  padding: "12px",
+  padding: "12px 14px",
   borderBottom: "1px solid #f1f5f9",
   fontSize: "14px",
   verticalAlign: "top",
