@@ -41,6 +41,7 @@ export default function ActionCenter() {
   const [filterKey, setFilterKey] = useState("all");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [prStatus, setPrStatus] = useState({});
 
   useEffect(() => {
     const load = async () => {
@@ -113,6 +114,24 @@ export default function ActionCenter() {
   const summary = useMemo(() => buildActionSummary(actions), [actions]);
   const filtered = useMemo(() => filterActionItems(actions, filterKey), [actions, filterKey]);
 
+  const handleCreatePurchaseRequest = async (row) => {
+    if (!supabase) return;
+    setPrStatus((prev) => ({ ...prev, [row.id]: "creating" }));
+    try {
+      const { error } = await supabase.from("purchase_requests").insert([{
+        drug_name: row.drugName,
+        suggested_qty: row.suggestedQuantity || 0,
+        priority: row.priority || "medium",
+        reason: row.details || row.action || "",
+        status: "pending",
+      }]);
+      if (error) throw error;
+      setPrStatus((prev) => ({ ...prev, [row.id]: "created" }));
+    } catch (err) {
+      setPrStatus((prev) => ({ ...prev, [row.id]: "error" }));
+    }
+  };
+
   return (
     <div style={wrap}>
       <div style={headerCard}>
@@ -166,6 +185,7 @@ export default function ActionCenter() {
                   <th style={th}>Drug Name</th>
                   <th style={th}>Details</th>
                   <th style={th}>Suggested Quantity</th>
+                  <th style={th}>Purchase Request</th>
                 </tr>
               </thead>
               <tbody>
@@ -181,6 +201,22 @@ export default function ActionCenter() {
                     <td style={tdDrug}>{row.drugName}</td>
                     <td style={td}>{row.details}</td>
                     <td style={td}>{row.suggestedQuantity || 0}</td>
+                    <td style={td}>
+                      {prStatus[row.id] === "created" ? (
+                        <span style={prCreatedBadge}>✓ Created</span>
+                      ) : prStatus[row.id] === "error" ? (
+                        <span style={prErrorBadge}>Failed</span>
+                      ) : (
+                        <button
+                          type="button"
+                          style={prBtn}
+                          disabled={prStatus[row.id] === "creating"}
+                          onClick={() => handleCreatePurchaseRequest(row)}
+                        >
+                          {prStatus[row.id] === "creating" ? "Creating..." : "Create PR"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -287,3 +323,37 @@ const badge = {
   padding: "5px 10px",
 };
 const emptyState = { padding: "24px", color: "#64748b" };
+
+const prBtn = {
+  padding: "6px 12px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  fontSize: "12px",
+  fontWeight: 700,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+const prCreatedBadge = {
+  display: "inline-flex",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  background: "#dcfce7",
+  color: "#166534",
+  fontSize: "12px",
+  fontWeight: 700,
+  border: "1px solid #bbf7d0",
+};
+
+const prErrorBadge = {
+  display: "inline-flex",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  background: "#fee2e2",
+  color: "#991b1b",
+  fontSize: "12px",
+  fontWeight: 700,
+  border: "1px solid #fecaca",
+};

@@ -9,6 +9,7 @@ import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
+import PurchaseRequests from "./PurchaseRequests";
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
@@ -67,6 +68,12 @@ export default function App() {
         return (
           <div style={contentCard}>
             <PDSSWorkspace initialView={pdssView} />
+          </div>
+        );
+      case "purchases":
+        return (
+          <div style={contentCard}>
+            <PurchaseRequests />
           </div>
         );
       default:
@@ -234,6 +241,13 @@ export default function App() {
             }}
           >
             PDSS
+          </button>
+
+          <button
+            style={page === "purchases" ? activeBtn : btn}
+            onClick={() => setPage("purchases")}
+          >
+            Purchase Requests
           </button>
         </div>
 
