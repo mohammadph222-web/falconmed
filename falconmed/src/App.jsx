@@ -8,10 +8,12 @@ import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
+import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
   const [page, setPage] = useState("dashboard");
+  const [pdssView, setPdssView] = useState("executive-dashboard");
 
   if (showLanding) {
     return <LandingPage onAccess={() => setShowLanding(false)} />;
@@ -64,7 +66,7 @@ export default function App() {
       case "pdss":
         return (
           <div style={contentCard}>
-            <PDSSWorkspace />
+            <PDSSWorkspace initialView={pdssView} />
           </div>
         );
       default:
@@ -139,6 +141,15 @@ export default function App() {
                 FalconMed is a pharmacy operations and clinical intelligence
                 platform designed for hospitals and community pharmacies.
               </p>
+            </div>
+
+            <div style={contentCard}>
+              <UrgentActionsWidget
+                onViewAll={() => {
+                  setPdssView("action-center");
+                  setPage("pdss");
+                }}
+              />
             </div>
           </>
         );
@@ -217,7 +228,10 @@ export default function App() {
 
           <button
             style={page === "pdss" ? activeBtn : btn}
-            onClick={() => setPage("pdss")}
+            onClick={() => {
+              setPdssView("executive-dashboard");
+              setPage("pdss");
+            }}
           >
             PDSS
           </button>

@@ -536,3 +536,137 @@ export function buildExpiryNarrative(metrics) {
 
   return `Expiry exposure is currently moderate with ${nearExpiryBatches} near-expiry batches and ${mediumExpiryRisk} medium-risk batches. Focus on controlled dispensing acceleration and procurement adjustment to reduce potential write-off volume.`;
 }
+
+export function priorityRank(priority) {
+  const rank = { high: 0, medium: 1, low: 2 };
+  return rank[String(priority || "").toLowerCase()] ?? 3;
+}
+
+function normalizeActionType(actionType) {
+  const value = String(actionType || "").toLowerCase();
+  if (value.includes("reorder")) return "Reorder";
+  if (value.includes("transfer")) return "Transfer";
+  if (value.includes("immediate")) return "Use Immediately";
+  if (value.includes("prioritize")) return "Prioritize Dispensing";
+  return "Monitor";
+}
+
+function shortageActions(shortageRows = []) {
+  return shortageRows
+    .map((row, index) => {
+      const risk = String(row.shortageRiskLevel || "low").toLowerCase();
+      const priority = risk === "high" ? "high" : risk === "medium" ? "medium" : "low";
+
+      const type = risk === "low" ? "Monitor" : "Reorder";
+      const action =
+        risk === "high"
+          ? "Create urgent reorder"
+          : risk === "medium"
+            ? "Plan reorder"
+            : "Monitor usage trend";
+
+      const details =
+        row.daysLeft == null
+          ? "Consumption data is limited; monitor demand and stock trend."
+          : `${row.daysLeft} days left at current usage.`;
+
+      return {
+        id: `shortage-${row.drugName}-${index}`,
+        source: "shortage",
+        priority,
+        type,
+        action,
+        drugName: row.drugName,
+        details,
+        suggestedQuantity: Number(row.suggestedReorderQuantity || 0),
+      };
+    })
+    .filter((row) => row.priority !== "low" || row.suggestedQuantity > 0);
+}
+
+function expiryActions(expiryRows = []) {
+  return expiryRows.map((row, index) => {
+    const risk = String(row.expiryRiskLevel || "medium").toLowerCase();
+    const priority = risk === "high" ? "high" : risk === "medium" ? "medium" : "low";
+
+    const type = normalizeActionType(row.suggestedAction);
+    const details =
+      row.daysToExpiry == null
+        ? "Expiry date unavailable. Review batch record."
+        : `${row.daysToExpiry} days to expiry, batch ${row.batchNumber || "-"}.`;
+
+    return {
+      id: `expiry-${row.id || `${row.drugName}-${index}`}`,
+      source: "expiry",
+      priority,
+      type,
+      action: row.suggestedAction || "Monitor Closely",
+      drugName: row.drugName,
+      details,
+      suggestedQuantity: Number(row.estimatedAtRiskQuantity || 0),
+    };
+  });
+}
+
+function transferActions(transferRows = []) {
+  return transferRows.map((row, index) => ({
+    id: `transfer-${row.drugName}-${row.fromBranch}-${row.toBranch}-${index}`,
+    source: "transfer",
+    priority: String(row.priority || "medium").toLowerCase(),
+    type: "Transfer",
+    action: "Review transfer suggestion",
+    drugName: row.drugName,
+    details: `${row.fromBranch} -> ${row.toBranch}`,
+    suggestedQuantity: Number(row.suggestedTransferQuantity || 0),
+  }));
+}
+
+export function buildPdssActionItems({
+  shortageRows = [],
+  expiryRows = [],
+  transferRows = [],
+}) {
+  const all = [
+    ...shortageActions(shortageRows),
+    ...expiryActions(expiryRows),
+    ...transferActions(transferRows),
+  ];
+
+  return all.sort((a, b) => {
+    const byPriority = priorityRank(a.priority) - priorityRank(b.priority);
+    if (byPriority !== 0) return byPriority;
+    return Number(b.suggestedQuantity || 0) - Number(a.suggestedQuantity || 0);
+  });
+}
+
+export function buildActionSummary(actions = []) {
+  return {
+    total: actions.length,
+    high: actions.filter((x) => x.priority === "high").length,
+    medium: actions.filter((x) => x.priority === "medium").length,
+    low: actions.filter((x) => x.priority === "low").length,
+  };
+}
+
+export function filterActionItems(actions = [], filterKey = "all") {
+  switch (filterKey) {
+    case "shortage":
+    case "expiry":
+    case "transfer":
+      return actions.filter((x) => x.source === filterKey);
+    case "high-priority":
+      return actions.filter((x) => x.priority === "high");
+    default:
+      return actions;
+  }
+}
+
+export function topUrgentActions(actions = [], limit = 5) {
+  return [...actions]
+    .sort((a, b) => {
+      const byPriority = priorityRank(a.priority) - priorityRank(b.priority);
+      if (byPriority !== 0) return byPriority;
+      return Number(b.suggestedQuantity || 0) - Number(a.suggestedQuantity || 0);
+    })
+    .slice(0, limit);
+}

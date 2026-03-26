@@ -1,15 +1,23 @@
 import { useState } from "react";
+import ActionCenter from "./ActionCenter";
 import ExecutiveDashboard from "./ExecutiveDashboard";
 import ExpiryIntelligence from "./ExpiryIntelligence";
 import ShortageIntelligence from "./ShortageIntelligence";
 import SmartTransfers from "./SmartTransfers";
 
-export default function PDSSWorkspace() {
-  const [activeView, setActiveView] = useState("executive-dashboard");
+export default function PDSSWorkspace({ initialView = "executive-dashboard" }) {
+  const [activeView, setActiveView] = useState(initialView);
 
   return (
     <div style={wrap}>
       <div style={tabBar}>
+        <button
+          type="button"
+          style={activeView === "action-center" ? activeTab : tab}
+          onClick={() => setActiveView("action-center")}
+        >
+          Action Center
+        </button>
         <button
           type="button"
           style={activeView === "executive-dashboard" ? activeTab : tab}
@@ -40,6 +48,7 @@ export default function PDSSWorkspace() {
         </button>
       </div>
 
+      {activeView === "action-center" ? <ActionCenter /> : null}
       {activeView === "executive-dashboard" ? <ExecutiveDashboard /> : null}
       {activeView === "expiry-intelligence" ? <ExpiryIntelligence /> : null}
       {activeView === "smart-transfers" ? <SmartTransfers /> : null}
