@@ -371,3 +371,168 @@ export function buildExecutiveNarrative(metrics) {
 
   return `Current portfolio risk is stable across ${trackedDrugs} tracked drugs, with no immediate internal transfer recommendations. Executive attention can remain focused on maintaining data quality and monitoring emerging medium-risk items before they escalate.`;
 }
+
+function daysUntil(dateValue) {
+  const date = toDate(dateValue);
+  if (!date) return null;
+
+  const now = new Date();
+  const ms = date.getTime() - now.getTime();
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+}
+
+function averageUsageByDrug(refills = []) {
+  const usageMap = new Map();
+
+  for (const row of refills) {
+    const key = normalizeDrugName(row.drug_name || row.drugName);
+    if (!key) continue;
+
+    const usage = toNumber(row.daily_usage ?? row.dailyUsage);
+    if (usage <= 0) continue;
+
+    if (!usageMap.has(key)) {
+      usageMap.set(key, {
+        total: 0,
+        count: 0,
+      });
+    }
+
+    const bucket = usageMap.get(key);
+    bucket.total += usage;
+    bucket.count += 1;
+  }
+
+  const result = new Map();
+  for (const [key, bucket] of usageMap.entries()) {
+    result.set(key, bucket.count > 0 ? bucket.total / bucket.count : 0);
+  }
+
+  return result;
+}
+
+function expiryRiskFromCoverage({ daysToExpiry, daysNeededToConsume, averageDailyUsage }) {
+  if (daysToExpiry == null) return "medium";
+  if (daysToExpiry <= 0) return "high";
+
+  if (averageDailyUsage <= 0) {
+    if (daysToExpiry <= 60) return "high";
+    if (daysToExpiry <= 120) return "medium";
+    return "low";
+  }
+
+  if (daysNeededToConsume > daysToExpiry) return "high";
+  if (daysNeededToConsume > daysToExpiry * 0.7) return "medium";
+  return "low";
+}
+
+function suggestedExpiryAction({ riskLevel, daysToExpiry, averageDailyUsage }) {
+  if (riskLevel === "high") {
+    if (daysToExpiry != null && daysToExpiry <= 30) return "Use Immediately";
+    return "Prioritize Dispensing";
+  }
+
+  if (riskLevel === "medium") {
+    if (averageDailyUsage <= 0) return "Monitor Closely";
+    return "Prioritize Dispensing";
+  }
+
+  if (daysToExpiry != null && daysToExpiry > 180) return "Reduce Next Order";
+  return "Monitor Closely";
+}
+
+export function calculateExpiryIntelligence({ expiryRecords = [], refills = [] }) {
+  const usageMap = averageUsageByDrug(refills);
+
+  return (expiryRecords || [])
+    .map((row, index) => {
+      const drugName = String(row.drug_name || row.drugName || "Unknown").trim() || "Unknown";
+      const batchNumber = String(row.batch_no || row.batchNo || "-").trim() || "-";
+      const quantity = Math.max(0, toNumber(row.quantity));
+      const expiryDate = row.expiry_date || row.expiryDate || "";
+      const daysToExpiry = daysUntil(expiryDate);
+
+      const usageKey = normalizeDrugName(drugName);
+      const averageDailyUsage = Number((usageMap.get(usageKey) || 0).toFixed(2));
+      const daysNeededToConsume =
+        averageDailyUsage > 0 ? Number((quantity / averageDailyUsage).toFixed(1)) : null;
+
+      const riskLevel = expiryRiskFromCoverage({
+        daysToExpiry,
+        daysNeededToConsume,
+        averageDailyUsage,
+      });
+
+      const suggestedAction = suggestedExpiryAction({
+        riskLevel,
+        daysToExpiry,
+        averageDailyUsage,
+      });
+
+      const estimatedAtRiskQuantity = (() => {
+        if (quantity <= 0) return 0;
+        if (daysToExpiry == null) return Math.ceil(quantity * 0.25);
+        if (daysToExpiry <= 0) return Math.ceil(quantity);
+        if (averageDailyUsage <= 0) return riskLevel === "high" ? Math.ceil(quantity) : Math.ceil(quantity * 0.3);
+
+        const expectedConsumption = averageDailyUsage * daysToExpiry;
+        return Math.max(0, Math.ceil(quantity - expectedConsumption));
+      })();
+
+      return {
+        id: row.id || `${drugName}-${batchNumber}-${index}`,
+        drugName,
+        batchNumber,
+        quantity: Math.round(quantity),
+        expiryDate,
+        daysToExpiry,
+        averageDailyUsage,
+        daysNeededToConsume,
+        expiryRiskLevel: riskLevel,
+        estimatedAtRiskQuantity,
+        suggestedAction,
+      };
+    })
+    .filter((row) => row.quantity > 0)
+    .sort((a, b) => {
+      const riskOrder = { high: 0, medium: 1, low: 2 };
+      const byRisk = riskOrder[a.expiryRiskLevel] - riskOrder[b.expiryRiskLevel];
+      if (byRisk !== 0) return byRisk;
+
+      const aDays = a.daysToExpiry == null ? Number.POSITIVE_INFINITY : a.daysToExpiry;
+      const bDays = b.daysToExpiry == null ? Number.POSITIVE_INFINITY : b.daysToExpiry;
+      return aDays - bDays;
+    });
+}
+
+export function buildExpiryMetrics(rows = []) {
+  return {
+    nearExpiryBatches: rows.filter((row) => row.daysToExpiry != null && row.daysToExpiry <= 90).length,
+    highExpiryRisk: rows.filter((row) => row.expiryRiskLevel === "high").length,
+    mediumExpiryRisk: rows.filter((row) => row.expiryRiskLevel === "medium").length,
+    lowExpiryRisk: rows.filter((row) => row.expiryRiskLevel === "low").length,
+    estimatedAtRiskQuantity: rows.reduce(
+      (sum, row) => sum + Number(row.estimatedAtRiskQuantity || 0),
+      0
+    ),
+  };
+}
+
+export function buildExpiryNarrative(metrics) {
+  const {
+    nearExpiryBatches = 0,
+    highExpiryRisk = 0,
+    mediumExpiryRisk = 0,
+    estimatedAtRiskQuantity = 0,
+  } = metrics || {};
+
+  if (nearExpiryBatches === 0) {
+    return "No near-expiry pressure is currently detected in the available inventory records. Continue routine monitoring and maintain refill usage quality to preserve forecasting confidence.";
+  }
+
+  if (highExpiryRisk > 0) {
+    return `The system has identified ${nearExpiryBatches} near-expiry batches, including ${highExpiryRisk} high-risk batches. Approximately ${estimatedAtRiskQuantity} units are exposed to expiry risk, so immediate dispensing prioritization is recommended for vulnerable items.`;
+  }
+
+  return `Expiry exposure is currently moderate with ${nearExpiryBatches} near-expiry batches and ${mediumExpiryRisk} medium-risk batches. Focus on controlled dispensing acceleration and procurement adjustment to reduce potential write-off volume.`;
+}
