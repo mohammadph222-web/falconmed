@@ -10,6 +10,7 @@ import Reports from "./Reports";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 import PurchaseRequests from "./PurchaseRequests";
+import NetworkIntelligence from "./modules/network/NetworkIntelligence";
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
@@ -19,6 +20,32 @@ export default function App() {
   if (showLanding) {
     return <LandingPage onAccess={() => setShowLanding(false)} />;
   }
+
+  const totalDrugsInDatabase = 22463;
+  const nearExpiryItems = 0;
+  const shortageRequestsToday = 0;
+  const activeSites = 0;
+  const activeUrgentActions = 0;
+
+  const computedRiskScore =
+    (Number(shortageRequestsToday) || 0) * 15 +
+    (Number(nearExpiryItems) || 0) * 10 +
+    (Number(activeUrgentActions) || 0) * 5;
+  const operationalRiskScore = Math.min(100, computedRiskScore);
+
+  const potentialWaste = (Number(nearExpiryItems) || 0) * 150;
+  const potentialSavings = (Number(shortageRequestsToday) || 0) * 200;
+  const financialImpact = potentialWaste + potentialSavings;
+
+  const riskLevel =
+    operationalRiskScore <= 30 ? "Low" : operationalRiskScore <= 60 ? "Medium" : "High";
+
+  const riskBadgeStyle =
+    riskLevel === "Low"
+      ? riskBadgeLow
+      : riskLevel === "Medium"
+        ? riskBadgeMedium
+        : riskBadgeHigh;
 
   const renderPage = () => {
     switch (page) {
@@ -76,35 +103,77 @@ export default function App() {
             <PurchaseRequests />
           </div>
         );
+      case "network":
+        return (
+          <div style={contentCard}>
+            <NetworkIntelligence />
+          </div>
+        );
       default:
         return (
           <>
             <div style={headerCard}>
               <h1 style={headerTitle}>FalconMed Dashboard</h1>
               <p style={headerText}>
-                Pharmacy Operations & Clinical Intelligence Platform
+                Operational intelligence for pharmacy decision-making.
               </p>
+            </div>
+
+            <div style={insightBox}>
+              22,463 formulary records are actively tracked. Current alerts show 0 near-expiry
+              items and 0 shortage requests today.
             </div>
 
             <div style={cardsGrid}>
               <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
                 <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
-                <div style={statValue}>22,463</div>
+                <div style={statValue}>{totalDrugsInDatabase.toLocaleString()}</div>
+                <div style={kpiHint}>Active formulary records across FalconMed.</div>
               </div>
 
               <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
                 <div style={statLabel}>NEAR EXPIRY ITEMS</div>
-                <div style={statValue}>0</div>
+                <div style={statValue}>{nearExpiryItems}</div>
+                <div style={kpiHint}>Items requiring near-term stock planning.</div>
               </div>
 
               <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
                 <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
-                <div style={statValue}>0</div>
+                <div style={statValue}>{shortageRequestsToday}</div>
+                <div style={kpiHint}>Current shortage pressure logged today.</div>
               </div>
 
               <div style={{ ...statCard, borderTop: "4px solid #10b981" }}>
                 <div style={statLabel}>ACTIVE SITES</div>
-                <div style={statValue}>0</div>
+                <div style={statValue}>{activeSites}</div>
+                <div style={kpiHint}>Sites currently contributing activity data.</div>
+              </div>
+
+              <div
+                style={{
+                  ...statCard,
+                  borderTop:
+                    riskLevel === "Low"
+                      ? "4px solid #16a34a"
+                      : riskLevel === "Medium"
+                        ? "4px solid #f59e0b"
+                        : "4px solid #ef4444",
+                }}
+              >
+                <div style={statLabel}>OPERATIONAL RISK SCORE</div>
+                <div style={statValue}>{operationalRiskScore} / 100</div>
+                <div style={riskBadgeStyle}>{riskLevel}</div>
+                <div style={riskHint}>Driven by shortage risk and urgent pharmacy actions.</div>
+              </div>
+
+              <div style={{ ...statCard, borderTop: "4px solid #0ea5e9" }}>
+                <div style={statLabel}>INVENTORY FINANCIAL IMPACT</div>
+                <div style={{ ...statValue, fontSize: "26px" }}>
+                  AED {financialImpact.toLocaleString()}
+                </div>
+                <div style={financialSubline}>
+                  Waste Risk AED {potentialWaste.toLocaleString()} | Savings Opportunity AED {potentialSavings.toLocaleString()}
+                </div>
               </div>
             </div>
 
@@ -173,7 +242,7 @@ export default function App() {
           </div>
 
           <div style={userCard}>
-            <div style={userLabel}>Demo Mode</div>
+            <div style={userLabel}>FalconMed Platform</div>
             <div style={userEmail}>falconmed.demo@preview</div>
           </div>
 
@@ -188,7 +257,7 @@ export default function App() {
             style={page === "drugsearch" ? activeBtn : btn}
             onClick={() => setPage("drugsearch")}
           >
-            Drug Search
+            Drug Intelligence
           </button>
 
           <button
@@ -209,14 +278,14 @@ export default function App() {
             style={page === "reports" ? activeBtn : btn}
             onClick={() => setPage("reports")}
           >
-            Reports
+            Analytics
           </button>
 
           <button
             style={page === "labels" ? activeBtn : btn}
             onClick={() => setPage("labels")}
           >
-            Label Builder
+            Labeling Suite
           </button>
 
           <button
@@ -249,9 +318,19 @@ export default function App() {
           >
             Purchase Requests
           </button>
+
+          <button
+            style={page === "network" ? activeBtn : btn}
+            onClick={() => setPage("network")}
+          >
+            Network Intelligence
+          </button>
         </div>
 
-        <div style={demoFooter}>Demo Preview</div>
+        <div style={demoFooter}>
+          <div>FalconMed v1.0</div>
+          <div>Build: Stable</div>
+        </div>
       </aside>
 
       <main style={main}>{renderPage()}</main>
@@ -340,33 +419,48 @@ const headerCard = {
   borderRadius: "16px",
   padding: "24px",
   boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "20px",
+  marginBottom: "32px",
   textAlign: "center",
 };
 
 const headerTitle = {
   margin: 0,
-  fontSize: "30px",
+  fontSize: "34px",
+  lineHeight: 1.2,
+  letterSpacing: "0.01em",
   color: "#0f172a",
 };
 
 const headerText = {
-  marginTop: "8px",
+  marginTop: "10px",
   color: "#475569",
-  fontSize: "18px",
+  fontSize: "16px",
+  lineHeight: 1.6,
+};
+
+const insightBox = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  marginBottom: "32px",
+  color: "#334155",
+  fontSize: "15px",
+  lineHeight: 1.6,
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
 };
 
 const cardsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "16px",
-  marginBottom: "20px",
+  marginBottom: "32px",
 };
 
 const statCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px 20px",
+  padding: "24px 20px",
   boxShadow: "0 4px 20px rgba(15, 23, 42, 0.08)",
   textAlign: "center",
 };
@@ -386,23 +480,82 @@ const statValue = {
   color: "#0f172a",
 };
 
+const kpiHint = {
+  marginTop: "10px",
+  fontSize: "12px",
+  color: "#64748b",
+  lineHeight: 1.5,
+};
+
+const riskBadgeBase = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  borderRadius: "999px",
+  padding: "4px 10px",
+  fontSize: "12px",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+  marginTop: "10px",
+};
+
+const riskBadgeLow = {
+  ...riskBadgeBase,
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #bbf7d0",
+};
+
+const riskBadgeMedium = {
+  ...riskBadgeBase,
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fde68a",
+};
+
+const riskBadgeHigh = {
+  ...riskBadgeBase,
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+};
+
+const riskHint = {
+  marginTop: "10px",
+  fontSize: "12px",
+  color: "#64748b",
+  lineHeight: 1.5,
+};
+
+const financialSubline = {
+  marginTop: "8px",
+  fontSize: "12px",
+  color: "#64748b",
+  lineHeight: 1.4,
+  fontWeight: 600,
+};
+
 const contentCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "22px",
+  padding: "24px",
   boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  marginBottom: "20px",
+  marginBottom: "28px",
 };
 
 const sectionTitle = {
   marginTop: 0,
+  marginBottom: "14px",
+  fontSize: "24px",
+  lineHeight: 1.3,
   color: "#0f172a",
   textAlign: "center",
 };
 
 const sectionText = {
   color: "#475569",
-  lineHeight: 1.7,
+  fontSize: "16px",
+  lineHeight: 1.6,
   textAlign: "center",
 };
 
@@ -447,6 +600,8 @@ const activityTitle = {
 
 const activityText = {
   color: "#64748b",
+  fontSize: "15px",
+  lineHeight: 1.6,
 };
 
 const demoFooter = {

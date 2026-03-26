@@ -42,6 +42,9 @@ export default function ActionCenter() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [prStatus, setPrStatus] = useState({});
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalRow, setModalRow] = useState(null);
+  const [orderQty, setOrderQty] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -114,26 +117,85 @@ export default function ActionCenter() {
   const summary = useMemo(() => buildActionSummary(actions), [actions]);
   const filtered = useMemo(() => filterActionItems(actions, filterKey), [actions, filterKey]);
 
-  const handleCreatePurchaseRequest = async (row) => {
-    if (!supabase) return;
-    setPrStatus((prev) => ({ ...prev, [row.id]: "creating" }));
+  const openModal = (row) => {
+    setModalRow(row);
+    setOrderQty(String(row.suggestedQuantity || 1));
+    setModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setModalOpen(false);
+    setModalRow(null);
+    setOrderQty("");
+  };
+
+  const handleCreatePurchaseRequest = async () => {
+    if (!supabase || !modalRow) return;
+    const drugName = modalRow.drugName || modalRow.drug_name || modalRow.drug || modalRow.name || "";
+    if (!drugName) return;
+    const qty = parseInt(orderQty, 10);
+    if (!qty || qty <= 0) return;
+    setPrStatus((prev) => ({ ...prev, [modalRow.id]: "creating" }));
     try {
       const { error } = await supabase.from("purchase_requests").insert([{
-        drug_name: row.drugName,
-        suggested_qty: row.suggestedQuantity || 0,
-        priority: row.priority || "medium",
-        reason: row.details || row.action || "",
+        drug_name: drugName,
+        suggested_qty: qty,
+        priority: modalRow.priority,
+        reason: modalRow.action || "",
         status: "pending",
       }]);
       if (error) throw error;
-      setPrStatus((prev) => ({ ...prev, [row.id]: "created" }));
+      setPrStatus((prev) => ({ ...prev, [modalRow.id]: "idle" }));
+      closeModal();
+      setMessage("Purchase request created successfully.");
     } catch (err) {
-      setPrStatus((prev) => ({ ...prev, [row.id]: "error" }));
+      setPrStatus((prev) => ({ ...prev, [modalRow.id]: "idle" }));
     }
   };
 
   return (
     <div style={wrap}>
+      {modalOpen && modalRow && (
+        <div style={modalOverlay}>
+          <div style={modalBox}>
+            <h3 style={modalTitle}>Create Purchase Request</h3>
+            <div style={modalField}>
+              <span style={modalLabel}>Drug Name</span>
+              <span style={modalValue}>
+                {modalRow.drugName || modalRow.drug_name || modalRow.drug || modalRow.name || "—"}
+              </span>
+            </div>
+            <div style={modalField}>
+              <span style={modalLabel}>Suggested Quantity</span>
+              <span style={modalValue}>{modalRow.suggestedQuantity || 0}</span>
+            </div>
+            <div style={modalField}>
+              <label style={modalLabel} htmlFor="order-qty">Order Quantity</label>
+              <input
+                id="order-qty"
+                type="number"
+                min="1"
+                style={modalInput}
+                value={orderQty}
+                onChange={(e) => setOrderQty(e.target.value)}
+              />
+            </div>
+            <div style={modalActions}>
+              <button type="button" style={cancelBtn} onClick={closeModal}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={confirmBtn}
+                disabled={prStatus[modalRow.id] === "creating" || !orderQty || parseInt(orderQty, 10) <= 0}
+                onClick={handleCreatePurchaseRequest}
+              >
+                {prStatus[modalRow.id] === "creating" ? "Creating..." : "Create Purchase Request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div style={headerCard}>
         <h2 style={title}>Action Center</h2>
         <p style={subtitle}>
@@ -185,7 +247,7 @@ export default function ActionCenter() {
                   <th style={th}>Drug Name</th>
                   <th style={th}>Details</th>
                   <th style={th}>Suggested Quantity</th>
-                  <th style={th}>Purchase Request</th>
+                  <th style={th}>Create PR</th>
                 </tr>
               </thead>
               <tbody>
@@ -202,20 +264,13 @@ export default function ActionCenter() {
                     <td style={td}>{row.details}</td>
                     <td style={td}>{row.suggestedQuantity || 0}</td>
                     <td style={td}>
-                      {prStatus[row.id] === "created" ? (
-                        <span style={prCreatedBadge}>✓ Created</span>
-                      ) : prStatus[row.id] === "error" ? (
-                        <span style={prErrorBadge}>Failed</span>
-                      ) : (
-                        <button
-                          type="button"
-                          style={prBtn}
-                          disabled={prStatus[row.id] === "creating"}
-                          onClick={() => handleCreatePurchaseRequest(row)}
-                        >
-                          {prStatus[row.id] === "creating" ? "Creating..." : "Create PR"}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        style={prBtn}
+                        onClick={() => openModal(row)}
+                      >
+                        Create PR
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -336,24 +391,88 @@ const prBtn = {
   whiteSpace: "nowrap",
 };
 
-const prCreatedBadge = {
-  display: "inline-flex",
-  padding: "4px 10px",
-  borderRadius: "999px",
-  background: "#dcfce7",
-  color: "#166534",
-  fontSize: "12px",
-  fontWeight: 700,
-  border: "1px solid #bbf7d0",
+const modalOverlay = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.45)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
 };
-
-const prErrorBadge = {
-  display: "inline-flex",
-  padding: "4px 10px",
-  borderRadius: "999px",
-  background: "#fee2e2",
-  color: "#991b1b",
-  fontSize: "12px",
+const modalBox = {
+  background: "white",
+  borderRadius: "16px",
+  padding: "28px 24px",
+  width: "100%",
+  maxWidth: "420px",
+  boxShadow: "0 20px 60px rgba(15, 23, 42, 0.18)",
+  border: "1px solid #e2e8f0",
+  display: "grid",
+  gap: "16px",
+};
+const modalTitle = {
+  margin: 0,
+  fontSize: "17px",
   fontWeight: 700,
-  border: "1px solid #fecaca",
+  color: "#0f172a",
+};
+const modalField = {
+  display: "flex",
+  flexDirection: "column",
+  gap: "6px",
+};
+const modalLabel = {
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  color: "#64748b",
+};
+const modalValue = {
+  fontSize: "14px",
+  fontWeight: 600,
+  color: "#0f172a",
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "8px",
+  padding: "8px 12px",
+};
+const modalInput = {
+  fontSize: "14px",
+  fontWeight: 600,
+  color: "#0f172a",
+  background: "white",
+  border: "1px solid #cbd5e1",
+  borderRadius: "8px",
+  padding: "8px 12px",
+  outline: "none",
+  width: "100%",
+  boxSizing: "border-box",
+};
+const modalActions = {
+  display: "flex",
+  gap: "10px",
+  justifyContent: "flex-end",
+  marginTop: "4px",
+};
+const cancelBtn = {
+  padding: "8px 16px",
+  background: "white",
+  color: "#334155",
+  border: "1px solid #cbd5e1",
+  borderRadius: "8px",
+  fontSize: "13px",
+  fontWeight: 600,
+  cursor: "pointer",
+};
+const confirmBtn = {
+  padding: "8px 16px",
+  background: "#2563eb",
+  color: "white",
+  border: "none",
+  borderRadius: "8px",
+  fontSize: "13px",
+  fontWeight: 700,
+  cursor: "pointer",
 };
