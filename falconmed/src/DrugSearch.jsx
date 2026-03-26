@@ -48,6 +48,7 @@ function getValue(row, possibleKeys) {
 export default function DrugSearch() {
   const [allDrugs, setAllDrugs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDrug, setSelectedDrug] = useState(null);
 
   const [search, setSearch] = useState("");
   const [brandFilter, setBrandFilter] = useState("");
@@ -328,7 +329,9 @@ export default function DrugSearch() {
                   <td style={td}>{drug.rx_otc || "-"}</td>
                   <td style={td}>{drug.public_price || "-"}</td>
                   <td style={td}>
-                    <button style={smallBtn}>View</button>
+                    <button style={smallBtn} onClick={() => setSelectedDrug(drug)}>
+                      View
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -344,6 +347,76 @@ export default function DrugSearch() {
           </table>
         </div>
       </div>
+
+      {selectedDrug ? (
+        <div style={modalOverlay} onClick={() => setSelectedDrug(null)}>
+          <div style={modalCard} onClick={(e) => e.stopPropagation()}>
+            <div style={modalHeader}>
+              <h3 style={modalTitle}>Drug Details</h3>
+              <button style={closeBtn} onClick={() => setSelectedDrug(null)}>
+                Close
+              </button>
+            </div>
+
+            <div style={detailsGrid}>
+              <div style={detailItem}>
+                <div style={detailLabel}>Brand</div>
+                <div style={detailValue}>{selectedDrug.brand || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Generic</div>
+                <div style={detailValue}>{selectedDrug.generic || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Strength</div>
+                <div style={detailValue}>{selectedDrug.strength || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Dosage Form</div>
+                <div style={detailValue}>{selectedDrug.dosage_form || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Drug Code</div>
+                <div style={detailValue}>{selectedDrug.drug_code || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Barcode</div>
+                <div style={detailValue}>{selectedDrug.barcode || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Rx / OTC</div>
+                <div style={detailValue}>{selectedDrug.rx_otc || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Public Price</div>
+                <div style={detailValue}>{selectedDrug.public_price || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>UPP Scope</div>
+                <div style={detailValue}>{selectedDrug.upp_scope || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Thiqa/ABM Coverage</div>
+                <div style={detailValue}>{selectedDrug.thiqa_abm || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Basic Coverage</div>
+                <div style={detailValue}>{selectedDrug.basic_coverage || "-"}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -475,4 +548,75 @@ const emptyCell = {
   padding: "24px",
   textAlign: "center",
   color: "#64748b",
+};
+
+const modalOverlay = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(15, 23, 42, 0.5)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "20px",
+  zIndex: 2000,
+};
+
+const modalCard = {
+  width: "100%",
+  maxWidth: "780px",
+  maxHeight: "85vh",
+  overflowY: "auto",
+  background: "white",
+  borderRadius: "16px",
+  padding: "20px",
+  boxShadow: "0 16px 40px rgba(15, 23, 42, 0.24)",
+};
+
+const modalHeader = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: "14px",
+};
+
+const modalTitle = {
+  margin: 0,
+  color: "#0f172a",
+  fontSize: "20px",
+};
+
+const closeBtn = {
+  border: "1px solid #cbd5e1",
+  background: "#f8fafc",
+  color: "#0f172a",
+  borderRadius: "8px",
+  padding: "8px 12px",
+  cursor: "pointer",
+  fontWeight: 600,
+};
+
+const detailsGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "10px",
+};
+
+const detailItem = {
+  border: "1px solid #e2e8f0",
+  borderRadius: "10px",
+  padding: "10px",
+  background: "#f8fafc",
+};
+
+const detailLabel = {
+  fontSize: "12px",
+  color: "#64748b",
+  marginBottom: "6px",
+  fontWeight: 700,
+};
+
+const detailValue = {
+  fontSize: "14px",
+  color: "#0f172a",
+  wordBreak: "break-word",
 };
