@@ -7,6 +7,7 @@ import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
+import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
@@ -58,6 +59,12 @@ export default function App() {
         return (
           <div style={contentCard}>
             <RefillTracker />
+          </div>
+        );
+      case "pdss":
+        return (
+          <div style={contentCard}>
+            <PDSSWorkspace />
           </div>
         );
       default:
@@ -206,6 +213,13 @@ export default function App() {
             onClick={() => setPage("refill")}
           >
             Refill Tracker
+          </button>
+
+          <button
+            style={page === "pdss" ? activeBtn : btn}
+            onClick={() => setPage("pdss")}
+          >
+            PDSS
           </button>
         </div>
 
