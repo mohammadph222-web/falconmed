@@ -1,1382 +1,1025 @@
-import { useEffect, useMemo, useState } from "react";
-import Papa from "papaparse";
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-import { resolvePharmacyUnitPrice } from "./utils/drugPricing";
-
-const sessionStatusStyles = {
-  open: { background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0" },
-  closed: { background: "#e2e8f0", color: "#334155", border: "1px solid #cbd5e1" },
-};
-
-const feedbackStyles = {
-  info: { background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe" },
-  success: { background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0" },
-  error: { background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca" },
-};
-
-const initialSessionForm = {
-  sessionName: "",
-  site: "",
-  notes: "",
-};
-
-function normalizeText(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function toNumber(value) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : 0;
-}
-
-function roundToTwo(value) {
-  return Math.round((toNumber(value) + Number.EPSILON) * 100) / 100;
-}
-
-function formatDateTime(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString();
-}
-
-function formatQuantity(value) {
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(toNumber(value));
-}
 
 function formatCurrency(value) {
-  return new Intl.NumberFormat("en-AE", {
-    style: "currency",
-    currency: "AED",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(toNumber(value));
+  const n = Number(value || 0);
+  return `AED ${n.toFixed(2)}`;
 }
 
-function buildDerivedItem(item, nextFields = {}) {
-  const nextItem = { ...item, ...nextFields };
-  const systemQty = toNumber(nextItem.system_qty);
-  const countedQty = toNumber(nextItem.counted_qty);
-  const unitPrice = toNumber(nextItem.unit_price);
-  const differenceQty = roundToTwo(countedQty - systemQty);
-  const valueDifference = roundToTwo(differenceQty * unitPrice);
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function deriveItem(item) {
+  const systemQty = Number(item.system_qty || 0);
+  const countedQty = Number(item.counted_qty || 0);
+  const unitPrice = Number(item.unit_price || 0);
+  const differenceQty = countedQty - systemQty;
+  const valueDifference = differenceQty * unitPrice;
 
   return {
-    ...nextItem,
+    ...item,
+    system_qty: systemQty,
     counted_qty: countedQty,
-    difference_qty: differenceQty,
     unit_price: unitPrice,
+    difference_qty: differenceQty,
     value_difference: valueDifference,
   };
 }
 
-function aggregateExpiryStock(records) {
-  const grouped = new Map();
+function downloadCsv(filename, rows) {
+  if (!rows || rows.length === 0) return;
 
-  for (const row of records || []) {
-    const drugName = String(row?.drug_name || "").trim();
-    if (!drugName) continue;
-
-    const key = normalizeText(drugName);
-    const quantity = toNumber(row?.quantity);
-
-    if (!grouped.has(key)) {
-      grouped.set(key, {
-        drug_name: drugName,
-        barcode: "",
-        system_qty: 0,
-      });
+  const headers = Object.keys(rows[0]);
+  const escapeCell = (value) => {
+    const str = String(value ?? "");
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
     }
+    return str;
+  };
 
-    const current = grouped.get(key);
-    current.system_qty = roundToTwo(current.system_qty + quantity);
-  }
+  const csv = [
+    headers.join(","),
+    ...rows.map((row) => headers.map((h) => escapeCell(row[h])).join(",")),
+  ].join("\n");
 
-  return Array.from(grouped.values()).sort((left, right) =>
-    left.drug_name.localeCompare(right.drug_name)
-  );
-}
-
-function getCsvValue(row, keys) {
-  const entries = Object.entries(row || {});
-
-  for (const key of keys) {
-    const normalizedKey = normalizeText(key).replace(/[_\s-]+/g, "");
-    const match = entries.find(([entryKey]) => {
-      const entryNormalized = normalizeText(entryKey).replace(/[_\s-]+/g, "");
-      return entryNormalized === normalizedKey;
-    });
-
-    if (match && match[1] !== undefined && match[1] !== null && String(match[1]).trim() !== "") {
-      return match[1];
-    }
-  }
-
-  return "";
-}
-
-async function insertInChunks(table, rows, chunkSize = 500) {
-  if (!supabase || !rows.length) return;
-
-  for (let index = 0; index < rows.length; index += chunkSize) {
-    const slice = rows.slice(index, index + chunkSize);
-    const { error } = await supabase.from(table).insert(slice);
-    if (error) throw error;
-  }
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function Stocktaking() {
   const [sessions, setSessions] = useState([]);
   const [selectedSessionId, setSelectedSessionId] = useState(null);
   const [sessionItems, setSessionItems] = useState([]);
-  const [dirtyItems, setDirtyItems] = useState({});
-  const [metricsRows, setMetricsRows] = useState([]);
-  const [feedback, setFeedback] = useState({ tone: "info", text: "" });
-  const [loadingSessions, setLoadingSessions] = useState(true);
-  const [loadingItems, setLoadingItems] = useState(false);
-  const [savingProgress, setSavingProgress] = useState(false);
-  const [creatingSession, setCreatingSession] = useState(false);
-  const [closingSession, setClosingSession] = useState(false);
-  const [importingFile, setImportingFile] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [feedback, setFeedback] = useState({ type: "", message: "" });
+
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [sessionForm, setSessionForm] = useState(initialSessionForm);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [filterKey, setFilterKey] = useState("all");
-  const [quickEntryTerm, setQuickEntryTerm] = useState("");
-  const [quickEntryQty, setQuickEntryQty] = useState("1");
+  const [newSessionName, setNewSessionName] = useState("");
+  const [newSite, setNewSite] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+
+  const [barcodeInput, setBarcodeInput] = useState("");
+  const [lastScanned, setLastScanned] = useState(null);
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
+
+  useEffect(() => {
+    if (selectedSessionId) {
+      loadSessionItems(selectedSessionId);
+    } else {
+      setSessionItems([]);
+    }
+  }, [selectedSessionId]);
 
   const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedSessionId) || null,
+    () => sessions.find((s) => s.id === selectedSessionId) || null,
     [sessions, selectedSessionId]
   );
 
-  const isClosedSession = selectedSession?.status === "closed";
-
-  const kpis = useMemo(() => {
-    const openSessions = sessions.filter((session) => session.status === "open").length;
-    const countedItems = metricsRows.filter((item) => toNumber(item.counted_qty) > 0).length;
-    const varianceItems = metricsRows.filter((item) => roundToTwo(item.difference_qty) !== 0).length;
-    const totalVarianceValue = metricsRows.reduce(
-      (total, item) => total + Math.abs(toNumber(item.value_difference)),
+  const summary = useMemo(() => {
+    const openSessions = sessions.filter((s) => s.status === "open").length;
+    const countedItems = sessionItems.filter((i) => Number(i.counted_qty || 0) > 0).length;
+    const varianceItems = sessionItems.filter((i) => Number(i.difference_qty || 0) !== 0).length;
+    const totalVarianceValue = sessionItems.reduce(
+      (sum, i) => sum + Number(i.value_difference || 0),
       0
     );
+    const negativeVarianceValue = sessionItems
+      .filter((i) => Number(i.value_difference || 0) < 0)
+      .reduce((sum, i) => sum + Number(i.value_difference || 0), 0);
+    const positiveVarianceValue = sessionItems
+      .filter((i) => Number(i.value_difference || 0) > 0)
+      .reduce((sum, i) => sum + Number(i.value_difference || 0), 0);
 
     return {
       openSessions,
       countedItems,
       varianceItems,
       totalVarianceValue,
+      negativeVarianceValue,
+      positiveVarianceValue,
     };
-  }, [metricsRows, sessions]);
+  }, [sessions, sessionItems]);
 
-  const varianceSummary = useMemo(() => {
-    return sessionItems.reduce(
-      (summary, item) => {
-        const value = toNumber(item.value_difference);
-        if (value > 0) summary.positive += value;
-        if (value < 0) summary.negative += value;
-        summary.net += value;
-        return summary;
-      },
-      { positive: 0, negative: 0, net: 0 }
-    );
-  }, [sessionItems]);
-
-  const filteredItems = useMemo(() => {
-    const query = normalizeText(searchTerm);
-
-    return sessionItems.filter((item) => {
-      if (filterKey === "variance" && roundToTwo(item.difference_qty) === 0) return false;
-      if (filterKey === "negative" && toNumber(item.difference_qty) >= 0) return false;
-      if (filterKey === "positive" && toNumber(item.difference_qty) <= 0) return false;
-
-      if (!query) return true;
-
-      const matchesDrug = normalizeText(item.drug_name).includes(query);
-      const matchesBarcode = normalizeText(item.barcode).includes(query);
-      return matchesDrug || matchesBarcode;
-    });
-  }, [filterKey, searchTerm, sessionItems]);
-
-  useEffect(() => {
-    void refreshDashboard();
-  }, []);
-
-  useEffect(() => {
-    if (!selectedSessionId) {
-      setSessionItems([]);
-      setDirtyItems({});
-      return;
-    }
-
-    void loadSessionItems(selectedSessionId);
-  }, [selectedSessionId]);
-
-  async function refreshDashboard(preferredSessionId = null) {
-    await Promise.all([loadSessions(preferredSessionId), loadMetrics()]);
-  }
-
-  async function loadSessions(preferredSessionId = null) {
-    if (!supabase) {
-      setSessions([]);
-      setSelectedSessionId(null);
-      setLoadingSessions(false);
-      setFeedback({
-        tone: "error",
-        text: "Supabase is not configured. Stocktaking is available after the environment is connected.",
-      });
-      return;
-    }
-
-    setLoadingSessions(true);
+  async function loadSessions() {
+    setLoading(true);
+    setFeedback({ type: "", message: "" });
 
     const { data, error } = await supabase
       .from("stocktaking_sessions")
-      .select("id,session_name,site,status,notes,created_at,closed_at")
-      .order("created_at", { ascending: false })
-      .limit(200);
-
-    setLoadingSessions(false);
+      .select("*")
+      .order("created_at", { ascending: false });
 
     if (error) {
-      setSessions([]);
-      setSelectedSessionId(null);
-      setFeedback({
-        tone: "error",
-        text: "Stocktaking tables are not available yet. Run the SQL setup, then reload this module.",
-      });
+      setFeedback({ type: "error", message: error.message });
+      setLoading(false);
       return;
     }
 
-    const rows = data || [];
-    setSessions(rows);
-    setSelectedSessionId((current) => {
-      const desiredId = preferredSessionId || current;
-      if (desiredId && rows.some((session) => session.id === desiredId)) {
-        return desiredId;
-      }
-      return rows[0]?.id || null;
-    });
-  }
+    setSessions(data || []);
 
-  async function loadMetrics() {
-    if (!supabase) {
-      setMetricsRows([]);
-      return;
+    if (!selectedSessionId && data && data.length > 0) {
+      setSelectedSessionId(data[0].id);
     }
 
-    const { data, error } = await supabase
-      .from("stocktaking_items")
-      .select("counted_qty,difference_qty,value_difference")
-      .limit(10000);
-
-    if (error) {
-      setMetricsRows([]);
-      return;
-    }
-
-    setMetricsRows(data || []);
+    setLoading(false);
   }
 
   async function loadSessionItems(sessionId) {
-    if (!supabase || !sessionId) {
-      setSessionItems([]);
-      setDirtyItems({});
-      return;
-    }
-
-    setLoadingItems(true);
+    setLoading(true);
 
     const { data, error } = await supabase
       .from("stocktaking_items")
-      .select(
-        "id,session_id,drug_name,barcode,system_qty,counted_qty,difference_qty,unit_price,value_difference,created_at"
-      )
+      .select("*")
       .eq("session_id", sessionId)
-      .order("drug_name", { ascending: true })
-      .limit(10000);
-
-    setLoadingItems(false);
+      .order("drug_name", { ascending: true });
 
     if (error) {
-      setSessionItems([]);
-      setDirtyItems({});
-      setFeedback({
-        tone: "error",
-        text: "Could not load stocktaking items for the selected session.",
-      });
+      setFeedback({ type: "error", message: error.message });
+      setLoading(false);
       return;
     }
 
-    const rows = (data || []).map((item) => buildDerivedItem(item));
-    setSessionItems(rows);
-    setDirtyItems({});
+    setSessionItems((data || []).map(deriveItem));
+    setLoading(false);
   }
 
-  function updateItem(itemId, nextFields) {
-    setSessionItems((current) =>
-      current.map((item) => (item.id === itemId ? buildDerivedItem(item, nextFields) : item))
-    );
-    setDirtyItems((current) => ({ ...current, [itemId]: true }));
-  }
+  async function createSession() {
+    if (!newSessionName.trim()) {
+      setFeedback({ type: "error", message: "Please enter a session name." });
+      return;
+    }
 
-  function resetCreateModal() {
-    setSessionForm(initialSessionForm);
-    setShowCreateModal(false);
-  }
+    setLoading(true);
+    setFeedback({ type: "", message: "" });
 
-  async function handleCreateSession(event) {
-    event.preventDefault();
+    const payload = {
+      session_name: newSessionName.trim(),
+      site: newSite.trim() || null,
+      notes: newNotes.trim() || null,
+      status: "open",
+      created_at: nowIso(),
+      updated_at: nowIso(),
+    };
 
-    const sessionName = sessionForm.sessionName.trim();
-    if (!sessionName || !supabase) return;
+    const { data: sessionData, error: sessionError } = await supabase
+      .from("stocktaking_sessions")
+      .insert([payload])
+      .select()
+      .single();
 
-    setCreatingSession(true);
+    if (sessionError) {
+      setFeedback({ type: "error", message: sessionError.message });
+      setLoading(false);
+      return;
+    }
 
-    let createdSession = null;
+    const sessionId = sessionData.id;
 
-    try {
-      const { data: sessionRow, error: sessionError } = await supabase
-        .from("stocktaking_sessions")
-        .insert([
-          {
-            session_name: sessionName,
-            site: sessionForm.site.trim() || null,
-            status: "open",
-            notes: sessionForm.notes.trim() || null,
-          },
-        ])
-        .select("id,session_name,site,status,notes,created_at,closed_at")
-        .single();
+    let expiryRows = null;
+    let expiryError = null;
 
-      if (sessionError) throw sessionError;
-      createdSession = sessionRow;
+    const barcodeAttempt = await supabase
+      .from("expiry_records")
+      .select("drug_name, quantity, batch_no, expiry_date, barcode");
 
-      const { data: stockRows, error: stockError } = await supabase
+    if (barcodeAttempt.error) {
+      const fallbackAttempt = await supabase
         .from("expiry_records")
-        .select("drug_name,quantity,batch_no,expiry_date")
-        .limit(10000);
+        .select("drug_name, quantity, batch_no, expiry_date");
 
-      if (stockError) throw stockError;
-
-      const aggregatedStock = aggregateExpiryStock(stockRows || []);
-      const itemsToInsert = aggregatedStock.map((item) => ({
-        session_id: createdSession.id,
-        drug_name: item.drug_name,
-        barcode: item.barcode,
-        system_qty: item.system_qty,
-        counted_qty: 0,
-        difference_qty: 0,
-        unit_price: roundToTwo(resolvePharmacyUnitPrice(item.drug_name) ?? 0),
-        value_difference: 0,
-      }));
-
-      await insertInChunks("stocktaking_items", itemsToInsert, 500);
-
-      await refreshDashboard(createdSession.id);
-      setSelectedSessionId(createdSession.id);
-      resetCreateModal();
-      setFeedback({
-        tone: "success",
-        text: `Stocktaking session created successfully with ${itemsToInsert.length} snapshot items.`,
-      });
-    } catch (error) {
-      if (createdSession?.id && supabase) {
-        await supabase.from("stocktaking_sessions").delete().eq("id", createdSession.id);
-      }
-      setFeedback({
-        tone: "error",
-        text: error?.message || "Could not create the stocktaking session.",
-      });
-    } finally {
-      setCreatingSession(false);
-    }
-  }
-
-  async function saveProgress(options = {}) {
-    if (!supabase || !selectedSessionId) return false;
-
-    const dirtyIds = Object.keys(dirtyItems).filter(Boolean);
-    if (dirtyIds.length === 0) {
-      if (!options.silent) {
-        setFeedback({ tone: "success", text: "No unsaved stocktaking changes found." });
-      }
-      return true;
+      expiryRows = fallbackAttempt.data || [];
+      expiryError = fallbackAttempt.error || null;
+    } else {
+      expiryRows = barcodeAttempt.data || [];
+      expiryError = null;
     }
 
-    setSavingProgress(true);
-
-    try {
-      const payload = sessionItems
-        .filter((item) => dirtyItems[item.id])
-        .map((item) => ({
-          id: item.id,
-          session_id: item.session_id,
-          drug_name: item.drug_name,
-          barcode: item.barcode || null,
-          system_qty: roundToTwo(item.system_qty),
-          counted_qty: roundToTwo(item.counted_qty),
-          difference_qty: roundToTwo(item.difference_qty),
-          unit_price: roundToTwo(item.unit_price),
-          value_difference: roundToTwo(item.value_difference),
-        }));
-
-      for (let index = 0; index < payload.length; index += 300) {
-        const slice = payload.slice(index, index + 300);
-        const { error } = await supabase
-          .from("stocktaking_items")
-          .upsert(slice, { onConflict: "id" });
-        if (error) throw error;
-      }
-
-      setDirtyItems({});
-      await loadMetrics();
-
-      if (!options.silent) {
-        setFeedback({ tone: "success", text: "Stocktaking progress saved." });
-      }
-
-      return true;
-    } catch (error) {
+    if (expiryError) {
       setFeedback({
-        tone: "error",
-        text: error?.message || "Could not save stocktaking progress.",
+        type: "error",
+        message: `Session created, but snapshot failed: ${expiryError.message}`,
       });
-      return false;
-    } finally {
-      setSavingProgress(false);
-    }
-  }
-
-  async function handleCloseSession() {
-    if (!supabase || !selectedSession || selectedSession.status === "closed") return;
-
-    setClosingSession(true);
-
-    try {
-      const saved = await saveProgress({ silent: true });
-      if (!saved) return;
-
-      const closedAt = new Date().toISOString();
-      const { error } = await supabase
-        .from("stocktaking_sessions")
-        .update({ status: "closed", closed_at: closedAt })
-        .eq("id", selectedSession.id);
-
-      if (error) throw error;
-
-      setSessions((current) =>
-        current.map((session) =>
-          session.id === selectedSession.id
-            ? { ...session, status: "closed", closed_at: closedAt }
-            : session
-        )
-      );
-      setFeedback({ tone: "success", text: "Stocktaking session closed successfully." });
-      await loadMetrics();
-    } catch (error) {
-      setFeedback({
-        tone: "error",
-        text: error?.message || "Could not close the stocktaking session.",
-      });
-    } finally {
-      setClosingSession(false);
-    }
-  }
-
-  function handleQuickEntryApply() {
-    const query = normalizeText(quickEntryTerm);
-    const nextQty = roundToTwo(quickEntryQty);
-
-    if (!query || nextQty < 0) {
-      setFeedback({ tone: "error", text: "Enter a drug name or barcode and a valid counted quantity." });
+      setLoading(false);
+      await loadSessions();
+      setSelectedSessionId(sessionId);
       return;
     }
 
-    const barcodeMatch = sessionItems.find((item) => normalizeText(item.barcode) === query);
-    const drugMatch = sessionItems.find((item) => normalizeText(item.drug_name) === query);
-    const matchedItem = barcodeMatch || drugMatch;
+    const grouped = {};
+    for (const row of expiryRows) {
+      const drugName = String(row.drug_name || "").trim();
+      if (!drugName) continue;
 
-    if (!matchedItem) {
-      setFeedback({ tone: "error", text: "No stocktaking item matched that barcode or drug name." });
-      return;
+      if (!grouped[drugName]) {
+        grouped[drugName] = {
+          session_id: sessionId,
+          drug_name: drugName,
+          barcode: row.barcode ?? null,
+          batch_no: row.batch_no ?? null,
+          expiry_date: row.expiry_date ?? null,
+          system_qty: 0,
+          counted_qty: 0,
+          unit_price: 0,
+          difference_qty: 0,
+          value_difference: 0,
+          counted_at: null,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        };
+      }
+
+      grouped[drugName].system_qty += Number(row.quantity || 0);
+
+      if (!grouped[drugName].barcode && row.barcode) {
+        grouped[drugName].barcode = row.barcode;
+      }
+      if (!grouped[drugName].batch_no && row.batch_no) {
+        grouped[drugName].batch_no = row.batch_no;
+      }
+      if (!grouped[drugName].expiry_date && row.expiry_date) {
+        grouped[drugName].expiry_date = row.expiry_date;
+      }
     }
 
-    updateItem(matchedItem.id, { counted_qty: nextQty });
-    setSearchTerm(matchedItem.drug_name);
-    setFeedback({
-      tone: "success",
-      text: `Count updated for ${matchedItem.drug_name}. Save progress when ready.`,
-    });
-  }
+    const snapshotItems = Object.values(grouped).map(deriveItem);
 
-  function handleImportFile(event) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    if (snapshotItems.length > 0) {
+      const { error: itemsError } = await supabase
+        .from("stocktaking_items")
+        .insert(snapshotItems);
 
-    setImportingFile(true);
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = Array.isArray(results.data) ? results.data : [];
-        let matchedCount = 0;
-
-        const nextItems = sessionItems.map((item) => ({ ...item }));
-        const nextDirty = { ...dirtyItems };
-
-        for (const row of rows) {
-          const barcode = String(getCsvValue(row, ["barcode", "bar code", "ean", "code"]) || "").trim();
-          const drugName = String(getCsvValue(row, ["drug_name", "drug name", "name", "item"]) || "").trim();
-          const countedQtyRaw = getCsvValue(row, ["counted_qty", "counted qty", "quantity", "qty"]);
-          const countedQty = roundToTwo(countedQtyRaw);
-
-          const indexByBarcode = barcode
-            ? nextItems.findIndex((item) => normalizeText(item.barcode) === normalizeText(barcode))
-            : -1;
-          const indexByDrug = drugName
-            ? nextItems.findIndex((item) => normalizeText(item.drug_name) === normalizeText(drugName))
-            : -1;
-          const matchedIndex = indexByBarcode >= 0 ? indexByBarcode : indexByDrug;
-
-          if (matchedIndex < 0) continue;
-
-          const matchedItem = nextItems[matchedIndex];
-          nextItems[matchedIndex] = buildDerivedItem(matchedItem, {
-            barcode: barcode || matchedItem.barcode,
-            counted_qty: countedQty,
-          });
-          nextDirty[matchedItem.id] = true;
-          matchedCount += 1;
-        }
-
-        setSessionItems(nextItems);
-        setDirtyItems(nextDirty);
-        setImportingFile(false);
-        event.target.value = "";
-
-        if (matchedCount === 0) {
-          setFeedback({
-            tone: "error",
-            text: "CSV import completed, but no rows matched by barcode or drug name.",
-          });
-          return;
-        }
-
+      if (itemsError) {
         setFeedback({
-          tone: "success",
-          text: `CSV import updated ${matchedCount} stocktaking item${matchedCount === 1 ? "" : "s"}. Save progress when ready.`,
+          type: "error",
+          message: `Session created, but snapshot items failed: ${itemsError.message}`,
         });
-      },
-      error: (error) => {
-        setImportingFile(false);
-        event.target.value = "";
-        setFeedback({ tone: "error", text: error?.message || "Could not import the CSV file." });
-      },
+        setLoading(false);
+        await loadSessions();
+        setSelectedSessionId(sessionId);
+        return;
+      }
+    }
+
+    setShowCreateModal(false);
+    setNewSessionName("");
+    setNewSite("");
+    setNewNotes("");
+    setSelectedSessionId(sessionId);
+
+    await loadSessions();
+    await loadSessionItems(sessionId);
+
+    setFeedback({
+      type: "success",
+      message: `Stocktaking session created successfully with ${snapshotItems.length} snapshot items.`,
     });
+
+    setLoading(false);
+  }
+
+  function updateLocalItem(itemId, newCountedQty) {
+    setSessionItems((prev) =>
+      prev.map((item) =>
+        item.id === itemId
+          ? deriveItem({
+              ...item,
+              counted_qty: Number(newCountedQty || 0),
+              counted_at: nowIso(),
+              updated_at: nowIso(),
+            })
+          : item
+      )
+    );
+  }
+
+  async function saveProgress() {
+    if (!selectedSession) {
+      setFeedback({ type: "error", message: "Please select a session first." });
+      return;
+    }
+
+    setLoading(true);
+
+    for (const item of sessionItems) {
+      const payload = {
+        counted_qty: Number(item.counted_qty || 0),
+        difference_qty: Number(item.difference_qty || 0),
+        value_difference: Number(item.value_difference || 0),
+        counted_at: item.counted_at || null,
+        updated_at: nowIso(),
+      };
+
+      const { error } = await supabase
+        .from("stocktaking_items")
+        .update(payload)
+        .eq("id", item.id);
+
+      if (error) {
+        setFeedback({ type: "error", message: error.message });
+        setLoading(false);
+        return;
+      }
+    }
+
+    await supabase
+      .from("stocktaking_sessions")
+      .update({ updated_at: nowIso() })
+      .eq("id", selectedSession.id);
+
+    setFeedback({ type: "success", message: "Progress saved successfully." });
+    setLoading(false);
+  }
+
+  async function closeSession() {
+    if (!selectedSession) {
+      setFeedback({ type: "error", message: "Please select a session first." });
+      return;
+    }
+
+    if (selectedSession.status === "closed") {
+      setFeedback({ type: "error", message: "This session is already closed." });
+      return;
+    }
+
+    const ok = window.confirm("Are you sure you want to close this session?");
+    if (!ok) return;
+
+    setLoading(true);
+
+    const { error } = await supabase
+      .from("stocktaking_sessions")
+      .update({
+        status: "closed",
+        closed_at: nowIso(),
+        updated_at: nowIso(),
+      })
+      .eq("id", selectedSession.id);
+
+    if (error) {
+      setFeedback({ type: "error", message: error.message });
+      setLoading(false);
+      return;
+    }
+
+    await loadSessions();
+    setFeedback({ type: "success", message: "Session closed successfully." });
+    setLoading(false);
   }
 
   function exportVarianceReport() {
-    if (!selectedSession || sessionItems.length === 0) return;
+    if (!selectedSession || sessionItems.length === 0) {
+      setFeedback({ type: "error", message: "No session data available to export." });
+      return;
+    }
 
-    const csv = Papa.unparse(
-      sessionItems.map((item) => ({
-        drug_name: item.drug_name,
-        barcode: item.barcode || "",
-        system_qty: roundToTwo(item.system_qty),
-        counted_qty: roundToTwo(item.counted_qty),
-        difference_qty: roundToTwo(item.difference_qty),
-        unit_price: roundToTwo(item.unit_price),
-        value_difference: roundToTwo(item.value_difference),
-      }))
-    );
+    const rows = sessionItems.map((item) => ({
+      session_name: selectedSession.session_name,
+      site: selectedSession.site || "",
+      drug_name: item.drug_name,
+      barcode: item.barcode || "",
+      batch_no: item.batch_no || "",
+      expiry_date: item.expiry_date || "",
+      system_qty: item.system_qty,
+      counted_qty: item.counted_qty,
+      difference_qty: item.difference_qty,
+      unit_price: item.unit_price,
+      value_difference: item.value_difference,
+      counted_at: item.counted_at || "",
+    }));
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${selectedSession.session_name.replace(/[^a-z0-9-_]+/gi, "-") || "stocktaking"}-variance-report.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    const safeName = selectedSession.session_name.replace(/[^a-z0-9]/gi, "_").toLowerCase();
+    downloadCsv(`stocktaking_variance_${safeName}.csv`, rows);
+    setFeedback({ type: "success", message: "Variance report exported." });
   }
 
+  async function handleBarcodeKeyDown(event) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+
+    if (!selectedSession) {
+      setFeedback({ type: "error", message: "Please select a session first." });
+      return;
+    }
+
+    if (selectedSession.status === "closed") {
+      setFeedback({ type: "error", message: "Session is closed, scanning is disabled." });
+      return;
+    }
+
+    const scanned = barcodeInput.trim();
+    if (!scanned) return;
+
+    const matched = sessionItems.find(
+      (item) =>
+        String(item.barcode || "").trim() !== "" &&
+        String(item.barcode).trim() === scanned
+    );
+
+    if (!matched) {
+      setLastScanned(null);
+      setFeedback({
+        type: "error",
+        message: "Barcode not found in this stocktaking session",
+      });
+      setBarcodeInput("");
+      return;
+    }
+
+    const newCount = Number(matched.counted_qty || 0) + 1;
+    const updated = deriveItem({
+      ...matched,
+      counted_qty: newCount,
+      counted_at: nowIso(),
+      updated_at: nowIso(),
+    });
+
+    const { error } = await supabase
+      .from("stocktaking_items")
+      .update({
+        counted_qty: updated.counted_qty,
+        difference_qty: updated.difference_qty,
+        value_difference: updated.value_difference,
+        counted_at: updated.counted_at,
+        updated_at: updated.updated_at,
+      })
+      .eq("id", matched.id);
+
+    if (error) {
+      setFeedback({ type: "error", message: error.message });
+      setBarcodeInput("");
+      return;
+    }
+
+    setSessionItems((prev) =>
+      prev.map((item) => (item.id === matched.id ? updated : item))
+    );
+
+    setLastScanned({
+      drug_name: updated.drug_name,
+      barcode: updated.barcode,
+      counted_qty: updated.counted_qty,
+    });
+
+    setFeedback({
+      type: "success",
+      message: `Scanned successfully: ${updated.drug_name} | Counted Qty: ${updated.counted_qty}`,
+    });
+
+    setBarcodeInput("");
+  }
+
+  const feedbackStyle =
+    feedback.type === "error"
+      ? {
+          background: "#fde7e7",
+          color: "#b42318",
+          border: "1px solid #f3b4b4",
+        }
+      : feedback.type === "success"
+      ? {
+          background: "#e8f8ec",
+          color: "#137333",
+          border: "1px solid #b7e1c0",
+        }
+      : {};
+
   return (
-    <div style={wrap}>
-      <div style={headerCard}>
-        <div>
-          <h2 style={title}>Stocktaking Sessions</h2>
-          <p style={subtitle}>
-            Create controlled stocktaking snapshots, record counted quantities, and review variances without adjusting stock in v1.
-          </p>
+    <div style={{ padding: 28 }}>
+      <div
+        style={{
+          background: "#fff",
+          border: "1px solid #dbe3ee",
+          borderRadius: 24,
+          padding: 28,
+          boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
+        }}
+      >
+        <div style={{ textAlign: "center", marginBottom: 12 }}>
+          <h1 style={{ margin: 0, fontSize: 28, color: "#0f172a" }}>Stocktaking Sessions</h1>
         </div>
-        <button type="button" style={primaryBtn} onClick={() => setShowCreateModal(true)}>
+
+        <p
+          style={{
+            textAlign: "center",
+            color: "#475569",
+            fontSize: 16,
+            marginTop: 0,
+            marginBottom: 24,
+          }}
+        >
+          Create controlled stocktaking snapshots, record counted quantities, and review variances without adjusting stock in v1.
+        </p>
+
+        <button
+          onClick={() => setShowCreateModal(true)}
+          style={{
+            background: "#2563eb",
+            color: "#fff",
+            border: "none",
+            borderRadius: 12,
+            padding: "14px 22px",
+            fontWeight: 700,
+            cursor: "pointer",
+            marginBottom: 18,
+          }}
+        >
           Start New Session
         </button>
-      </div>
 
-      {feedback.text ? (
-        <div style={{ ...messageBox, ...(feedbackStyles[feedback.tone] || feedbackStyles.info) }}>
-          {feedback.text}
-        </div>
-      ) : null}
+        {feedback.message ? (
+          <div
+            style={{
+              ...feedbackStyle,
+              borderRadius: 14,
+              padding: "14px 18px",
+              marginBottom: 20,
+              textAlign: "center",
+              fontWeight: 600,
+            }}
+          >
+            {feedback.message}
+          </div>
+        ) : null}
 
-      <div style={statsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Open Sessions</div>
-          <div style={statValue}>{kpis.openSessions}</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: 16,
+            marginBottom: 20,
+          }}
+        >
+          <MetricCard label="OPEN SESSIONS" value={summary.openSessions} />
+          <MetricCard label="COUNTED ITEMS" value={summary.countedItems} />
+          <MetricCard label="VARIANCE ITEMS" value={summary.varianceItems} />
+          <MetricCard label="TOTAL VARIANCE VALUE" value={formatCurrency(summary.totalVarianceValue)} />
         </div>
-        <div style={statCard}>
-          <div style={statLabel}>Counted Items</div>
-          <div style={statValue}>{kpis.countedItems}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Variance Items</div>
-          <div style={statValue}>{kpis.varianceItems}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Total Variance Value</div>
-          <div style={{ ...statValue, fontSize: "24px" }}>{formatCurrency(kpis.totalVarianceValue)}</div>
-        </div>
-      </div>
 
-      <div style={splitGrid}>
-        <div style={panelCard}>
-          <div style={panelHeader}>
-            <h3 style={sectionTitle}>Sessions</h3>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "360px 1fr",
+            gap: 20,
+            alignItems: "start",
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #dbe3ee",
+              borderRadius: 20,
+              padding: 22,
+              minHeight: 420,
+            }}
+          >
+            <h2 style={{ marginTop: 0, color: "#0f172a" }}>Sessions</h2>
+
+            {sessions.length === 0 ? (
+              <div
+                style={{
+                  border: "1px dashed #cbd5e1",
+                  borderRadius: 18,
+                  padding: 28,
+                  textAlign: "center",
+                  color: "#64748b",
+                  lineHeight: 1.6,
+                }}
+              >
+                No stocktaking sessions yet. Create the first session to capture a system stock snapshot.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 12 }}>
+                {sessions.map((session) => {
+                  const active = session.id === selectedSessionId;
+                  return (
+                    <button
+                      key={session.id}
+                      onClick={() => setSelectedSessionId(session.id)}
+                      style={{
+                        textAlign: "left",
+                        border: active ? "2px solid #2563eb" : "1px solid #dbe3ee",
+                        background: active ? "#eff6ff" : "#fff",
+                        borderRadius: 16,
+                        padding: 14,
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>
+                        {session.session_name}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 4 }}>
+                        Site: {session.site || session.location_name || "-"}
+                      </div>
+                      <div style={{ fontSize: 13, color: "#64748b", marginBottom: 8 }}>
+                        Status:{" "}
+                        <span
+                          style={{
+                            color: session.status === "open" ? "#137333" : "#b42318",
+                            fontWeight: 700,
+                          }}
+                        >
+                          {session.status}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                        {session.created_at ? new Date(session.created_at).toLocaleString() : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
-          {loadingSessions ? (
-            <div style={emptyState}>Loading stocktaking sessions...</div>
-          ) : sessions.length === 0 ? (
-            <div style={emptyState}>No stocktaking sessions yet. Create the first session to capture a system stock snapshot.</div>
-          ) : (
-            <div style={tableWrap}>
-              <table style={table}>
-                <thead>
-                  <tr>
-                    <th style={th}>Session Name</th>
-                    <th style={th}>Site</th>
-                    <th style={th}>Status</th>
-                    <th style={th}>Created At</th>
-                    <th style={th}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((session) => {
-                    const statusStyle =
-                      sessionStatusStyles[session.status] || sessionStatusStyles.closed;
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid #dbe3ee",
+              borderRadius: 20,
+              padding: 22,
+              minHeight: 420,
+            }}
+          >
+            <h2 style={{ marginTop: 0, color: "#0f172a" }}>Session Workspace</h2>
 
-                    return (
-                      <tr
-                        key={session.id}
-                        style={
-                          session.id === selectedSessionId
-                            ? { background: "#eff6ff" }
-                            : undefined
-                        }
-                      >
-                        <td style={tdStrong}>{session.session_name}</td>
-                        <td style={td}>{session.site || "—"}</td>
-                        <td style={td}>
-                          <span style={{ ...statusBadge, ...statusStyle }}>
-                            {String(session.status || "open").toUpperCase()}
-                          </span>
-                        </td>
-                        <td style={td}>{formatDateTime(session.created_at)}</td>
-                        <td style={td}>
-                          <button
-                            type="button"
-                            style={secondaryBtn}
-                            onClick={() => setSelectedSessionId(session.id)}
-                          >
-                            {session.id === selectedSessionId ? "Open" : "View"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div style={panelCard}>
-          <div style={panelHeaderStack}>
-            <div>
-              <h3 style={sectionTitle}>Session Workspace</h3>
-              <p style={sectionText}>
-                {selectedSession
-                  ? `${selectedSession.session_name}${selectedSession.site ? ` • ${selectedSession.site}` : ""}`
-                  : "Select a session to start counting."}
-              </p>
-            </div>
-
-            <div style={panelActions}>
-              <button
-                type="button"
-                style={secondaryBtn}
-                onClick={exportVarianceReport}
-                disabled={!selectedSession || sessionItems.length === 0}
-              >
-                Export Variance Report
-              </button>
-              <button
-                type="button"
-                style={secondaryBtn}
-                onClick={() => void saveProgress()}
-                disabled={!selectedSession || isClosedSession || savingProgress}
-              >
-                {savingProgress ? "Saving..." : "Save Progress"}
-              </button>
-              <button
-                type="button"
-                style={dangerBtn}
-                onClick={() => void handleCloseSession()}
-                disabled={!selectedSession || isClosedSession || closingSession}
-              >
-                {isClosedSession ? "Session Closed" : closingSession ? "Closing..." : "Close Session"}
-              </button>
-            </div>
-          </div>
-
-          {!selectedSession ? (
-            <div style={emptyState}>No session selected.</div>
-          ) : (
-            <>
-              <div style={summaryGrid}>
-                <div style={summaryCard}>
-                  <div style={summaryLabel}>Negative Variance Value</div>
-                  <div style={{ ...summaryValue, color: "#b91c1c" }}>
-                    {formatCurrency(varianceSummary.negative)}
+            {!selectedSession ? (
+              <div style={{ color: "#64748b" }}>Select a session to start counting.</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12, color: "#64748b" }}>
+                  <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>
+                    {selectedSession.session_name}
                   </div>
+                  <div>Site: {selectedSession.site || selectedSession.location_name || "-"}</div>
+                  <div>Status: {selectedSession.status}</div>
                 </div>
-                <div style={summaryCard}>
-                  <div style={summaryLabel}>Positive Variance Value</div>
-                  <div style={{ ...summaryValue, color: "#166534" }}>
-                    {formatCurrency(varianceSummary.positive)}
-                  </div>
-                </div>
-                <div style={summaryCard}>
-                  <div style={summaryLabel}>Net Variance Value</div>
-                  <div style={summaryValue}>{formatCurrency(varianceSummary.net)}</div>
-                </div>
-              </div>
 
-              <div style={controlsGrid}>
-                <div style={controlCard}>
-                  <div style={controlTitle}>Manual / Barcode Entry</div>
-                  <div style={controlRow}>
-                    <input
-                      type="text"
-                      placeholder="Scan barcode or enter drug name"
-                      style={textInput}
-                      value={quickEntryTerm}
-                      onChange={(event) => setQuickEntryTerm(event.target.value)}
-                      disabled={isClosedSession}
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      style={numberInput}
-                      value={quickEntryQty}
-                      onChange={(event) => setQuickEntryQty(event.target.value)}
-                      disabled={isClosedSession}
-                    />
-                    <button
-                      type="button"
-                      style={primaryBtn}
-                      onClick={handleQuickEntryApply}
-                      disabled={isClosedSession}
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+                  <button
+                    onClick={exportVarianceReport}
+                    style={secondaryBtnStyle}
+                  >
+                    Export Variance Report
+                  </button>
+
+                  <button
+                    onClick={saveProgress}
+                    style={secondaryBtnStyle}
+                  >
+                    Save Progress
+                  </button>
+
+                  <button
+                    onClick={closeSession}
+                    style={dangerBtnStyle}
+                  >
+                    Close Session
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                    gap: 12,
+                    marginBottom: 18,
+                  }}
+                >
+                  <MetricCard
+                    label="NEGATIVE VARIANCE VALUE"
+                    value={formatCurrency(summary.negativeVarianceValue)}
+                    valueColor="#dc2626"
+                  />
+                  <MetricCard
+                    label="POSITIVE VARIANCE VALUE"
+                    value={formatCurrency(summary.positiveVarianceValue)}
+                    valueColor="#15803d"
+                  />
+                  <MetricCard
+                    label="NET VARIANCE VALUE"
+                    value={formatCurrency(summary.totalVarianceValue)}
+                    valueColor={summary.totalVarianceValue < 0 ? "#dc2626" : "#15803d"}
+                  />
+                </div>
+
+                <div
+                  style={{
+                    border: "1px solid #dbe3ee",
+                    borderRadius: 18,
+                    padding: 16,
+                    marginBottom: 18,
+                    background: selectedSession.status === "closed" ? "#f8fafc" : "#fff",
+                  }}
+                >
+                  <div style={{ fontWeight: 800, marginBottom: 10, color: "#0f172a" }}>
+                    Barcode Scan
+                  </div>
+
+                  <input
+                    type="text"
+                    value={barcodeInput}
+                    onChange={(e) => setBarcodeInput(e.target.value)}
+                    onKeyDown={handleBarcodeKeyDown}
+                    disabled={selectedSession.status === "closed"}
+                    placeholder={
+                      selectedSession.status === "closed"
+                        ? "Session closed, scanning disabled"
+                        : "Scan barcode and press Enter"
+                    }
+                    style={{
+                      width: "100%",
+                      maxWidth: 420,
+                      padding: "12px 14px",
+                      borderRadius: 12,
+                      border: "1px solid #cbd5e1",
+                      outline: "none",
+                      fontSize: 15,
+                    }}
+                  />
+
+                  {lastScanned ? (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        padding: 12,
+                        borderRadius: 12,
+                        background: "#eff6ff",
+                        color: "#1e3a8a",
+                        fontWeight: 600,
+                      }}
                     >
-                      Apply Count
-                    </button>
-                  </div>
+                      Last scanned: {lastScanned.drug_name} | Barcode: {lastScanned.barcode || "-"} | Counted Qty: {lastScanned.counted_qty}
+                    </div>
+                  ) : null}
                 </div>
 
-                <div style={controlCard}>
-                  <div style={controlTitle}>Import Counts (CSV)</div>
-                  <div style={controlRow}>
-                    <input
-                      type="file"
-                      accept=".csv"
-                      onChange={handleImportFile}
-                      disabled={isClosedSession || importingFile}
-                    />
-                    <div style={helperText}>Columns: drug_name, counted_qty, barcode (optional)</div>
+                {sessionItems.length === 0 ? (
+                  <div
+                    style={{
+                      border: "1px dashed #cbd5e1",
+                      borderRadius: 18,
+                      padding: 28,
+                      textAlign: "center",
+                      color: "#64748b",
+                    }}
+                  >
+                    No items found in this session.
                   </div>
-                </div>
-              </div>
-
-              <div style={toolbar}>
-                <input
-                  type="text"
-                  placeholder="Filter by drug name or barcode"
-                  style={toolbarSearch}
-                  value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
-                />
-
-                <div style={filterBar}>
-                  {[
-                    ["all", "All"],
-                    ["variance", "Variance only"],
-                    ["negative", "Negative only"],
-                    ["positive", "Positive only"],
-                  ].map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      style={filterKey === key ? activeFilterBtn : filterBtn}
-                      onClick={() => setFilterKey(key)}
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table
+                      style={{
+                        width: "100%",
+                        borderCollapse: "collapse",
+                        fontSize: 14,
+                      }}
                     >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {loadingItems ? (
-                <div style={emptyState}>Loading stocktaking items...</div>
-              ) : filteredItems.length === 0 ? (
-                <div style={emptyState}>No stocktaking items match the current filters.</div>
-              ) : (
-                <div style={tableWrap}>
-                  <table style={wideTable}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Drug Name</th>
-                        <th style={th}>Barcode</th>
-                        <th style={th}>System Qty</th>
-                        <th style={th}>Counted Qty</th>
-                        <th style={th}>Difference Qty</th>
-                        <th style={th}>Value Difference</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredItems.map((item) => (
-                        <tr key={item.id}>
-                          <td style={tdStrong}>{item.drug_name}</td>
-                          <td style={td}>
-                            <input
-                              type="text"
-                              style={tableInput}
-                              value={item.barcode || ""}
-                              onChange={(event) => updateItem(item.id, { barcode: event.target.value })}
-                              disabled={isClosedSession}
-                            />
-                          </td>
-                          <td style={td}>{formatQuantity(item.system_qty)}</td>
-                          <td style={td}>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              style={tableNumberInput}
-                              value={item.counted_qty}
-                              onChange={(event) => updateItem(item.id, { counted_qty: event.target.value })}
-                              disabled={isClosedSession}
-                            />
-                          </td>
-                          <td style={td}>
-                            <span
-                              style={
-                                toNumber(item.difference_qty) < 0
-                                  ? negativeText
-                                  : toNumber(item.difference_qty) > 0
-                                    ? positiveText
-                                    : neutralText
-                              }
+                      <thead>
+                        <tr style={{ background: "#f8fafc", color: "#334155" }}>
+                          <th style={thStyle}>Drug</th>
+                          <th style={thStyle}>Barcode</th>
+                          <th style={thStyle}>System Qty</th>
+                          <th style={thStyle}>Counted Qty</th>
+                          <th style={thStyle}>Difference</th>
+                          <th style={thStyle}>Unit Price</th>
+                          <th style={thStyle}>Value Difference</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessionItems.map((item) => (
+                          <tr key={item.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                            <td style={tdStyle}>{item.drug_name}</td>
+                            <td style={tdStyle}>{item.barcode || "-"}</td>
+                            <td style={tdStyle}>{item.system_qty}</td>
+                            <td style={tdStyle}>
+                              <input
+                                type="number"
+                                min="0"
+                                value={item.counted_qty}
+                                disabled={selectedSession.status === "closed"}
+                                onChange={(e) => updateLocalItem(item.id, e.target.value)}
+                                style={{
+                                  width: 90,
+                                  padding: "8px 10px",
+                                  borderRadius: 10,
+                                  border: "1px solid #cbd5e1",
+                                }}
+                              />
+                            </td>
+                            <td
+                              style={{
+                                ...tdStyle,
+                                color:
+                                  Number(item.difference_qty) < 0
+                                    ? "#dc2626"
+                                    : Number(item.difference_qty) > 0
+                                    ? "#15803d"
+                                    : "#0f172a",
+                                fontWeight: 700,
+                              }}
                             >
-                              {formatQuantity(item.difference_qty)}
-                            </span>
-                          </td>
-                          <td style={td}>
-                            <span
-                              style={
-                                toNumber(item.value_difference) < 0
-                                  ? negativeText
-                                  : toNumber(item.value_difference) > 0
-                                    ? positiveText
-                                    : neutralText
-                              }
+                              {item.difference_qty}
+                            </td>
+                            <td style={tdStyle}>{formatCurrency(item.unit_price)}</td>
+                            <td
+                              style={{
+                                ...tdStyle,
+                                color:
+                                  Number(item.value_difference) < 0
+                                    ? "#dc2626"
+                                    : Number(item.value_difference) > 0
+                                    ? "#15803d"
+                                    : "#0f172a",
+                                fontWeight: 700,
+                              }}
                             >
                               {formatCurrency(item.value_difference)}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {showCreateModal ? (
-        <div style={modalOverlay}>
-          <div style={modalCard}>
-            <h3 style={modalTitle}>Start New Stocktaking Session</h3>
-            <form style={modalForm} onSubmit={handleCreateSession}>
-              <label style={fieldLabel}>
-                Session Name
-                <input
-                  type="text"
-                  style={modalInput}
-                  value={sessionForm.sessionName}
-                  onChange={(event) =>
-                    setSessionForm((current) => ({ ...current, sessionName: event.target.value }))
-                  }
-                  placeholder="Month-end count"
-                  required
-                />
-              </label>
-              <label style={fieldLabel}>
-                Site
-                <input
-                  type="text"
-                  style={modalInput}
-                  value={sessionForm.site}
-                  onChange={(event) =>
-                    setSessionForm((current) => ({ ...current, site: event.target.value }))
-                  }
-                  placeholder="Main Pharmacy"
-                />
-              </label>
-              <label style={fieldLabel}>
-                Notes
-                <textarea
-                  style={modalTextarea}
-                  value={sessionForm.notes}
-                  onChange={(event) =>
-                    setSessionForm((current) => ({ ...current, notes: event.target.value }))
-                  }
-                  placeholder="Optional handover notes"
-                  rows={4}
-                />
-              </label>
-              <div style={modalActions}>
-                <button type="button" style={secondaryBtn} onClick={resetCreateModal}>
-                  Cancel
-                </button>
-                <button type="submit" style={primaryBtn} disabled={creatingSession}>
-                  {creatingSession ? "Creating..." : "Create Session"}
-                </button>
-              </div>
-            </form>
+        <div style={modalOverlayStyle}>
+          <div style={modalCardStyle}>
+            <h2 style={{ marginTop: 0, marginBottom: 22, color: "#0f172a", textAlign: "center" }}>
+              Start New Stocktaking Session
+            </h2>
+
+            <label style={labelStyle}>Session Name</label>
+            <input
+              value={newSessionName}
+              onChange={(e) => setNewSessionName(e.target.value)}
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>Site</label>
+            <input
+              value={newSite}
+              onChange={(e) => setNewSite(e.target.value)}
+              style={inputStyle}
+            />
+
+            <label style={labelStyle}>Notes</label>
+            <textarea
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              style={{ ...inputStyle, minHeight: 110, resize: "vertical" }}
+            />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 18 }}>
+              <button onClick={() => setShowCreateModal(false)} style={secondaryBtnStyle}>
+                Cancel
+              </button>
+              <button onClick={createSession} style={primaryBtnStyle}>
+                Create Session
+              </button>
+            </div>
           </div>
         </div>
+      ) : null}
+
+      {loading ? (
+        <div style={{ marginTop: 14, color: "#64748b", fontWeight: 600 }}>Loading...</div>
       ) : null}
     </div>
   );
 }
 
-const wrap = { display: "grid", gap: "16px" };
+function MetricCard({ label, value, valueColor = "#0f172a" }) {
+  return (
+    <div
+      style={{
+        background: "#fff",
+        border: "1px solid #dbe3ee",
+        borderRadius: 18,
+        padding: 18,
+        minHeight: 110,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          letterSpacing: "0.08em",
+          color: "#64748b",
+          marginBottom: 14,
+          textAlign: "center",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 28,
+          fontWeight: 900,
+          color: valueColor,
+          textAlign: "center",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
 
-const headerCard = {
-  background: "white",
-  borderRadius: "16px",
-  border: "1px solid #e2e8f0",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  padding: "20px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "16px",
-  flexWrap: "wrap",
-};
-
-const title = { margin: 0, color: "#0f172a" };
-
-const subtitle = {
-  marginTop: "8px",
-  marginBottom: 0,
-  color: "#475569",
-  fontSize: "14px",
-  lineHeight: 1.6,
-  maxWidth: "760px",
-};
-
-const messageBox = {
-  borderRadius: "12px",
-  padding: "12px 14px",
-  fontSize: "14px",
-};
-
-const statsGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
-};
-
-const statCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  border: "1px solid #e2e8f0",
-  boxShadow: "0 4px 14px rgba(15, 23, 42, 0.05)",
-};
-
-const statLabel = {
-  color: "#64748b",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  marginBottom: "8px",
-};
-
-const statValue = {
-  marginTop: "10px",
-  fontSize: "28px",
-  color: "#0f172a",
-  fontWeight: 700,
-};
-
-const splitGrid = {
-  display: "grid",
-  gridTemplateColumns: "minmax(320px, 0.95fr) minmax(520px, 1.45fr)",
-  gap: "16px",
-};
-
-const panelCard = {
-  background: "white",
-  borderRadius: "16px",
-  border: "1px solid #e2e8f0",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  padding: "20px",
-  display: "grid",
-  gap: "16px",
-};
-
-const panelHeader = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-};
-
-const panelHeaderStack = {
-  display: "flex",
-  alignItems: "flex-start",
-  justifyContent: "space-between",
-  gap: "16px",
-  flexWrap: "wrap",
-};
-
-const panelActions = {
-  display: "flex",
-  gap: "10px",
-  flexWrap: "wrap",
-};
-
-const sectionTitle = { margin: 0, color: "#0f172a", fontSize: "18px" };
-
-const sectionText = {
-  margin: "6px 0 0",
-  color: "#64748b",
-  fontSize: "13px",
-};
-
-const summaryGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
-};
-
-const summaryCard = {
-  background: "#f8fafc",
-  borderRadius: "14px",
-  border: "1px solid #e2e8f0",
-  padding: "16px",
-};
-
-const summaryLabel = {
-  color: "#64748b",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-};
-
-const summaryValue = {
-  marginTop: "10px",
-  fontSize: "20px",
-  fontWeight: 700,
-  color: "#0f172a",
-};
-
-const controlsGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: "12px",
-};
-
-const controlCard = {
-  background: "#f8fafc",
-  borderRadius: "14px",
-  border: "1px solid #e2e8f0",
-  padding: "16px",
-  display: "grid",
-  gap: "12px",
-};
-
-const controlTitle = {
-  color: "#0f172a",
-  fontSize: "14px",
-  fontWeight: 700,
-};
-
-const controlRow = {
-  display: "flex",
-  gap: "10px",
-  flexWrap: "wrap",
-  alignItems: "center",
-};
-
-const helperText = {
-  color: "#64748b",
-  fontSize: "12px",
-};
-
-const toolbar = {
-  display: "grid",
-  gap: "12px",
-};
-
-const toolbarSearch = {
-  width: "100%",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px 12px",
-  fontSize: "14px",
-  color: "#0f172a",
-  outline: "none",
-  boxSizing: "border-box",
-};
-
-const filterBar = {
-  display: "flex",
-  gap: "10px",
-  flexWrap: "wrap",
-};
-
-const filterBtn = {
-  border: "1px solid #cbd5e1",
-  background: "#ffffff",
-  color: "#334155",
-  borderRadius: "999px",
-  padding: "8px 14px",
-  fontSize: "13px",
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const activeFilterBtn = {
-  ...filterBtn,
-  background: "#2563eb",
-  border: "1px solid #2563eb",
-  color: "#ffffff",
-};
-
-const primaryBtn = {
-  padding: "10px 16px",
-  background: "#2563eb",
-  color: "white",
-  border: "none",
-  borderRadius: "10px",
-  fontSize: "13px",
-  fontWeight: 700,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const secondaryBtn = {
-  padding: "10px 16px",
-  background: "white",
-  color: "#334155",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  fontSize: "13px",
-  fontWeight: 600,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const dangerBtn = {
-  padding: "10px 16px",
-  background: "#dc2626",
-  color: "white",
-  border: "none",
-  borderRadius: "10px",
-  fontSize: "13px",
-  fontWeight: 700,
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const textInput = {
-  flex: 1,
-  minWidth: "220px",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px 12px",
-  fontSize: "14px",
-  color: "#0f172a",
-  outline: "none",
-};
-
-const numberInput = {
-  width: "120px",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px 12px",
-  fontSize: "14px",
-  color: "#0f172a",
-  outline: "none",
-};
-
-const tableWrap = { width: "100%", overflowX: "auto" };
-
-const table = { width: "100%", borderCollapse: "collapse", minWidth: "680px" };
-
-const wideTable = { width: "100%", borderCollapse: "collapse", minWidth: "920px" };
-
-const th = {
+const thStyle = {
   textAlign: "left",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  color: "#64748b",
-  background: "#f8fafc",
-  borderBottom: "2px solid #e2e8f0",
-  padding: "12px 14px",
-  whiteSpace: "nowrap",
+  padding: "12px 10px",
+  borderBottom: "1px solid #e2e8f0",
+  fontWeight: 800,
 };
 
-const td = {
-  color: "#334155",
-  padding: "12px 14px",
-  borderBottom: "1px solid #f1f5f9",
-  fontSize: "14px",
+const tdStyle = {
+  padding: "12px 10px",
+  color: "#0f172a",
   verticalAlign: "middle",
 };
 
-const tdStrong = { ...td, fontWeight: 600, color: "#0f172a" };
-
-const statusBadge = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  borderRadius: "999px",
-  fontSize: "12px",
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-  padding: "5px 10px",
-};
-
-const emptyState = {
-  padding: "24px",
-  color: "#64748b",
-  background: "#f8fafc",
-  borderRadius: "12px",
-  border: "1px dashed #cbd5e1",
-};
-
-const tableInput = {
+const inputStyle = {
   width: "100%",
-  minWidth: "140px",
+  padding: "12px 14px",
+  borderRadius: 12,
   border: "1px solid #cbd5e1",
-  borderRadius: "8px",
-  padding: "8px 10px",
-  fontSize: "13px",
-  color: "#0f172a",
-  outline: "none",
+  marginBottom: 14,
+  fontSize: 15,
   boxSizing: "border-box",
 };
 
-const tableNumberInput = {
-  ...tableInput,
-  minWidth: "110px",
+const labelStyle = {
+  display: "block",
+  marginBottom: 8,
+  color: "#334155",
+  fontWeight: 700,
 };
 
-const neutralText = { color: "#334155", fontWeight: 600 };
-const positiveText = { color: "#166534", fontWeight: 700 };
-const negativeText = { color: "#b91c1c", fontWeight: 700 };
+const primaryBtnStyle = {
+  background: "#2563eb",
+  color: "#fff",
+  border: "none",
+  borderRadius: 12,
+  padding: "12px 18px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
 
-const modalOverlay = {
+const secondaryBtnStyle = {
+  background: "#fff",
+  color: "#0f172a",
+  border: "1px solid #cbd5e1",
+  borderRadius: 12,
+  padding: "12px 18px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const dangerBtnStyle = {
+  background: "#ef4444",
+  color: "#fff",
+  border: "none",
+  borderRadius: 12,
+  padding: "12px 18px",
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
+const modalOverlayStyle = {
   position: "fixed",
   inset: 0,
-  background: "rgba(15, 23, 42, 0.45)",
+  background: "rgba(15,23,42,0.35)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "20px",
-  zIndex: 1000,
+  zIndex: 9999,
+  padding: 20,
 };
 
-const modalCard = {
+const modalCardStyle = {
   width: "100%",
-  maxWidth: "460px",
-  background: "white",
-  borderRadius: "18px",
-  border: "1px solid #e2e8f0",
-  boxShadow: "0 20px 60px rgba(15, 23, 42, 0.18)",
-  padding: "24px",
-};
-
-const modalTitle = {
-  margin: 0,
-  fontSize: "18px",
-  color: "#0f172a",
-};
-
-const modalForm = {
-  display: "grid",
-  gap: "14px",
-  marginTop: "18px",
-};
-
-const fieldLabel = {
-  display: "grid",
-  gap: "8px",
-  fontSize: "13px",
-  fontWeight: 600,
-  color: "#334155",
-};
-
-const modalInput = {
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px 12px",
-  fontSize: "14px",
-  color: "#0f172a",
-  outline: "none",
-};
-
-const modalTextarea = {
-  ...modalInput,
-  resize: "vertical",
-  minHeight: "96px",
-  fontFamily: "inherit",
-};
-
-const modalActions = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: "10px",
-  marginTop: "4px",
-  flexWrap: "wrap",
+  maxWidth: 620,
+  background: "#fff",
+  borderRadius: 24,
+  padding: 26,
+  boxShadow: "0 20px 50px rgba(15,23,42,0.20)",
 };
