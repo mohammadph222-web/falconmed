@@ -7,6 +7,7 @@ import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
+import Stocktaking from "./Stocktaking";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 import PurchaseRequests from "./PurchaseRequests";
@@ -101,6 +102,12 @@ export default function App() {
         return (
           <div style={contentCard}>
             <PurchaseRequests />
+          </div>
+        );
+      case "stocktaking":
+        return (
+          <div style={contentCard}>
+            <Stocktaking />
           </div>
         );
       case "network":
@@ -317,6 +324,13 @@ export default function App() {
             onClick={() => setPage("purchases")}
           >
             Purchase Requests
+          </button>
+
+          <button
+            style={page === "stocktaking" ? activeBtn : btn}
+            onClick={() => setPage("stocktaking")}
+          >
+            Stocktaking
           </button>
 
           <button
