@@ -3,6 +3,7 @@ import CommandPalette from "./components/CommandPalette";
 import SkeletonCard from "./components/SkeletonCard";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
 import useCommandPaletteShortcut from "./hooks/useCommandPaletteShortcut";
+import { supabase } from "./lib/supabaseClient";
 import LandingPage from "./LandingPage";
 import DrugSearch from "./DrugSearch";
 import ExpiryTracker from "./ExpiryTracker";
@@ -25,12 +26,69 @@ export default function App() {
   const [pdssView, setPdssView] = useState("executive-dashboard");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [dashboardCounts, setDashboardCounts] = useState({
+    pharmacies: 0,
+    inventoryRecords: 0,
+    nearExpiry: 0,
+    shortage: 0,
+    purchase: 0,
+    refill: 0,
+  });
 
-  const totalDrugsInDatabase = 22463;
-  const nearExpiryItems = 0;
-  const shortageRequestsToday = 0;
-  const activeSites = 0;
-  const activeUrgentActions = 0;
+  const safeCount = async (tableName) => {
+    if (!supabase) return 0;
+
+    try {
+      const { count, error } = await supabase
+        .from(tableName)
+        .select("*", { count: "exact", head: true });
+
+      if (error) return 0;
+      return Number.isFinite(count) ? count : 0;
+    } catch {
+      return 0;
+    }
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDashboardCounts = async () => {
+      const [pharmaciesCount, inventoryCount, expiryCount, shortageCount, purchaseCount, refillCount] =
+        await Promise.all([
+          safeCount("pharmacies"),
+          safeCount("pharmacy_inventory"),
+          safeCount("expiry_records"),
+          safeCount("shortage_requests"),
+          safeCount("purchase_requests"),
+          safeCount("refill_requests"),
+        ]);
+
+      if (!isMounted) return;
+
+      setDashboardCounts({
+        pharmacies: pharmaciesCount,
+        inventoryRecords: inventoryCount,
+        nearExpiry: expiryCount,
+        shortage: shortageCount,
+        purchase: purchaseCount,
+        refill: refillCount,
+      });
+    };
+
+    void loadDashboardCounts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const totalDrugsInDatabase = dashboardCounts.inventoryRecords;
+  const nearExpiryItems = dashboardCounts.nearExpiry;
+  const shortageRequestsToday = dashboardCounts.shortage;
+  const activeSites = dashboardCounts.pharmacies;
+  const activeUrgentActions =
+    Number(dashboardCounts.purchase || 0) + Number(dashboardCounts.refill || 0);
 
   const computedRiskScore =
     (Number(shortageRequestsToday) || 0) * 15 +
@@ -282,8 +340,8 @@ export default function App() {
 
                 <div style={insightBox}>
                   <span style={insightBullet}>◆</span>{" "}
-                  22,463 formulary records are actively tracked. Current alerts show 0 near-expiry
-                  items and 0 shortage requests today.
+                  {totalDrugsInDatabase.toLocaleString()} inventory records are actively tracked. Current alerts show {nearExpiryItems.toLocaleString()} near-expiry
+                  items and {shortageRequestsToday.toLocaleString()} shortage requests.
                 </div>
 
                 <div style={cardsGrid}>
