@@ -65,6 +65,14 @@ export default function ExecutiveDashboard() {
     nearExpiryRiskValue: 0,
     deadStockValue: 0,
   });
+  const [snapshotCounts, setSnapshotCounts] = useState({
+    activeSites: 0,
+    inventoryRecords: 0,
+    nearExpiryItems: 0,
+    shortageRequests: 0,
+    purchaseRequests: 0,
+    refillRequests: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -73,7 +81,14 @@ export default function ExecutiveDashboard() {
       setLoading(true);
       setMessage("");
 
-      const [shortageRes, refillRes, expiryRes] = await Promise.all([
+      const [
+        shortageRes,
+        refillRes,
+        expiryRes,
+        pharmacyRes,
+        inventoryRes,
+        purchaseRes,
+      ] = await Promise.all([
         safeFetch(
           "shortage_requests",
           "drug_name,quantity_requested,status,request_date,created_at"
@@ -82,37 +97,50 @@ export default function ExecutiveDashboard() {
           "refill_requests",
           "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
         ),
-        safeFetch("expiry_records", "drug_name,quantity,location,batch_no,expiry_date,created_at"),
+        safeFetch(
+          "expiry_records",
+          "drug_name,quantity,location,batch_no,expiry_date,created_at"
+        ),
+        safeFetch("pharmacies", "id,name"),
+        safeFetch(
+          "pharmacy_inventory",
+          "id,drug_name,quantity,unit_cost,expiry_date,batch_no,pharmacy_id"
+        ),
+        safeFetch("purchase_requests", "id,status,drug_name,created_at"),
       ]);
 
-      const shortages = [
-        ...(shortageRes.data || []),
-        ...loadLocalArray("falconmed_shortages"),
-      ];
-      const refills = [
-        ...(refillRes.data || []),
-        ...loadLocalArray("falconmed_refills"),
-      ];
+      const localShortages = loadLocalArray("falconmed_shortages");
+      const localRefills = loadLocalArray("falconmed_refills");
+
+      const shortages = [...(shortageRes.data || []), ...localShortages];
+      const refills = [...(refillRes.data || []), ...localRefills];
       const expiryRecords = expiryRes.data || [];
+      const pharmacies = pharmacyRes.data || [];
+      const inventoryRecords = inventoryRes.data || [];
+      const purchaseRequests = purchaseRes.data || [];
 
       const computedShortageRows = calculateShortagePredictions({
         shortages,
         refills,
         expiryRecords,
       });
+
       const computedTransferRows = calculateSmartTransferRecommendations({
         shortages,
         refills,
         expiryRecords,
       });
+
       const computedExpiryRows = calculateExpiryIntelligence({
         expiryRecords,
         refills,
       });
+
       const drugPriceMap = buildDrugPriceMap();
 
       setShortageRows(computedShortageRows);
       setTransferRows(computedTransferRows);
+
       setFinancialKpis(
         calculateFinancialKpis({
           expiryRows: computedExpiryRows,
@@ -120,6 +148,7 @@ export default function ExecutiveDashboard() {
           drugPriceMap,
         })
       );
+
       setInventoryFinancials(
         calculateInventoryFinancials({
           expiryRows: computedExpiryRows,
@@ -127,7 +156,24 @@ export default function ExecutiveDashboard() {
         })
       );
 
-      const queryErrors = [shortageRes.error, refillRes.error, expiryRes.error].filter(Boolean);
+      setSnapshotCounts({
+        activeSites: pharmacies.length,
+        inventoryRecords: inventoryRecords.length,
+        nearExpiryItems: expiryRecords.length,
+        shortageRequests: shortages.length,
+        purchaseRequests: purchaseRequests.length,
+        refillRequests: refills.length,
+      });
+
+      const queryErrors = [
+        shortageRes.error,
+        refillRes.error,
+        expiryRes.error,
+        pharmacyRes.error,
+        inventoryRes.error,
+        purchaseRes.error,
+      ].filter(Boolean);
+
       if (queryErrors.length > 0) {
         setMessage(
           "Some operational data sources are unavailable. Executive insights below use the best available records."
@@ -146,19 +192,32 @@ export default function ExecutiveDashboard() {
   );
 
   const executiveNarrative = useMemo(
-    () => buildExecutiveNarrative(metrics),
-    [metrics]
+    () =>
+      buildExecutiveNarrative({
+        ...metrics,
+        activeSites: snapshotCounts.activeSites,
+        inventoryRecords: snapshotCounts.inventoryRecords,
+        nearExpiryItems: snapshotCounts.nearExpiryItems,
+        purchaseRequests: snapshotCounts.purchaseRequests,
+        refillRequests: snapshotCounts.refillRequests,
+      }),
+    [metrics, snapshotCounts]
   );
 
   const topHighRiskDrugs = useMemo(() => {
-    return shortageRows
-      .filter((row) => row.shortageRiskLevel === "high")
-      .slice(0, 5);
+    return shortageRows.filter((row) => row.shortageRiskLevel === "high").slice(0, 5);
   }, [shortageRows]);
 
   const topTransferOpportunities = useMemo(() => {
     return transferRows.slice(0, 5);
   }, [transferRows]);
+
+  const animActiveSites = useAnimatedCounter(snapshotCounts.activeSites);
+  const animInventoryRecords = useAnimatedCounter(snapshotCounts.inventoryRecords);
+  const animNearExpiryItems = useAnimatedCounter(snapshotCounts.nearExpiryItems);
+  const animShortageRequests = useAnimatedCounter(snapshotCounts.shortageRequests);
+  const animPurchaseRequests = useAnimatedCounter(snapshotCounts.purchaseRequests);
+  const animRefillRequests = useAnimatedCounter(snapshotCounts.refillRequests);
 
   const animTrackedDrugs = useAnimatedCounter(metrics.trackedDrugs);
   const animHighRisk = useAnimatedCounter(metrics.highRiskShortages);
@@ -180,12 +239,60 @@ export default function ExecutiveDashboard() {
           <div style={eyebrow}>Executive Intelligence</div>
           <h2 style={title}>PDSS Executive Dashboard</h2>
           <p style={subtitle}>
-            A concise operational view of shortage pressure, internal balancing opportunities, and near-term supply risk.
+            A concise operational view of shortage pressure, internal balancing
+            opportunities, and near-term supply risk.
           </p>
         </div>
       </div>
 
       {message ? <div style={messageBox}>{message}</div> : null}
+
+      <div style={statsGrid}>
+        {loading ? (
+          Array.from({ length: 6 }).map((_, index) => (
+            <SkeletonCard
+              key={`snapshot-skeleton-${index}`}
+              style={{ ...statCard, borderTop: "3px solid #e2e8f0", minHeight: 118 }}
+              blocks={[
+                { width: "54%", height: 10, gap: 12 },
+                { width: "42%", height: 30, gap: 0 },
+              ]}
+            />
+          ))
+        ) : (
+          <>
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #3b82f6" }}>
+              <div style={statLabel}>Active Sites</div>
+              <div style={statValue}>{animActiveSites}</div>
+            </div>
+
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #8b5cf6" }}>
+              <div style={statLabel}>Inventory Records</div>
+              <div style={statValue}>{animInventoryRecords}</div>
+            </div>
+
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+              <div style={statLabel}>Near Expiry Items</div>
+              <div style={statValue}>{animNearExpiryItems}</div>
+            </div>
+
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
+              <div style={statLabel}>Shortage Requests</div>
+              <div style={statValue}>{animShortageRequests}</div>
+            </div>
+
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #10b981" }}>
+              <div style={statLabel}>Purchase Requests</div>
+              <div style={statValue}>{animPurchaseRequests}</div>
+            </div>
+
+            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #06b6d4" }}>
+              <div style={statLabel}>Refill Requests</div>
+              <div style={statValue}>{animRefillRequests}</div>
+            </div>
+          </>
+        )}
+      </div>
 
       <div style={statsGrid}>
         {loading
@@ -205,63 +312,90 @@ export default function ExecutiveDashboard() {
                 <div style={statLabel}>Tracked Drugs</div>
                 <div style={statValue}>{animTrackedDrugs}</div>
               </div>
+
               <div className="ui-hover-lift" style={statCard}>
                 <div style={statLabel}>High Risk Shortages</div>
                 <div style={{ ...statValue, color: "#b91c1c" }}>{animHighRisk}</div>
               </div>
+
               <div className="ui-hover-lift" style={statCard}>
                 <div style={statLabel}>Medium Risk Shortages</div>
                 <div style={{ ...statValue, color: "#b45309" }}>{animMedRisk}</div>
               </div>
+
               <div className="ui-hover-lift" style={statCard}>
                 <div style={statLabel}>Low Risk Shortages</div>
                 <div style={{ ...statValue, color: "#166534" }}>{animLowRisk}</div>
               </div>
+
               <div className="ui-hover-lift" style={statCard}>
                 <div style={statLabel}>Transfer Opportunities</div>
                 <div style={statValue}>{animTransferOpp}</div>
               </div>
+
               <div className="ui-hover-lift" style={statCard}>
                 <div style={statLabel}>Suggested Transfer Qty</div>
                 <div style={statValue}>{animTransferQty}</div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
+              >
                 <div style={{ ...statLabel, color: "#92400e" }}>Expiry Loss (Est.)</div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
                   {`AED ${animExpiryLoss.toLocaleString()}`}
                 </div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
+              >
                 <div style={{ ...statLabel, color: "#92400e" }}>At-Risk Inventory</div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
                   {`AED ${animAtRisk.toLocaleString()}`}
                 </div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
-                <div style={{ ...statLabel, color: "#991b1b" }}>Shortage Exposure (High)</div>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #ef4444" }}
+              >
+                <div style={{ ...statLabel, color: "#991b1b" }}>
+                  Shortage Exposure (High)
+                </div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
                   {`AED ${animShortageExposure.toLocaleString()}`}
                 </div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}
+              >
                 <div style={{ ...statLabel, color: "#0369a1" }}>Total Inventory Value</div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#075985" }}>
                   {`AED ${animTotalInvValue.toLocaleString()}`}
                 </div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
-                <div style={{ ...statLabel, color: "#92400e" }}>Near-Expiry Risk Value</div>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
+              >
+                <div style={{ ...statLabel, color: "#92400e" }}>
+                  Near-Expiry Risk Value
+                </div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
                   {`AED ${animNearExpiryRisk.toLocaleString()}`}
                 </div>
               </div>
 
-              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #dc2626" }}>
+              <div
+                className="ui-hover-lift"
+                style={{ ...statCard, borderTop: "3px solid #dc2626" }}
+              >
                 <div style={{ ...statLabel, color: "#991b1b" }}>Dead Stock Value</div>
                 <div style={{ ...statValue, fontSize: "22px", color: "#991b1b" }}>
                   {`AED ${animDeadStock.toLocaleString()}`}
@@ -274,7 +408,13 @@ export default function ExecutiveDashboard() {
       <div className="ui-hover-lift" style={summaryCard}>
         {loading ? (
           <SkeletonCard
-            style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 88 }}
+            style={{
+              background: "transparent",
+              border: "none",
+              boxShadow: "none",
+              padding: 0,
+              minHeight: 88,
+            }}
             blocks={[
               { width: "26%", height: 16, gap: 16, radius: 10 },
               { width: "100%", height: 12, gap: 10, radius: 10 },
@@ -299,7 +439,13 @@ export default function ExecutiveDashboard() {
           {loading ? (
             <div style={{ padding: "18px" }}>
               <SkeletonCard
-                style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 212 }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  boxShadow: "none",
+                  padding: 0,
+                  minHeight: 212,
+                }}
                 blocks={[
                   { width: "100%", height: 34, gap: 10, radius: 10 },
                   { width: "100%", height: 34, gap: 10, radius: 10 },
@@ -347,7 +493,13 @@ export default function ExecutiveDashboard() {
           {loading ? (
             <div style={{ padding: "18px" }}>
               <SkeletonCard
-                style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 212 }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  boxShadow: "none",
+                  padding: 0,
+                  minHeight: 212,
+                }}
                 blocks={[
                   { width: "100%", height: 34, gap: 10, radius: 10 },
                   { width: "100%", height: 34, gap: 10, radius: 10 },
@@ -373,7 +525,9 @@ export default function ExecutiveDashboard() {
                 </thead>
                 <tbody>
                   {topTransferOpportunities.map((row, index) => (
-                    <tr key={`${row.drugName}-${row.fromBranch}-${row.toBranch}-${index}`}>
+                    <tr
+                      key={`${row.drugName}-${row.fromBranch}-${row.toBranch}-${index}`}
+                    >
                       <td style={tdDrug}>{row.drugName}</td>
                       <td style={td}>{row.fromBranch}</td>
                       <td style={td}>{row.toBranch}</td>
