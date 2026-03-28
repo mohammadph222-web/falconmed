@@ -1,7 +1,11 @@
 import { useMemo, useState, useEffect } from "react";
-import Papa from "papaparse";
 import "./Billing.css";
-import drugsMasterCsv from "./data/drugs_master.csv?raw";
+import {
+  getDrugDisplayName,
+  getDrugUnitPrice,
+  loadDrugMaster,
+  searchDrugMaster,
+} from "./utils/drugMaster";
 
 const INITIAL_PHARMACY = {
   name: "FalconMed Pharmacy",
@@ -51,45 +55,24 @@ function Billing({ onBack }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   useEffect(() => {
-    const parsed = Papa.parse(drugsMasterCsv, {
-      header: true,
-      skipEmptyLines: true,
-      dynamicTyping: false,
-      transformHeader: (header) => header.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_"),
-    });
+    let isMounted = true;
 
-    const rows = parsed.data
-      .map((row, index) => {
-        const brand = (row.brand_name || "").trim();
-        const generic = (row.generic_name || "").trim();
-        const strength = (row.strength || "").trim();
-        const dosageForm = (row.dosage_form || "").trim();
-
-        const rawPrice =
-          row.price_public ||
-          row.public_price ||
-          row.unit_price ||
-          row.price ||
-          row.price_pharmacy ||
-          row.pharmacy_price ||
-          "";
-
-        const defaultPrice = sanitizeNumber(rawPrice, 0);
-
-        return {
-          id: (row.drug_code || String(index + 1)).trim(),
-          drugCode: (row.drug_code || "").trim(),
-          brand,
-          generic,
-          strength,
-          dosageForm,
-          label: [brand || generic, strength, dosageForm].filter(Boolean).join(" - "),
-          defaultPrice,
-        };
+    loadDrugMaster()
+      .then((rows) => {
+        if (isMounted) {
+          setDrugs(rows || []);
+        }
       })
-      .filter((drug) => drug.label);
+      .catch((error) => {
+        console.error("Failed to load billing drug source:", error);
+        if (isMounted) {
+          setDrugs([]);
+        }
+      });
 
-    setDrugs(rows);
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -102,15 +85,7 @@ function Billing({ onBack }) {
   }, [documentType, documentNumber]);
 
   const suggestions = useMemo(() => {
-    const q = drugQuery.trim().toLowerCase();
-    if (!q) return [];
-
-    return drugs
-      .filter((drug) => {
-        const haystack = `${drug.label} ${drug.drugCode} ${drug.generic}`.toLowerCase();
-        return haystack.includes(q);
-      })
-      .slice(0, 8);
+    return searchDrugMaster(drugs, drugQuery, 8);
   }, [drugQuery, drugs]);
 
   const updatePharmacy = (field, value) => {
@@ -126,13 +101,14 @@ function Billing({ onBack }) {
   };
 
   const addItemFromDrug = (drug) => {
+    const label = getDrugDisplayName(drug);
     setItems((prev) => [
       ...prev,
       {
         id: `drug-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        item: drug.label,
+        item: label,
         quantity: 1,
-        unitPrice: drug.defaultPrice,
+        unitPrice: getDrugUnitPrice(drug, "public") || 0,
         discount: 0,
         source: "database",
       },
@@ -278,14 +254,14 @@ function Billing({ onBack }) {
             {showSuggestions && drugQuery.trim() && suggestions.length > 0 && (
               <ul className="billing-suggestions">
                 {suggestions.map((drug) => (
-                  <li key={`suggestion-${drug.id}-${drug.label}`}>
+                  <li key={`suggestion-${drug.drug_code || drug.display_name}`}>
                     <button
                       type="button"
                       onMouseDown={() => addItemFromDrug(drug)}
                       className="billing-suggestion-btn"
                     >
-                      <span>{drug.label}</span>
-                      <span>AED {formatCurrency(drug.defaultPrice)}</span>
+                      <span>{getDrugDisplayName(drug)}</span>
+                      <span>AED {formatCurrency(getDrugUnitPrice(drug, "public") || 0)}</span>
                     </button>
                   </li>
                 ))}

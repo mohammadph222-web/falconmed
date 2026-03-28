@@ -8,7 +8,7 @@ import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
-import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
+import PharmacyNetwork from "./PharmacyNetworkPage.jsx.jsx";
 import InventoryManagementPage from "./InventoryManagementPage.jsx";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";

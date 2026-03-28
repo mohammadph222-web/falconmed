@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
 
 function formatCurrency(value) {
   const n = Number(value || 0);
@@ -20,13 +21,15 @@ export default function PharmacyNetwork() {
     setLoading(true);
     setError("");
 
-    const { data: pharmacyData, error: pharmacyError } = await supabase
-      .from("pharmacies")
-      .select("*")
-      .order("name", { ascending: true });
+    const { data: pharmacyData, error: pharmacyError } = await loadPharmaciesWithFallback();
 
     if (pharmacyError) {
-      setError(pharmacyError.message);
+      setError("Live pharmacies unavailable. Showing restored demo pharmacies.");
+    }
+
+    if (!supabase) {
+      setPharmacies(pharmacyData || []);
+      setInventory([]);
       setLoading(false);
       return;
     }
@@ -34,7 +37,7 @@ export default function PharmacyNetwork() {
     const { data: inventoryData, error: inventoryError } = await supabase
       .from("pharmacy_inventory")
       .select("*")
-      .order("drug_name", { ascending: true });
+      .order("created_at", { ascending: false });
 
     if (inventoryError) {
       setError(inventoryError.message);
@@ -43,7 +46,7 @@ export default function PharmacyNetwork() {
     }
 
     setPharmacies(pharmacyData || []);
-    setInventory(inventoryData || []);
+    setInventory((inventoryData || []).map(normalizeInventoryRow));
     setLoading(false);
   }
 
@@ -308,7 +311,7 @@ export default function PharmacyNetwork() {
                         <td style={tdStyle}>
                           {pharmacyMap[item.pharmacy_id]?.name || "-"}
                         </td>
-                        <td style={tdStyle}>{item.drug_name}</td>
+                        <td style={tdStyle}>{item.drug_name || "-"}</td>
                         <td style={tdStyle}>{item.barcode || "-"}</td>
                         <td style={tdStyle}>{item.quantity}</td>
                         <td style={tdStyle}>

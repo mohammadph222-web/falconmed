@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import Papa from "papaparse";
 import * as XLSX from "xlsx";
 import { supabase } from "./lib/supabaseClient";
+import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMaster";
 import "./App.css";
 
 const STORAGE_KEY = 'falconmed_refills';
@@ -42,50 +42,6 @@ function getRefillStatus(nextRefillDate, fallbackStatus = "Pending") {
   if (diffDays < 0) return 'Overdue';
   if (diffDays <= 3) return 'Due';
   return 'Upcoming';
-}
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeKey(key) {
-  return String(key || "")
-    .toLowerCase()
-    .replace(/[\s/_-]+/g, "")
-    .trim();
-}
-
-function getValue(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
 }
 
 const mapDbToUi = (row) => {
@@ -165,60 +121,29 @@ function RefillTracker({ onBack }) {
     }
   }, []);
 
-  // Load medicines from the same dataset pattern used elsewhere
   useEffect(() => {
-    const loadMedicines = async () => {
-      try {
-        const response = await fetch('/src/data/drugs_master.csv');
-        if (!response.ok) throw new Error('Failed to load CSV');
+    let isMounted = true;
 
-        const csvText = await response.text();
-        const lines = csvText
-          .split(/\r?\n/)
-          .filter((line) => line.trim() !== '');
-
-        if (lines.length < 2) {
-          setMedicines([]);
-          return;
+    loadDrugMaster()
+      .then((rows) => {
+        if (isMounted) {
+          setMedicines(rows || []);
         }
-
-        const rawHeaders = parseCSVLine(lines[0]);
-        const headers = rawHeaders.map((h) => normalizeKey(h));
-
-        const meds = lines.slice(1).map((line) => {
-          const cols = parseCSVLine(line);
-          const rawRow = {};
-
-          headers.forEach((header, index) => {
-            rawRow[header] = cols[index] ?? '';
-          });
-
-          return {
-            brand: getValue(rawRow, ['brand', 'brandname', 'packagename', 'tradename']),
-            generic: getValue(rawRow, ['generic', 'genericname', 'scientificname']),
-            strength: getValue(rawRow, ['strength']),
-          };
-        }).filter((m) => m.brand || m.generic);
-
-        setMedicines(meds);
-      } catch (error) {
+      })
+      .catch((error) => {
         console.error('Error loading medicines:', error);
-      }
+        if (isMounted) {
+          setMedicines([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
     };
-    loadMedicines();
   }, []);
 
   const filteredMedicines = useMemo(() => {
-    if (!drugSearch.trim() || !showDrugDropdown) return [];
-
-    const q = drugSearch.toLowerCase().trim();
-    return medicines.filter((med) => {
-      return (
-        med.brand?.toLowerCase().includes(q) ||
-        med.generic?.toLowerCase().includes(q) ||
-        med.strength?.toLowerCase().includes(q)
-      );
-    }).slice(0, 25);
+    return showDrugDropdown ? searchDrugMaster(medicines, drugSearch, 25) : [];
   }, [medicines, drugSearch, showDrugDropdown]);
 
   // Save to localStorage whenever refills change
@@ -440,9 +365,7 @@ function RefillTracker({ onBack }) {
                   }}
                 >
                   {filteredMedicines.map((med, index) => {
-                    const displayName = med.brand
-                      ? `${med.brand}${med.strength ? ` (${med.strength})` : ''}`
-                      : `${med.generic || 'Unknown'}${med.strength ? ` (${med.strength})` : ''}`;
+                    const displayName = getDrugDisplayName(med);
 
                     return (
                       <div

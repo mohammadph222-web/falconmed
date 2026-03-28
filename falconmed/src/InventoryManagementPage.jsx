@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import {
+  getDrugDisplayName,
+  getDrugUnitPrice,
+  loadDrugMaster,
+  searchDrugMaster,
+} from "./utils/drugMaster";
+import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
 
 function formatCurrency(value) {
   const n = Number(value || 0);
@@ -10,6 +17,8 @@ export default function InventoryManagementPage() {
   const [pharmacies, setPharmacies] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
+  const [allDrugs, setAllDrugs] = useState([]);
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
 
   const [drug, setDrug] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -28,6 +37,20 @@ export default function InventoryManagementPage() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    loadDrugMaster().then((rows) => {
+      if (isMounted) {
+        setAllDrugs(rows || []);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (selectedPharmacyId) {
       fetchInventory(selectedPharmacyId);
     } else {
@@ -40,16 +63,11 @@ export default function InventoryManagementPage() {
     setLoading(true);
     setError("");
 
-    const { data, error } = await supabase
-      .from("pharmacies")
-      .select("*")
-      .order("name", { ascending: true });
+    const { data, error } = await loadPharmaciesWithFallback();
 
     if (error) {
       console.error(error);
-      setError("Failed to load pharmacies.");
-      setLoading(false);
-      return;
+      setError("Live pharmacies unavailable. Demo pharmacies restored.");
     }
 
     setPharmacies(data || []);
@@ -65,6 +83,12 @@ export default function InventoryManagementPage() {
     setLoading(true);
     setError("");
 
+    if (!supabase) {
+      setInventory([]);
+      setLoading(false);
+      return;
+    }
+
     const { data, error } = await supabase
       .from("pharmacy_inventory")
       .select("*")
@@ -78,7 +102,7 @@ export default function InventoryManagementPage() {
       return;
     }
 
-    setInventory(data || []);
+    setInventory((data || []).map(normalizeInventoryRow));
     setLoading(false);
   }
 
@@ -117,6 +141,16 @@ export default function InventoryManagementPage() {
 
     const payload = {
       pharmacy_id: selectedPharmacyId,
+      drug_name: drug.trim(),
+      barcode: barcode.trim() || null,
+      quantity: Number(qty) || 0,
+      unit_cost: Number(cost) || 0,
+      expiry_date: expiry || null,
+      batch_no: batch.trim() || null,
+    };
+
+    const legacyPayload = {
+      pharmacy_id: selectedPharmacyId,
       drug: drug.trim(),
       barcode: barcode.trim() || null,
       quantity: Number(qty) || 0,
@@ -125,32 +159,33 @@ export default function InventoryManagementPage() {
       batch: batch.trim() || null,
     };
 
-    if (editingId) {
-      const { error } = await supabase
-        .from("pharmacy_inventory")
-        .update(payload)
-        .eq("id", editingId);
-
-      if (error) {
-        console.error(error);
-        setError("Failed to update record.");
-        return;
+    const executeMutation = async (body) => {
+      if (editingId) {
+        return supabase.from("pharmacy_inventory").update(body).eq("id", editingId);
       }
 
-      setSuccess("Inventory record updated successfully.");
-    } else {
-      const { error } = await supabase
-        .from("pharmacy_inventory")
-        .insert([payload]);
+      return supabase.from("pharmacy_inventory").insert([body]);
+    };
 
-      if (error) {
-        console.error(error);
-        setError("Failed to add record.");
-        return;
+    let mutation = await executeMutation(payload);
+
+    if (mutation.error) {
+      const message = String(mutation.error.message || "").toLowerCase();
+      const missingCanonicalColumns =
+        message.includes("drug_name") || message.includes("batch_no") || message.includes("column");
+
+      if (missingCanonicalColumns) {
+        mutation = await executeMutation(legacyPayload);
       }
-
-      setSuccess("Drug added successfully.");
     }
+
+    if (mutation.error) {
+      console.error(mutation.error);
+      setError(editingId ? "Failed to update record." : "Failed to add record.");
+      return;
+    }
+
+    setSuccess(editingId ? "Inventory record updated successfully." : "Drug added successfully.");
 
     resetForm();
     fetchInventory(selectedPharmacyId);
@@ -158,12 +193,13 @@ export default function InventoryManagementPage() {
 
   function handleEdit(item) {
     setEditingId(item.id);
-    setDrug(item.drug || "");
+    setDrug(item.drug_name || item.drug || "");
     setBarcode(item.barcode || "");
     setQty(item.quantity ?? "");
     setCost(item.unit_cost ?? "");
     setExpiry(item.expiry_date || "");
-    setBatch(item.batch || "");
+    setBatch(item.batch_no || item.batch || "");
+    setShowDrugDropdown(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -196,6 +232,19 @@ export default function InventoryManagementPage() {
       0
     );
   }, [inventory]);
+
+  const filteredDrugs = useMemo(() => searchDrugMaster(allDrugs, drug, 20), [allDrugs, drug]);
+
+  const handleDrugSelect = (selectedDrug) => {
+    const displayName = getDrugDisplayName(selectedDrug);
+    const unitPrice = getDrugUnitPrice(selectedDrug, "pharmacy");
+
+    setDrug(displayName);
+    if (unitPrice !== null && !cost) {
+      setCost(String(unitPrice));
+    }
+    setShowDrugDropdown(false);
+  };
 
   const pageStyle = {
     padding: "24px",
@@ -281,6 +330,27 @@ export default function InventoryManagementPage() {
     padding: "18px",
   };
 
+  const dropdownStyle = {
+    position: "absolute",
+    top: "calc(100% + 6px)",
+    left: 0,
+    right: 0,
+    background: "#fff",
+    border: "1px solid #cbd5e1",
+    borderRadius: "14px",
+    boxShadow: "0 10px 30px rgba(15, 23, 42, 0.10)",
+    zIndex: 30,
+    maxHeight: "240px",
+    overflowY: "auto",
+  };
+
+  const dropdownItemStyle = {
+    padding: "12px 14px",
+    borderBottom: "1px solid #e2e8f0",
+    cursor: "pointer",
+    background: "#fff",
+  };
+
   return (
     <div style={pageStyle}>
       <div style={titleStyle}>Inventory Management</div>
@@ -351,12 +421,38 @@ export default function InventoryManagementPage() {
           <div style={gridStyle}>
             <div>
               <label style={labelStyle}>Drug Name</label>
-              <input
-                value={drug}
-                onChange={(e) => setDrug(e.target.value)}
-                placeholder="Drug Name"
-                style={inputStyle}
-              />
+              <div style={{ position: "relative" }}>
+                <input
+                  value={drug}
+                  onChange={(e) => setDrug(e.target.value)}
+                  onFocus={() => setShowDrugDropdown(true)}
+                  onBlur={() => setTimeout(() => setShowDrugDropdown(false), 160)}
+                  placeholder="Search drug by brand or generic name"
+                  style={inputStyle}
+                />
+
+                {showDrugDropdown && filteredDrugs.length > 0 ? (
+                  <div style={dropdownStyle}>
+                    {filteredDrugs.map((result) => (
+                      <div
+                        key={result.drug_code || result.display_name}
+                        style={dropdownItemStyle}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          handleDrugSelect(result);
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                          {getDrugDisplayName(result)}
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#64748b" }}>
+                          {result.generic_name || "Generic name unavailable"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div>
@@ -455,12 +551,12 @@ export default function InventoryManagementPage() {
               <tbody>
                 {inventory.map((item) => (
                   <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: "14px" }}>{item.drug || "-"}</td>
+                    <td style={{ padding: "14px" }}>{item.drug_name || "-"}</td>
                     <td style={{ padding: "14px" }}>{item.barcode || "-"}</td>
                     <td style={{ padding: "14px" }}>{item.quantity}</td>
                     <td style={{ padding: "14px" }}>{formatCurrency(item.unit_cost)}</td>
                     <td style={{ padding: "14px" }}>{item.expiry_date || "-"}</td>
-                    <td style={{ padding: "14px" }}>{item.batch || "-"}</td>
+                    <td style={{ padding: "14px" }}>{item.batch_no || "-"}</td>
                     <td style={{ padding: "14px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
                       <button
                         onClick={() => handleEdit(item)}

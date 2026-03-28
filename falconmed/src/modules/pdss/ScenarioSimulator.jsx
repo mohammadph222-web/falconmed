@@ -1,50 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import drugsMasterCsv from "../../data/drugs_master.csv?raw";
 import { supabase } from "../../lib/supabaseClient";
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeKey(key) {
-  return String(key || "")
-    .toLowerCase()
-    .replace(/[\s/_-]+/g, "")
-    .trim();
-}
-
-function getValue(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
-}
+import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "../../utils/drugMaster";
 
 function toNumber(value) {
   const parsed = Number(value);
@@ -67,57 +23,23 @@ export default function ScenarioSimulator() {
   const [reorderMsg, setReorderMsg] = useState("");
 
   useEffect(() => {
-    const text = String(drugsMasterCsv || "");
+    let isMounted = true;
 
-    if (!text.trim()) {
-      setAllDrugs([]);
-      return;
-    }
-
-    const lines = text
-      .split(/\r?\n/)
-      .filter((line) => line.trim() !== "");
-
-    if (lines.length < 2) {
-      setAllDrugs([]);
-      return;
-    }
-
-    const rawHeaders = parseCSVLine(lines[0]);
-    const headers = rawHeaders.map((h) => normalizeKey(h));
-
-    const parsed = lines.slice(1).map((line) => {
-      const cols = parseCSVLine(line);
-      const rawRow = {};
-
-      headers.forEach((header, index) => {
-        rawRow[header] = cols[index] ?? "";
+    loadDrugMaster()
+      .then((rows) => {
+        if (isMounted) {
+          setAllDrugs(rows || []);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setAllDrugs([]);
+        }
       });
 
-      const brand = getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]);
-      const generic = getValue(rawRow, ["generic", "genericname", "scientificname"]);
-      const strength = getValue(rawRow, ["strength"]);
-
-      const label = brand
-        ? `${brand}${strength ? ` ${strength}` : ""}`
-        : `${generic || "Unknown"}${strength ? ` ${strength}` : ""}`;
-
-      return {
-        label: label.trim(),
-        brand,
-        generic,
-      };
-    });
-
-    const unique = Array.from(
-      new Map(
-        parsed
-          .filter((d) => d.label && d.label !== "Unknown")
-          .map((d) => [d.label.toLowerCase(), d])
-      ).values()
-    );
-
-    setAllDrugs(unique);
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const canRun = useMemo(() => {
@@ -131,18 +53,7 @@ export default function ScenarioSimulator() {
 
   const filteredDrugs = useMemo(() => {
     if (!showDrugDropdown) return [];
-    const q = form.drugName.toLowerCase().trim();
-    if (!q) return allDrugs.slice(0, 20);
-
-    return allDrugs
-      .filter((drug) => {
-        return (
-          drug.label.toLowerCase().includes(q) ||
-          drug.brand?.toLowerCase().includes(q) ||
-          drug.generic?.toLowerCase().includes(q)
-        );
-      })
-      .slice(0, 20);
+    return searchDrugMaster(allDrugs, form.drugName, 20);
   }, [allDrugs, form.drugName, showDrugDropdown]);
 
   const handleChange = (field, value) => {
@@ -235,15 +146,15 @@ export default function ScenarioSimulator() {
               <div style={drugDropdown}>
                 {filteredDrugs.map((drug) => (
                   <button
-                    key={drug.label}
+                    key={drug.drug_code || drug.display_name}
                     type="button"
                     style={drugOption}
                     onClick={() => {
-                      handleChange("drugName", drug.label);
+                      handleChange("drugName", getDrugDisplayName(drug));
                       setShowDrugDropdown(false);
                     }}
                   >
-                    {drug.label}
+                    {getDrugDisplayName(drug)}
                   </button>
                 ))}
               </div>
