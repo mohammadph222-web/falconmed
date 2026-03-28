@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
+import InsightCard from "./components/InsightCard";
+import SkeletonCard from "./components/SkeletonCard";
 import { supabase } from "./lib/supabaseClient";
 import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
+import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
 
 function formatCurrency(value) {
   const n = Number(value || 0);
@@ -109,298 +112,406 @@ export default function PharmacyNetwork() {
     () =>
       inventory.map((item, index) => ({
         ...item,
-        rowBackground: index % 2 === 0 ? "#ffffff" : "#f8fafc",
+        _isEven: index % 2 === 0,
       })),
     [inventory]
   );
 
+  const imbalanceInsight = useMemo(() => {
+    if (loading || groupedByPharmacy.length < 2) return null;
+
+    const activeGroups = groupedByPharmacy.filter((group) => group.items.length > 0);
+    if (activeGroups.length < 2) return null;
+
+    const sorted = [...activeGroups].sort((a, b) => b.totalQty - a.totalQty);
+    const highest = sorted[0];
+    const lowest = sorted[sorted.length - 1];
+    const qtyDiff = Number(highest.totalQty || 0) - Number(lowest.totalQty || 0);
+
+    if (qtyDiff < 40) return null;
+
+    return {
+      icon: "⇅",
+      tone: "info",
+      title: "Smart Insight: Stock Imbalance",
+      message: `${highest.pharmacy?.name || "Top site"} carries ${Number(highest.totalQty || 0).toLocaleString()} units vs ${Number(
+        lowest.totalQty || 0
+      ).toLocaleString()} at ${lowest.pharmacy?.name || "lowest site"}. Consider balancing transfer opportunities.`,
+    };
+  }, [groupedByPharmacy, loading]);
+
   return (
-    <div style={pageWrap}>
-      <div style={shellCard}>
-        <div style={headerWrap}>
-          <h1 style={pageTitle}>
-            Pharmacy Network
-          </h1>
-          <p style={pageSubtitle}>
-            View active pharmacies and their inventory records across FalconMed.
-          </p>
+    <div style={page}>
+      {/* Page header */}
+      <div style={pageHeaderRow}>
+        <div>
+          <h1 style={pageTitle}>Pharmacy Network</h1>
+          <p style={pageSub}>View active pharmacies and their inventory records across FalconMed.</p>
         </div>
+      </div>
 
-        {error ? (
-          <div style={errorBanner}>
-            {error}
-          </div>
-        ) : null}
+      {error ? (
+        <div style={errorBanner}>{error}</div>
+      ) : null}
 
-        <div style={metricGrid}>
-          <MetricCard label="TOTAL PHARMACIES" value={pharmacies.length} />
-          <MetricCard label="INVENTORY RECORDS" value={inventory.length} />
-          <MetricCard label="TOTAL STOCK QTY" value={totalInventoryQty} />
-          <MetricCard
-            label="TOTAL STOCK VALUE"
-            value={formatCurrency(totalInventoryValue)}
-          />
-        </div>
+      {/* KPI row */}
+      <div style={kpiGrid}>
+        {loading ? (
+          Array.from({ length: 4 }).map((_, index) => (
+            <SkeletonCard
+              key={`pharmacy-kpi-skeleton-${index}`}
+              style={{ ...metricCard, borderTop: "4px solid #e2e8f0", minHeight: 116 }}
+              blocks={[
+                { width: "42%", height: 10, gap: 12 },
+                { width: index === 3 ? "68%" : "48%", height: 32, gap: 12 },
+                { width: "74%", height: 10, gap: 0 },
+              ]}
+            />
+          ))
+        ) : (
+          <>
+            <MetricCard label="TOTAL PHARMACIES" value={pharmacies.length} accent="#3b82f6" hint="registered" />
+            <MetricCard label="INVENTORY RECORDS" value={inventory.length} accent="#8b5cf6" hint="line items" />
+            <MetricCard label="TOTAL STOCK QTY" value={totalInventoryQty} accent="#10b981" hint="units on hand" />
+            <MetricCard label="TOTAL STOCK VALUE" value={totalInventoryValue} valueFn={formatCurrency} accent="#f59e0b" hint="estimated value" />
+          </>
+        )}
+      </div>
 
-        <div style={contentGrid}>
-          <div style={contentCard}>
-            <h2 style={sectionTitle}>Pharmacies</h2>
+      {/* Content columns */}
+      {imbalanceInsight && (
+        <InsightCard
+          icon={imbalanceInsight.icon}
+          tone={imbalanceInsight.tone}
+          title={imbalanceInsight.title}
+          message={imbalanceInsight.message}
+          style={{ marginBottom: 18 }}
+        />
+      )}
 
-            {pharmacies.length === 0 ? (
-              <div style={emptyStateBox}>
-                No pharmacies found.
-              </div>
-            ) : (
-              <div style={pharmacyList}>
-                {groupedByPharmacy.map((group) => (
-                  <div key={group.pharmacy.id} style={pharmacyCard}>
-                    <div style={pharmacyName}>
-                      {group.pharmacy.name}
-                    </div>
-
-                    <div style={pharmacyMeta}>
-                      Location: {group.pharmacy.location || "-"}
-                    </div>
-
-                    <div style={pharmacyMeta}>
-                      Inventory Items: {group.items.length}
-                    </div>
-
-                    <div style={pharmacyMeta}>
-                      Total Qty: {group.totalQty}
-                    </div>
-
-                    <div style={pharmacyValue}>
-                      Stock Value: {formatCurrency(group.totalValue)}
-                    </div>
+      <div style={contentGrid}>
+        {/* Pharmacy list */}
+        <div style={contentCard}>
+          <h2 style={sectionTitle}>Pharmacies</h2>
+          {loading ? (
+            <div style={pharmacyList}>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <SkeletonCard
+                  key={`pharmacy-card-skeleton-${index}`}
+                  style={{ ...pharmacyCard, borderTop: "3px solid #e2e8f0", minHeight: 116 }}
+                  blocks={[
+                    { width: "58%", height: 16, gap: 14 },
+                    { width: "90%", height: 10, gap: 10 },
+                    { width: "82%", height: 10, gap: 10 },
+                    { width: "74%", height: 10, gap: 0 },
+                  ]}
+                />
+              ))}
+            </div>
+          ) : pharmacies.length === 0 ? (
+            <div style={emptyStateBox}>
+              <p style={{ margin: 0, fontWeight: 600, color: "#475569" }}>No pharmacies found</p>
+              <p style={{ margin: "6px 0 0 0", color: "#94a3b8", fontSize: 13 }}>Add pharmacies to see them here</p>
+            </div>
+          ) : (
+            <div style={pharmacyList}>
+              {groupedByPharmacy.map((group) => (
+                <div className="ui-hover-lift" key={group.pharmacy.id} style={pharmacyCard}>
+                  <div style={pharmacyNameRow}>
+                    <span style={pharmacyNameText}>{group.pharmacy.name}</span>
+                    <span style={pharmacyItemsBadge}>{group.items.length} items</span>
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
+                  {group.pharmacy.location && (
+                    <div style={pharmacyMetaRow}>
+                      <span style={pharmacyMetaLabel}>Location</span>
+                      <span style={pharmacyMetaValue}>{group.pharmacy.location}</span>
+                    </div>
+                  )}
+                  <div style={pharmacyMetaRow}>
+                    <span style={pharmacyMetaLabel}>Total Qty</span>
+                    <span style={pharmacyMetaValue}>{group.totalQty}</span>
+                  </div>
+                  <div style={{ ...pharmacyMetaRow, marginBottom: 0 }}>
+                    <span style={pharmacyMetaLabel}>Stock Value</span>
+                    <span style={{ ...pharmacyMetaValue, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(group.totalValue)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
-          <div style={contentCard}>
-            <h2 style={sectionTitle}>
-              Pharmacy Inventory
-            </h2>
-
-            {loading ? (
-              <div style={loadingText}>Loading...</div>
-            ) : inventory.length === 0 ? (
-              <div style={emptyStateBox}>
-                No inventory records found.
+        {/* Inventory table */}
+        <div style={contentCard}>
+          <h2 style={sectionTitle}>Pharmacy Inventory</h2>
+          {loading ? (
+            <div style={tableWrap}>
+              <div style={{ padding: 16, display: "grid", gap: 10 }}>
+                <SkeletonCard
+                  style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}
+                  blocks={[
+                    { width: "100%", height: 38, gap: 10, radius: 10 },
+                    { width: "100%", height: 38, gap: 10, radius: 10 },
+                    { width: "100%", height: 38, gap: 10, radius: 10 },
+                    { width: "100%", height: 38, gap: 10, radius: 10 },
+                    { width: "100%", height: 38, gap: 0, radius: 10 },
+                  ]}
+                />
               </div>
-            ) : (
-              <div style={tableWrap}>
-                <table style={table}>
-                  <thead>
-                    <tr style={tableHeadRow}>
-                      <th style={thStyle}>Pharmacy</th>
-                      <th style={thStyle}>Drug</th>
-                      <th style={thStyle}>Barcode</th>
-                      <th style={thStyle}>Quantity</th>
-                      <th style={thStyle}>Unit Cost</th>
-                      <th style={thStyle}>Expiry Date</th>
-                      <th style={thStyle}>Batch</th>
+            </div>
+          ) : inventory.length === 0 ? (
+            <div style={emptyStateBox}>
+              <p style={{ margin: 0, fontWeight: 600, color: "#475569" }}>No inventory records</p>
+              <p style={{ margin: "6px 0 0 0", color: "#94a3b8", fontSize: 13 }}>Inventory will appear here once synced</p>
+            </div>
+          ) : (
+            <div style={tableWrap}>
+              <table style={table}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>Pharmacy</th>
+                    <th style={thStyle}>Drug</th>
+                    <th style={thStyle}>Barcode</th>
+                    <th style={thStyle}>Quantity</th>
+                    <th style={thStyle}>Unit Cost</th>
+                    <th style={thStyle}>Expiry Date</th>
+                    <th style={thStyle}>Batch</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryRows.map((item) => (
+                    <tr key={item.id} style={{ background: item._isEven ? "white" : "#f9fafb" }}>
+                      <td style={tdStyle}>{pharmacyMap[item.pharmacy_id]?.name || "-"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: "#0f172a" }}>{item.drug_name || "-"}</td>
+                      <td style={{ ...tdStyle, color: "#64748b", fontFamily: "monospace", fontSize: 12 }}>{item.barcode || "-"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{item.quantity}</td>
+                      <td style={tdStyle}>{formatCurrency(item.unit_cost)}</td>
+                      <td style={tdStyle}>{item.expiry_date || "-"}</td>
+                      <td style={{ ...tdStyle, color: "#64748b" }}>{item.batch_no || "-"}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {inventoryRows.map((item) => (
-                      <tr
-                        key={item.id}
-                        style={{
-                          ...tableRow,
-                          background: item.rowBackground,
-                        }}
-                      >
-                        <td style={tdStyle}>
-                          {pharmacyMap[item.pharmacy_id]?.name || "-"}
-                        </td>
-                        <td style={tdStyle}>{item.drug_name || "-"}</td>
-                        <td style={tdStyle}>{item.barcode || "-"}</td>
-                        <td style={tdStyle}>{item.quantity}</td>
-                        <td style={tdStyle}>
-                          {formatCurrency(item.unit_cost)}
-                        </td>
-                        <td style={tdStyle}>{item.expiry_date || "-"}</td>
-                        <td style={tdStyle}>{item.batch_no || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-function MetricCard({ label, value }) {
+function MetricCard({ label, value, accent, hint, valueFn }) {
+  // valueFn: optional formatter fn(animatedNum) → string (e.g. formatCurrency)
+  // If value is a raw number, animate it; if pre-formatted string, show as-is
+  const numericTarget = typeof value === "number" ? value : 0;
+  const animated = useAnimatedCounter(numericTarget);
+  const display =
+    typeof valueFn === "function"
+      ? valueFn(animated)
+      : typeof value === "number"
+      ? animated.toLocaleString()
+      : value;
+
   return (
-    <div style={metricCard}>
-      <div style={metricLabel}>
-        {label}
-      </div>
-      <div style={metricValue}>
-        {value}
-      </div>
+    <div className="ui-hover-lift" style={{ ...metricCard, borderTop: `4px solid ${accent}` }}>
+      <p style={metricLabel}>{label}</p>
+      <p style={metricValue}>{display}</p>
+      {hint && <p style={metricHint}>{hint}</p>}
     </div>
   );
 }
 
-const pageWrap = {
-  padding: 28,
-  fontFamily: "Arial, sans-serif",
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
+const page = {
+  maxWidth: 1400,
+  margin: "0 auto",
+  padding: 0,
+  fontFamily: "'Segoe UI', Arial, sans-serif",
 };
 
-const shellCard = {
-  background: "#fff",
-  border: "1px solid #dbe3ee",
-  borderRadius: 24,
-  padding: 28,
-  boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
-};
-
-const headerWrap = {
-  textAlign: "center",
-  marginBottom: 24,
+const pageHeaderRow = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  marginBottom: 28,
+  paddingBottom: 20,
+  borderBottom: "1px solid #f1f5f9",
 };
 
 const pageTitle = {
   margin: 0,
-  fontSize: 30,
+  fontSize: 28,
   fontWeight: 800,
   color: "#0f172a",
   letterSpacing: "-0.02em",
 };
 
-const pageSubtitle = {
-  color: "#475569",
-  fontSize: 15,
-  marginTop: 10,
-  marginBottom: 0,
+const pageSub = {
+  margin: "4px 0 0 0",
+  fontSize: 14,
+  color: "#64748b",
+  fontWeight: 400,
 };
 
 const errorBanner = {
-  background: "#fde7e7",
-  color: "#b42318",
-  border: "1px solid #f3b4b4",
-  borderRadius: 14,
-  padding: "14px 18px",
-  marginBottom: 20,
-  textAlign: "center",
+  background: "#fef2f2",
+  color: "#b91c1c",
+  borderLeft: "4px solid #ef4444",
+  borderRadius: 12,
+  padding: "12px 16px",
+  marginBottom: 24,
   fontWeight: 600,
+  fontSize: 14,
 };
 
-const metricGrid = {
+const kpiGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-  gap: 16,
-  marginBottom: 20,
+  gap: 14,
+  marginBottom: 24,
+};
+
+const metricCard = {
+  background: "white",
+  border: "1px solid #e8edf5",
+  borderRadius: 18,
+  padding: "22px 20px 18px",
+  boxShadow: "0 2px 14px rgba(15,23,42,0.06)",
+};
+
+const metricLabel = {
+  margin: "0 0 10px 0",
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  color: "#94a3b8",
+  textTransform: "uppercase",
+};
+
+const metricValue = {
+  margin: 0,
+  fontSize: 32,
+  fontWeight: 800,
+  color: "#0f172a",
+  letterSpacing: "-0.02em",
+  lineHeight: 1.1,
+};
+
+const metricHint = {
+  margin: "4px 0 0 0",
+  fontSize: 12,
+  color: "#94a3b8",
 };
 
 const contentGrid = {
   display: "grid",
-  gridTemplateColumns: "320px 1fr",
+  gridTemplateColumns: "300px 1fr",
   gap: 20,
   alignItems: "start",
 };
 
 const contentCard = {
-  background: "#fff",
-  border: "1px solid #dbe3ee",
-  borderRadius: 20,
-  padding: 22,
-  minHeight: 420,
+  background: "white",
+  border: "1px solid #e8edf5",
+  borderRadius: 18,
+  padding: "22px 22px 26px",
+  boxShadow: "0 2px 14px rgba(15,23,42,0.06)",
 };
 
 const sectionTitle = {
-  marginTop: 0,
-  marginBottom: 16,
-  color: "#0f172a",
-  fontSize: 20,
+  margin: "0 0 16px 0",
+  fontSize: 16,
   fontWeight: 800,
+  color: "#0f172a",
+  letterSpacing: "-0.01em",
+  paddingBottom: 12,
+  borderBottom: "1px solid #f1f5f9",
 };
 
 const emptyStateBox = {
+  background: "#f8fafc",
   border: "1px dashed #cbd5e1",
-  borderRadius: 18,
-  padding: 28,
+  borderRadius: 14,
+  padding: "28px 20px",
   textAlign: "center",
-  color: "#64748b",
-  lineHeight: 1.6,
-  fontSize: 14,
 };
 
-const loadingText = {
-  color: "#64748b",
-  fontSize: 14,
+const loadingWrap = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "16px 0",
+};
+
+const loadingDot = {
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  background: "#3b82f6",
+  display: "inline-block",
 };
 
 const pharmacyList = {
   display: "grid",
-  gap: 12,
+  gap: 10,
 };
 
 const pharmacyCard = {
-  border: "1px solid #dbe3ee",
-  background: "#fff",
-  borderRadius: 16,
-  padding: 14,
+  border: "1px solid #e8edf5",
+  borderTop: "3px solid #3b82f6",
+  background: "white",
+  borderRadius: 14,
+  padding: "14px 16px",
+  boxShadow: "0 1px 6px rgba(15,23,42,0.04)",
 };
 
-const pharmacyName = {
+const pharmacyNameRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 10,
+};
+
+const pharmacyNameText = {
   fontWeight: 800,
   color: "#0f172a",
-  marginBottom: 6,
-  fontSize: 15,
+  fontSize: 14,
 };
 
-const pharmacyMeta = {
-  fontSize: 13,
-  color: "#64748b",
-  marginBottom: 4,
-};
-
-const pharmacyValue = {
-  fontSize: 13,
-  color: "#0f172a",
+const pharmacyItemsBadge = {
+  background: "#dbeafe",
+  color: "#1e40af",
+  borderRadius: 999,
+  padding: "2px 9px",
+  fontSize: 11,
   fontWeight: 700,
 };
 
-const metricCard = {
-  background: "#fff",
-  border: "1px solid #dbe3ee",
-  borderRadius: 18,
-  padding: 18,
-  minHeight: 110,
+const pharmacyMetaRow = {
   display: "flex",
-  flexDirection: "column",
-  justifyContent: "center",
+  justifyContent: "space-between",
+  marginBottom: 5,
 };
 
-const metricLabel = {
+const pharmacyMetaLabel = {
   fontSize: 12,
-  fontWeight: 800,
-  letterSpacing: "0.08em",
-  color: "#64748b",
-  marginBottom: 14,
-  textAlign: "center",
+  color: "#94a3b8",
+  fontWeight: 600,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
 };
 
-const metricValue = {
-  fontSize: 28,
-  fontWeight: 900,
-  color: "#0f172a",
-  textAlign: "center",
+const pharmacyMetaValue = {
+  fontSize: 13,
+  color: "#334155",
+  fontWeight: 500,
 };
 
 const tableWrap = {
   overflowX: "auto",
-  border: "1px solid #e2e8f0",
-  borderRadius: 14,
+  borderRadius: 12,
+  border: "1px solid #e8edf5",
 };
 
 const table = {
@@ -408,15 +519,7 @@ const table = {
   borderCollapse: "separate",
   borderSpacing: 0,
   fontSize: 13,
-};
-
-const tableHeadRow = {
-  background: "#f8fafc",
-  color: "#334155",
-};
-
-const tableRow = {
-  borderBottom: "1px solid #e2e8f0",
+  fontFamily: "'Segoe UI', Arial, sans-serif",
 };
 
 const thStyle = {
@@ -424,17 +527,21 @@ const thStyle = {
   position: "sticky",
   top: 0,
   zIndex: 1,
-  padding: "12px 12px",
+  padding: "10px 14px",
   background: "#f8fafc",
-  borderBottom: "1px solid #e2e8f0",
-  fontWeight: 800,
-  fontSize: 12,
-  letterSpacing: "0.04em",
+  borderBottom: "1px solid #f1f5f9",
+  fontWeight: 700,
+  fontSize: 11,
+  letterSpacing: "0.06em",
+  color: "#64748b",
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
 };
 
 const tdStyle = {
-  padding: "12px 12px",
-  color: "#0f172a",
+  padding: "12px 14px",
+  color: "#334155",
   verticalAlign: "middle",
   fontSize: 13,
+  borderBottom: "1px solid #f8fafc",
 };

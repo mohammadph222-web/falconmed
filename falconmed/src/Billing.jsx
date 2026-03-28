@@ -196,9 +196,14 @@ function Billing({ onBack }) {
 
   return (
     <div className="billing-page">
-      <div className="billing-header-bar">
-        <button onClick={onBack} className="back-button">Back</button>
-        <h2>Billing</h2>
+      <div className="billing-header-card">
+        <div>
+          <h1 className="billing-page-title">Billing</h1>
+          <p className="billing-page-sub">Create invoices and quotations for patient transactions.</p>
+        </div>
+        {onBack && (
+          <button onClick={onBack} className="back-button">← Back</button>
+        )}
       </div>
 
       <div className="billing-controls no-print">

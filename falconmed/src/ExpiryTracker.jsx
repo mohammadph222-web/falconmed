@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import InsightCard from "./components/InsightCard";
 import { supabase } from "./lib/supabaseClient";
 import {
   getDrugDisplayName,
@@ -423,10 +424,38 @@ export default function ExpiryTracker({ user, profile }) {
     };
   }, [items]);
 
+  const expiryInsight = useMemo(() => {
+    if (loading || items.length === 0) return null;
+
+    const highRiskItems = items.filter((item) => getStatus(item.expiryDate) === "High Risk");
+    const nearExpiryItems = items.filter((item) => getStatus(item.expiryDate) === "Near Expiry");
+
+    const atRiskCount = highRiskItems.length + nearExpiryItems.length;
+    if (atRiskCount === 0) return null;
+
+    const atRiskValue = [...highRiskItems, ...nearExpiryItems].reduce(
+      (sum, item) => sum + Number(item.quantity || 0) * Number(item.unitPrice || 0),
+      0
+    );
+
+    return {
+      icon: "⏳",
+      tone: highRiskItems.length > 0 ? "warning" : "info",
+      title: "Smart Insight: Expiry Pressure",
+      message: `${atRiskCount} item${atRiskCount === 1 ? "" : "s"} are approaching expiry (${highRiskItems.length} high risk). Estimated at-risk value: AED ${Math.round(
+        atRiskValue
+      ).toLocaleString()}.`,
+    };
+  }, [items, loading]);
+
   return (
     <div>
+      {/* Page header */}
       <div style={pageHeaderRow}>
-        <h1 style={pageTitle}>Expiry Tracker</h1>
+        <div>
+          <h1 style={pageTitle}>Expiry Tracker</h1>
+          <p style={pageSub}>Monitor stock expiry risk and near-expiry inventory value.</p>
+        </div>
         <button
           type="button"
           style={testBtn}
@@ -434,42 +463,57 @@ export default function ExpiryTracker({ user, profile }) {
           disabled={generatingTestData || loading}
           title="TEST ONLY"
         >
-          {generatingTestData ? "Generating..." : "Generate Test Inventory"}
+          {generatingTestData ? "Generating…" : "Generate Test Inventory"}
         </button>
       </div>
 
+      {/* KPI strip */}
       <div style={cardsGrid}>
-        <div style={statCard}>
+        <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
           <div style={statLabel}>Total Stock Value</div>
           <div style={statValue}>{totals.totalValue.toLocaleString()} AED</div>
         </div>
-
-        <div style={statCard}>
+        <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
           <div style={statLabel}>Near Expiry Value</div>
           <div style={statValue}>{totals.nearExpiryValue.toLocaleString()} AED</div>
         </div>
-
-        <div style={statCard}>
+        <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
           <div style={statLabel}>High Risk Value</div>
           <div style={statValue}>{totals.highRiskValue.toLocaleString()} AED</div>
         </div>
-
-        <div style={statCard}>
+        <div style={{ ...statCard, borderTop: "4px solid #94a3b8" }}>
           <div style={statLabel}>Expired Value</div>
           <div style={statValue}>{totals.expiredValue.toLocaleString()} AED</div>
         </div>
       </div>
 
+      {/* Add form */}
       <div style={formCard}>
         <h2 style={sectionTitle}>Add Expiry Item</h2>
 
-        {message && <div style={messageBox}>{message}</div>}
+        {message && (
+          <div
+            style={
+              message.toLowerCase().includes("success") ||
+              message.toLowerCase().includes("generated")
+                ? messageBoxSuccess
+                : message.toLowerCase().includes("fail") ||
+                    message.toLowerCase().includes("error") ||
+                    message.toLowerCase().includes("unable")
+                  ? messageBoxError
+                  : messageBox
+            }
+          >
+            {message}
+          </div>
+        )}
 
         <form onSubmit={handleAdd} style={formGrid}>
           <div style={drugSearchContainer}>
+            <div style={fieldLabel}>Search Drug</div>
             <input
               style={input}
-              placeholder="Search drug by brand, generic, strength..."
+              placeholder="Search by brand, generic, strength…"
               value={drugSearch}
               onChange={(e) => {
                 setDrugSearch(e.target.value);
@@ -495,60 +539,101 @@ export default function ExpiryTracker({ user, profile }) {
               <div style={drugDropdownEmpty}>No matching drugs found</div>
             )}
           </div>
-          <input
-            style={input}
-            placeholder="Drug Name (selected above)"
-            value={form.drugName}
-            onChange={(e) => handleChange("drugName", e.target.value)}
-            readOnly
-          />
-          <input
-            style={input}
-            placeholder="Batch No"
-            value={form.batchNo}
-            onChange={(e) => handleChange("batchNo", e.target.value)}
-          />
-          <input
-            style={input}
-            type="number"
-            placeholder="Quantity"
-            value={form.quantity}
-            onChange={(e) => handleChange("quantity", e.target.value)}
-          />
-          <input
-            style={input}
-            type="date"
-            value={form.expiryDate}
-            onChange={(e) => handleChange("expiryDate", e.target.value)}
-          />
-          <input
-            style={input}
-            type="number"
-            placeholder="Unit Price"
-            value={form.unitPrice}
-            onChange={(e) => handleChange("unitPrice", e.target.value)}
-          />
-          <input
-            style={input}
-            placeholder="Location"
-            value={form.location}
-            onChange={(e) => handleChange("location", e.target.value)}
-          />
-          <textarea
-            style={textarea}
-            placeholder="Notes (e.g., storage conditions, supplier info)"
-            value={form.notes}
-            onChange={(e) => handleChange("notes", e.target.value)}
-          />
 
-          <button type="submit" style={primaryBtn}>
-            Add Item
-          </button>
+          <div>
+            <div style={fieldLabel}>Drug Name</div>
+            <input
+              style={inputReadOnly}
+              placeholder="Auto-filled from search above"
+              value={form.drugName}
+              onChange={(e) => handleChange("drugName", e.target.value)}
+              readOnly
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Batch No.</div>
+            <input
+              style={input}
+              placeholder="e.g. BATCH-10001"
+              value={form.batchNo}
+              onChange={(e) => handleChange("batchNo", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Quantity</div>
+            <input
+              style={input}
+              type="number"
+              placeholder="e.g. 50"
+              value={form.quantity}
+              onChange={(e) => handleChange("quantity", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Expiry Date</div>
+            <input
+              style={input}
+              type="date"
+              value={form.expiryDate}
+              onChange={(e) => handleChange("expiryDate", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Unit Price (AED)</div>
+            <input
+              style={input}
+              type="number"
+              placeholder="e.g. 12.50"
+              value={form.unitPrice}
+              onChange={(e) => handleChange("unitPrice", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Location</div>
+            <input
+              style={input}
+              placeholder="e.g. Shelf A3"
+              value={form.location}
+              onChange={(e) => handleChange("location", e.target.value)}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={fieldLabel}>Notes</div>
+            <textarea
+              style={textarea}
+              placeholder="Storage conditions, supplier info…"
+              value={form.notes}
+              onChange={(e) => handleChange("notes", e.target.value)}
+            />
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <button type="submit" style={primaryBtn}>
+              Add Item
+            </button>
+          </div>
         </form>
       </div>
 
+      {/* Table */}
       <div style={tableCard}>
         <h2 style={sectionTitle}>Tracked Items</h2>
+
+        {expiryInsight && (
+          <InsightCard
+            icon={expiryInsight.icon}
+            tone={expiryInsight.tone}
+            title={expiryInsight.title}
+            message={expiryInsight.message}
+            style={{ marginTop: -2 }}
+          />
+        )}
 
         <div style={tableWrap}>
           <table style={table}>
@@ -569,25 +654,28 @@ export default function ExpiryTracker({ user, profile }) {
               {loading && (
                 <tr>
                   <td colSpan="9" style={emptyCell}>
-                    Loading expiry records...
+                    Loading expiry records…
                   </td>
                 </tr>
               )}
 
-              {items.map((item) => {
+              {items.map((item, idx) => {
                 const status = item.expiryDate ? getStatus(item.expiryDate) : item.status || "Active";
                 const value = Number(item.quantity) * Number(item.unitPrice);
 
                 return (
-                  <tr key={item.id}>
-                    <td style={td}>{item.drugName}</td>
-                    <td style={td}>{item.batchNo}</td>
+                  <tr
+                    key={item.id}
+                    style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
+                  >
+                    <td style={{ ...td, fontWeight: 700 }}>{item.drugName}</td>
+                    <td style={{ ...td, color: "#64748b" }}>{item.batchNo}</td>
                     <td style={td}>{item.quantity}</td>
-                    <td style={td}>{item.unitPrice}</td>
-                    <td style={td}>{value.toLocaleString()} AED</td>
-                    <td style={td}>{item.expiryDate}</td>
-                    <td style={td}>{item.location}</td>
-                    <td style={td}>{item.notes}</td>
+                    <td style={td}>{item.unitPrice} AED</td>
+                    <td style={{ ...td, fontWeight: 600 }}>{value.toLocaleString()} AED</td>
+                    <td style={{ ...td, color: "#64748b" }}>{item.expiryDate}</td>
+                    <td style={{ ...td, color: "#64748b" }}>{item.location}</td>
+                    <td style={{ ...td, color: "#64748b", maxWidth: "160px" }}>{item.notes}</td>
                     <td style={td}>
                       <span style={getStatusStyle(status)}>{status}</span>
                     </td>
@@ -598,7 +686,7 @@ export default function ExpiryTracker({ user, profile }) {
               {!loading && items.length === 0 && (
                 <tr>
                   <td colSpan="9" style={emptyCell}>
-                    No expiry items found.
+                    No expiry items found. Use the form above to add your first item.
                   </td>
                 </tr>
               )}
@@ -611,98 +699,156 @@ export default function ExpiryTracker({ user, profile }) {
 }
 
 const pageTitle = {
-  fontSize: "28px",
-  fontWeight: 700,
+  fontSize: "30px",
+  fontWeight: 800,
   margin: 0,
   color: "#0f172a",
+  letterSpacing: "-0.02em",
+  lineHeight: 1.2,
+};
+
+const pageSub = {
+  margin: "6px 0 0",
+  fontSize: "14px",
+  color: "#64748b",
+  lineHeight: 1.6,
 };
 
 const pageHeaderRow = {
   display: "flex",
-  alignItems: "center",
+  alignItems: "flex-start",
   justifyContent: "space-between",
   gap: "12px",
-  marginBottom: "18px",
+  marginBottom: "24px",
+  paddingBottom: "20px",
+  borderBottom: "1px solid #f1f5f9",
   flexWrap: "wrap",
 };
 
 const testBtn = {
-  padding: "10px 12px",
+  padding: "9px 15px",
   background: "#f59e0b",
   color: "white",
   border: "none",
-  borderRadius: "9px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontSize: "13px",
-  fontWeight: "bold",
+  fontWeight: 700,
+  flexShrink: 0,
 };
 
 const cardsGrid = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
-  marginBottom: "16px",
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: "16px",
+  marginBottom: "24px",
 };
 
 const statCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "16px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e5eaf1",
+  padding: "20px 18px 16px",
+  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
+  border: "1px solid #e8edf5",
+  textAlign: "center",
 };
 
 const statLabel = {
-  fontSize: "12px",
-  color: "#64748b",
-  marginBottom: "8px",
+  fontSize: "10px",
+  color: "#94a3b8",
+  marginBottom: "10px",
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
 };
 
 const statValue = {
-  fontSize: "22px",
-  fontWeight: "bold",
+  fontSize: "26px",
+  fontWeight: 800,
   color: "#0f172a",
+  letterSpacing: "-0.02em",
+  lineHeight: 1.1,
 };
 
 const formCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "18px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e5eaf1",
-  marginBottom: "16px",
+  padding: "24px 26px",
+  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
+  border: "1px solid #e8edf5",
+  marginBottom: "22px",
 };
 
 const sectionTitle = {
   marginTop: 0,
-  marginBottom: "12px",
+  marginBottom: "16px",
   color: "#0f172a",
-  fontSize: "18px",
+  fontSize: "16px",
+  fontWeight: 800,
+  letterSpacing: "-0.01em",
+  paddingBottom: "12px",
+  borderBottom: "1px solid #f1f5f9",
 };
 
 const formGrid = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "12px",
+  gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+  gap: "14px",
+};
+
+const fieldLabel = {
+  fontSize: "11px",
+  fontWeight: 700,
+  color: "#374151",
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  marginBottom: "6px",
 };
 
 const messageBox = {
-  marginBottom: "10px",
-  padding: "9px 11px",
+  marginBottom: "14px",
+  padding: "11px 14px",
   borderRadius: "10px",
-  background: "#f8fafc",
-  border: "1px solid #e2e8f0",
-  color: "#334155",
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  borderLeft: "4px solid #3b82f6",
+  color: "#1e3a5f",
   fontSize: "13px",
+  fontWeight: 600,
+};
+
+const messageBoxSuccess = {
+  ...messageBox,
+  background: "#dcfce7",
+  border: "1px solid #bbf7d0",
+  borderLeft: "4px solid #22c55e",
+  color: "#166534",
+};
+
+const messageBoxError = {
+  ...messageBox,
+  background: "#fee2e2",
+  border: "1px solid #fecaca",
+  borderLeft: "4px solid #ef4444",
+  color: "#991b1b",
 };
 
 const input = {
   width: "100%",
   padding: "10px 12px",
   fontSize: "14px",
-  borderRadius: "9px",
-  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  border: "1.5px solid #e2e8f0",
   boxSizing: "border-box",
+  fontFamily: "'Segoe UI', Arial, sans-serif",
+  color: "#0f172a",
+  background: "#fff",
+};
+
+const inputReadOnly = {
+  ...input,
+  background: "#f8fafc",
+  color: "#64748b",
 };
 
 const drugSearchContainer = {
@@ -712,13 +858,13 @@ const drugSearchContainer = {
 
 const drugDropdown = {
   position: "absolute",
-  top: "48px",
+  top: "calc(100% + 6px)",
   left: 0,
   right: 0,
   background: "white",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.1)",
+  border: "1.5px solid #e2e8f0",
+  borderRadius: "12px",
+  boxShadow: "0 8px 24px rgba(15,23,42,0.12)",
   zIndex: 1000,
   maxHeight: "250px",
   overflowY: "auto",
@@ -733,13 +879,13 @@ const drugOption = {
 };
 
 const drugDropdownEmpty = {
-  padding: "10px 14px",
+  padding: "11px 16px",
   color: "#64748b",
   fontSize: "14px",
   textAlign: "center",
   background: "#f8fafc",
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
+  border: "1.5px solid #e2e8f0",
+  borderRadius: "12px",
   marginTop: "4px",
 };
 
@@ -747,92 +893,114 @@ const textarea = {
   width: "100%",
   padding: "10px 12px",
   fontSize: "14px",
-  borderRadius: "9px",
-  border: "1px solid #cbd5e1",
+  borderRadius: "10px",
+  border: "1.5px solid #e2e8f0",
   boxSizing: "border-box",
-  gridColumn: "1 / -1",
-  fontFamily: "inherit",
+  fontFamily: "'Segoe UI', Arial, sans-serif",
   resize: "vertical",
-  minHeight: "74px",
+  minHeight: "72px",
+  color: "#0f172a",
+  background: "#fff",
 };
 
 const primaryBtn = {
-  padding: "10px 12px",
-  background: "#2563eb",
+  padding: "10px 22px",
+  background: "#1e40af",
   color: "white",
   border: "none",
-  borderRadius: "9px",
+  borderRadius: "10px",
   cursor: "pointer",
   fontSize: "14px",
-  fontWeight: "bold",
+  fontWeight: 700,
+  letterSpacing: "0.01em",
+  boxShadow: "0 2px 10px rgba(30,64,175,0.25)",
 };
 
 const tableCard = {
   background: "white",
   borderRadius: "16px",
-  padding: "18px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e5eaf1",
+  padding: "24px 26px",
+  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
+  border: "1px solid #e8edf5",
 };
 
 const tableWrap = {
   overflowX: "auto",
+  borderRadius: "10px",
+  border: "1px solid #e8edf5",
 };
 
 const table = {
   width: "100%",
-  borderCollapse: "collapse",
+  borderCollapse: "separate",
+  borderSpacing: 0,
 };
 
 const th = {
   textAlign: "left",
-  padding: "10px 12px",
-  borderBottom: "1px solid #e2e8f0",
-  color: "#334155",
-  fontSize: "13px",
+  padding: "11px 14px",
+  background: "#f8fafc",
+  borderBottom: "1px solid #e8edf5",
+  color: "#64748b",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  position: "sticky",
+  top: 0,
+  whiteSpace: "nowrap",
 };
 
 const td = {
-  padding: "10px 12px",
+  padding: "11px 14px",
   borderBottom: "1px solid #f1f5f9",
   color: "#0f172a",
   fontSize: "13px",
+  verticalAlign: "middle",
 };
 
 const badgeBase = {
-  display: "inline-block",
-  padding: "6px 10px",
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 10px",
   borderRadius: "999px",
-  fontSize: "12px",
-  fontWeight: "bold",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
 };
 
 const badgeOk = {
   ...badgeBase,
   background: "#dcfce7",
   color: "#166534",
+  border: "1px solid #bbf7d0",
 };
 
 const badgeNear = {
   ...badgeBase,
   background: "#fef3c7",
   color: "#92400e",
+  border: "1px solid #fde68a",
 };
 
 const badgeHighRisk = {
   ...badgeBase,
   background: "#fee2e2",
   color: "#b91c1c",
+  border: "1px solid #fecaca",
 };
 
 const badgeExpired = {
   ...badgeBase,
-  background: "#e2e8f0",
-  color: "#334155",
+  background: "#f1f5f9",
+  color: "#475569",
+  border: "1px solid #cbd5e1",
 };
 
 const emptyCell = {
-  padding: "24px",
+  padding: "40px 20px",
   textAlign: "center",
-  color: "#64748b",
+  color: "#94a3b8",
+  fontSize: "14px",
+  background: "#f8fafc",
 };

@@ -1,5 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import InsightCard from "./components/InsightCard";
+import SkeletonCard from "./components/SkeletonCard";
 import { supabase } from "./lib/supabaseClient";
+import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
 import {
   getDrugDisplayName,
   getDrugUnitPrice,
@@ -235,6 +238,33 @@ export default function InventoryManagementPage() {
 
   const filteredDrugs = useMemo(() => searchDrugMaster(allDrugs, drug, 20), [allDrugs, drug]);
 
+  // Animated KPI counters
+  const animTotalItems = useAnimatedCounter(totalItems);
+  const animTotalValue = useAnimatedCounter(totalValue);
+  const animRecords = useAnimatedCounter(inventory.length);
+
+  const inventoryInsight = useMemo(() => {
+    if (loading || inventory.length === 0) return null;
+
+    const lowStockRows = inventory.filter(
+      (item) => Number(item.quantity || 0) > 0 && Number(item.quantity || 0) <= 10
+    );
+    if (lowStockRows.length === 0) return null;
+
+    const topLow = [...lowStockRows].sort(
+      (a, b) => Number(a.quantity || 0) - Number(b.quantity || 0)
+    )[0];
+
+    return {
+      icon: "▾",
+      tone: "warning",
+      title: "Smart Insight: Low Stock Warning",
+      message: `${lowStockRows.length} SKU${lowStockRows.length === 1 ? "" : "s"} are at or below 10 units. Lowest stock: ${topLow?.drug_name || "Unknown"} (${Number(
+        topLow?.quantity || 0
+      )} units).`,
+    };
+  }, [inventory, loading]);
+
   const handleDrugSelect = (selectedDrug) => {
     const displayName = getDrugDisplayName(selectedDrug);
     const unitPrice = getDrugUnitPrice(selectedDrug, "pharmacy");
@@ -246,88 +276,151 @@ export default function InventoryManagementPage() {
     setShowDrugDropdown(false);
   };
 
+  // ─── Style constants ──────────────────────────────────────────────────────────
+
   const pageStyle = {
-    padding: "24px",
-    background: "#f5f7fb",
+    padding: "32px",
+    background: "#eef2f7",
     minHeight: "100vh",
-    fontFamily: "Arial, sans-serif",
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+  };
+
+  const headerCard = {
+    background: "white",
+    borderRadius: "20px",
+    padding: "26px 32px",
+    boxShadow: "0 2px 16px rgba(15,23,42,0.07)",
+    marginBottom: "24px",
+    borderLeft: "5px solid #1e40af",
+  };
+
+  const headerTitle = {
+    margin: 0,
+    fontSize: "30px",
+    fontWeight: 800,
+    color: "#0f172a",
+    letterSpacing: "-0.02em",
+    lineHeight: 1.2,
+  };
+
+  const headerSub = {
+    marginTop: "6px",
+    marginBottom: 0,
+    fontSize: "14px",
+    color: "#64748b",
+    lineHeight: 1.6,
   };
 
   const cardStyle = {
     background: "#fff",
     borderRadius: "18px",
-    padding: "24px",
-    boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
+    padding: "24px 28px",
+    boxShadow: "0 2px 14px rgba(15,23,42,0.06)",
     marginBottom: "22px",
-  };
-
-  const titleStyle = {
-    fontSize: "34px",
-    fontWeight: "700",
-    marginBottom: "20px",
-    color: "#0f172a",
+    border: "1px solid #e8edf5",
   };
 
   const sectionTitle = {
-    fontSize: "22px",
-    fontWeight: "700",
+    fontSize: "15px",
+    fontWeight: 800,
     marginBottom: "18px",
+    marginTop: 0,
     color: "#0f172a",
-    textAlign: "center",
+    letterSpacing: "-0.01em",
+    paddingBottom: "12px",
+    borderBottom: "1px solid #f1f5f9",
   };
 
   const labelStyle = {
     display: "block",
-    fontWeight: "700",
-    marginBottom: "8px",
-    color: "#1e3557",
-    fontSize: "16px",
+    fontWeight: 700,
+    marginBottom: "6px",
+    color: "#374151",
+    fontSize: "11px",
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
   };
 
   const inputStyle = {
     width: "100%",
-    padding: "14px 16px",
-    borderRadius: "14px",
-    border: "1px solid #cbd5e1",
+    padding: "10px 13px",
+    borderRadius: "10px",
+    border: "1.5px solid #e2e8f0",
     outline: "none",
-    fontSize: "16px",
+    fontSize: "14px",
     boxSizing: "border-box",
     background: "#fff",
+    color: "#0f172a",
+    fontFamily: "'Segoe UI', Arial, sans-serif",
   };
 
   const buttonStyle = {
-    padding: "14px 20px",
-    borderRadius: "14px",
+    padding: "10px 22px",
+    borderRadius: "10px",
     border: "none",
-    background: "#2563eb",
+    background: "#1e40af",
     color: "#fff",
-    fontWeight: "700",
-    fontSize: "16px",
+    fontWeight: 700,
+    fontSize: "14px",
     cursor: "pointer",
+    boxShadow: "0 2px 10px rgba(30,64,175,0.25)",
+    letterSpacing: "0.01em",
   };
 
   const secondaryButtonStyle = {
-    padding: "14px 20px",
-    borderRadius: "14px",
-    border: "1px solid #cbd5e1",
+    padding: "10px 22px",
+    borderRadius: "10px",
+    border: "1.5px solid #e2e8f0",
     background: "#fff",
-    color: "#111827",
-    fontWeight: "700",
-    fontSize: "16px",
+    color: "#374151",
+    fontWeight: 600,
+    fontSize: "14px",
     cursor: "pointer",
   };
 
   const gridStyle = {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
     gap: "16px",
   };
 
-  const summaryBox = {
-    background: "#eff6ff",
-    border: "1px solid #bfdbfe",
-    borderRadius: "16px",
-    padding: "18px",
+  const kpiGrid = {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "14px",
+  };
+
+  const kpiCard = {
+    background: "white",
+    borderRadius: "14px",
+    padding: "16px 18px",
+    boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
+    border: "1px solid #e8edf5",
+    textAlign: "center",
+  };
+
+  const kpiLabel = {
+    fontSize: "10px",
+    fontWeight: 700,
+    color: "#94a3b8",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    marginBottom: "8px",
+  };
+
+  const kpiValue = {
+    fontSize: "26px",
+    fontWeight: 800,
+    color: "#0f172a",
+    letterSpacing: "-0.02em",
+    lineHeight: 1.1,
+  };
+
+  const kpiHint = {
+    fontSize: "11px",
+    color: "#94a3b8",
+    marginTop: "5px",
+    lineHeight: 1.4,
   };
 
   const dropdownStyle = {
@@ -336,86 +429,176 @@ export default function InventoryManagementPage() {
     left: 0,
     right: 0,
     background: "#fff",
-    border: "1px solid #cbd5e1",
-    borderRadius: "14px",
-    boxShadow: "0 10px 30px rgba(15, 23, 42, 0.10)",
+    border: "1.5px solid #e2e8f0",
+    borderRadius: "12px",
+    boxShadow: "0 10px 30px rgba(15,23,42,0.10)",
     zIndex: 30,
     maxHeight: "240px",
     overflowY: "auto",
   };
 
   const dropdownItemStyle = {
-    padding: "12px 14px",
-    borderBottom: "1px solid #e2e8f0",
+    padding: "11px 14px",
+    borderBottom: "1px solid #f1f5f9",
     cursor: "pointer",
-    background: "#fff",
+  };
+
+  const thStyle = {
+    padding: "11px 14px",
+    fontWeight: 700,
+    fontSize: "11px",
+    color: "#64748b",
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    background: "#f8fafc",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+    position: "sticky",
+    top: 0,
+  };
+
+  const tdStyle = {
+    padding: "12px 14px",
+    fontSize: "14px",
+    color: "#0f172a",
+    verticalAlign: "middle",
+  };
+
+  const editBtnStyle = {
+    padding: "6px 14px",
+    borderRadius: "8px",
+    border: "none",
+    background: "#dbeafe",
+    color: "#1e40af",
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: "12px",
+    letterSpacing: "0.02em",
+  };
+
+  const deleteBtnStyle = {
+    padding: "6px 14px",
+    borderRadius: "8px",
+    border: "none",
+    background: "#fee2e2",
+    color: "#b91c1c",
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: "12px",
+    letterSpacing: "0.02em",
+  };
+
+  const bannerError = {
+    background: "#fee2e2",
+    color: "#991b1b",
+    padding: "12px 16px",
+    borderRadius: "12px",
+    marginBottom: "16px",
+    fontWeight: 600,
+    fontSize: "14px",
+    borderLeft: "4px solid #ef4444",
+  };
+
+  const bannerSuccess = {
+    background: "#dcfce7",
+    color: "#166534",
+    padding: "12px 16px",
+    borderRadius: "12px",
+    marginBottom: "16px",
+    fontWeight: 600,
+    fontSize: "14px",
+    borderLeft: "4px solid #22c55e",
   };
 
   return (
     <div style={pageStyle}>
-      <div style={titleStyle}>Inventory Management</div>
+      {/* Header */}
+      <div style={headerCard}>
+        <h1 style={headerTitle}>Inventory Management</h1>
+        <p style={headerSub}>
+          Track, add, and manage drug stock levels across all pharmacy sites.
+        </p>
+      </div>
 
-      {error && (
-        <div
-          style={{
-            background: "#fee2e2",
-            color: "#991b1b",
-            padding: "12px 16px",
-            borderRadius: "12px",
-            marginBottom: "16px",
-            fontWeight: "600",
-          }}
-        >
-          {error}
-        </div>
-      )}
+      {/* Banners */}
+      {error && <div style={bannerError}>{error}</div>}
+      {success && <div style={bannerSuccess}>{success}</div>}
 
-      {success && (
-        <div
-          style={{
-            background: "#dcfce7",
-            color: "#166534",
-            padding: "12px 16px",
-            borderRadius: "12px",
-            marginBottom: "16px",
-            fontWeight: "600",
-          }}
-        >
-          {success}
-        </div>
-      )}
-
+      {/* Pharmacy selector + KPI summary */}
       <div style={cardStyle}>
-        <div style={gridStyle}>
+        <div style={sectionTitle}>Pharmacy &amp; Summary</div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 2fr",
+            gap: "24px",
+            alignItems: "start",
+          }}
+        >
           <div>
             <label style={labelStyle}>Select Pharmacy</label>
-            <select
-              value={selectedPharmacyId}
-              onChange={(e) => setSelectedPharmacyId(e.target.value)}
-              style={inputStyle}
-            >
-              <option value="">Choose pharmacy</option>
-              {pharmacies.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            {loading && pharmacies.length === 0 ? (
+              <SkeletonCard
+                style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}
+                blocks={[{ width: "100%", height: 42, gap: 0, radius: 10 }]}
+              />
+            ) : (
+              <select
+                value={selectedPharmacyId}
+                onChange={(e) => setSelectedPharmacyId(e.target.value)}
+                style={inputStyle}
+              >
+                <option value="">Choose pharmacy</option>
+                {pharmacies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
-          <div style={summaryBox}>
-            <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>
-              Inventory Summary
-            </div>
-            <div>Total Quantity: {totalItems}</div>
-            <div>Total Value: {formatCurrency(totalValue)}</div>
-            <div>Records: {inventory.length}</div>
+          <div style={kpiGrid}>
+            {loading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <SkeletonCard
+                  key={`inventory-kpi-skeleton-${index}`}
+                  style={{ ...kpiCard, borderTop: "4px solid #e2e8f0", minHeight: 112 }}
+                  blocks={[
+                    { width: "46%", height: 10, gap: 12 },
+                    { width: index === 1 ? "70%" : "52%", height: 28, gap: 12 },
+                    { width: "76%", height: 10, gap: 0 },
+                  ]}
+                />
+              ))
+            ) : (
+              <>
+                <div className="ui-hover-lift" style={{ ...kpiCard, borderTop: "4px solid #3b82f6" }}>
+                  <div style={kpiLabel}>Total Quantity</div>
+                  <div style={kpiValue}>{animTotalItems.toLocaleString()}</div>
+                  <div style={kpiHint}>Units across all SKUs</div>
+                </div>
+                <div className="ui-hover-lift" style={{ ...kpiCard, borderTop: "4px solid #10b981" }}>
+                  <div style={kpiLabel}>Total Value</div>
+                  <div style={{ ...kpiValue, fontSize: "20px" }}>{formatCurrency(animTotalValue)}</div>
+                  <div style={kpiHint}>Stock valuation at cost</div>
+                </div>
+                <div className="ui-hover-lift" style={{ ...kpiCard, borderTop: "4px solid #8b5cf6" }}>
+                  <div style={kpiLabel}>Records</div>
+                  <div style={kpiValue}>{animRecords}</div>
+                  <div style={kpiHint}>Inventory line items</div>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
 
+      {/* Add / Edit form */}
       <div style={cardStyle}>
-        <div style={sectionTitle}>{editingId ? "Edit Drug" : "Add Drug"}</div>
+        <div style={sectionTitle}>
+          {editingId ? "Edit Drug Record" : "Add Drug to Inventory"}
+        </div>
 
         <form onSubmit={handleSubmit}>
           <div style={gridStyle}>
@@ -427,7 +610,7 @@ export default function InventoryManagementPage() {
                   onChange={(e) => setDrug(e.target.value)}
                   onFocus={() => setShowDrugDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDrugDropdown(false), 160)}
-                  placeholder="Search drug by brand or generic name"
+                  placeholder="Search by brand or generic"
                   style={inputStyle}
                 />
 
@@ -442,10 +625,10 @@ export default function InventoryManagementPage() {
                           handleDrugSelect(result);
                         }}
                       >
-                        <div style={{ fontWeight: 700, color: "#0f172a" }}>
+                        <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "14px" }}>
                           {getDrugDisplayName(result)}
                         </div>
-                        <div style={{ fontSize: "12px", color: "#64748b" }}>
+                        <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
                           {result.generic_name || "Generic name unavailable"}
                         </div>
                       </div>
@@ -460,7 +643,7 @@ export default function InventoryManagementPage() {
               <input
                 value={barcode}
                 onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Barcode"
+                placeholder="Barcode (optional)"
                 style={inputStyle}
               />
             </div>
@@ -471,19 +654,19 @@ export default function InventoryManagementPage() {
                 type="number"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
-                placeholder="Quantity"
+                placeholder="e.g. 100"
                 style={inputStyle}
               />
             </div>
 
             <div>
-              <label style={labelStyle}>Unit Cost</label>
+              <label style={labelStyle}>Unit Cost (AED)</label>
               <input
                 type="number"
                 step="0.01"
                 value={cost}
                 onChange={(e) => setCost(e.target.value)}
-                placeholder="Unit Cost"
+                placeholder="e.g. 12.50"
                 style={inputStyle}
               />
             </div>
@@ -499,21 +682,20 @@ export default function InventoryManagementPage() {
             </div>
 
             <div>
-              <label style={labelStyle}>Batch</label>
+              <label style={labelStyle}>Batch No.</label>
               <input
                 value={batch}
                 onChange={(e) => setBatch(e.target.value)}
-                placeholder="Batch"
+                placeholder="e.g. BT-2026-01"
                 style={inputStyle}
               />
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: "12px", marginTop: "22px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: "10px", marginTop: "20px", flexWrap: "wrap" }}>
             <button type="submit" style={buttonStyle}>
-              {editingId ? "Update Drug" : "Add Drug"}
+              {editingId ? "Update Record" : "Add Drug"}
             </button>
-
             <button type="button" style={secondaryButtonStyle} onClick={resetForm}>
               Clear
             </button>
@@ -521,71 +703,89 @@ export default function InventoryManagementPage() {
         </form>
       </div>
 
+      {/* Inventory table */}
       <div style={cardStyle}>
         <div style={sectionTitle}>Inventory Records</div>
 
+        {inventoryInsight && (
+          <InsightCard
+            icon={inventoryInsight.icon}
+            tone={inventoryInsight.tone}
+            title={inventoryInsight.title}
+            message={inventoryInsight.message}
+            style={{ marginTop: -2 }}
+          />
+        )}
+
         {loading ? (
-          <div>Loading...</div>
+          <div style={{ display: "grid", gap: "10px", paddingTop: "4px" }}>
+            <SkeletonCard
+              style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}
+              blocks={[
+                { width: "100%", height: 42, gap: 10, radius: 10 },
+                { width: "100%", height: 42, gap: 10, radius: 10 },
+                { width: "100%", height: 42, gap: 10, radius: 10 },
+                { width: "100%", height: 42, gap: 10, radius: 10 },
+                { width: "100%", height: 42, gap: 0, radius: 10 },
+              ]}
+            />
+          </div>
         ) : inventory.length === 0 ? (
-          <div>No inventory records found.</div>
+          <div
+            style={{
+              background: "#f8fafc",
+              border: "1px solid #e8edf5",
+              borderRadius: "12px",
+              padding: "36px",
+              textAlign: "center",
+              color: "#94a3b8",
+              fontSize: "14px",
+            }}
+          >
+            No inventory records found for this pharmacy.
+          </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table
               style={{
                 width: "100%",
-                borderCollapse: "collapse",
+                borderCollapse: "separate",
+                borderSpacing: 0,
                 background: "#fff",
               }}
             >
               <thead>
-                <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
-                  <th style={{ padding: "14px" }}>Drug</th>
-                  <th style={{ padding: "14px" }}>Barcode</th>
-                  <th style={{ padding: "14px" }}>Quantity</th>
-                  <th style={{ padding: "14px" }}>Unit Cost</th>
-                  <th style={{ padding: "14px" }}>Expiry Date</th>
-                  <th style={{ padding: "14px" }}>Batch</th>
-                  <th style={{ padding: "14px" }}>Actions</th>
+                <tr>
+                  <th style={thStyle}>Drug</th>
+                  <th style={thStyle}>Barcode</th>
+                  <th style={thStyle}>Qty</th>
+                  <th style={thStyle}>Unit Cost</th>
+                  <th style={thStyle}>Expiry</th>
+                  <th style={thStyle}>Batch</th>
+                  <th style={thStyle}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {inventory.map((item) => (
-                  <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                    <td style={{ padding: "14px" }}>{item.drug_name || "-"}</td>
-                    <td style={{ padding: "14px" }}>{item.barcode || "-"}</td>
-                    <td style={{ padding: "14px" }}>{item.quantity}</td>
-                    <td style={{ padding: "14px" }}>{formatCurrency(item.unit_cost)}</td>
-                    <td style={{ padding: "14px" }}>{item.expiry_date || "-"}</td>
-                    <td style={{ padding: "14px" }}>{item.batch_no || "-"}</td>
-                    <td style={{ padding: "14px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
-                      <button
-                        onClick={() => handleEdit(item)}
-                        style={{
-                          padding: "10px 14px",
-                          borderRadius: "12px",
-                          border: "none",
-                          background: "#2563eb",
-                          color: "#fff",
-                          cursor: "pointer",
-                          fontWeight: "700",
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        style={{
-                          padding: "10px 14px",
-                          borderRadius: "12px",
-                          border: "none",
-                          background: "#ef4444",
-                          color: "#fff",
-                          cursor: "pointer",
-                          fontWeight: "700",
-                        }}
-                      >
-                        Delete
-                      </button>
+                {inventory.map((item, idx) => (
+                  <tr
+                    key={item.id}
+                    style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
+                  >
+                    <td style={{ ...tdStyle, fontWeight: 700 }}>{item.drug_name || "-"}</td>
+                    <td style={{ ...tdStyle, color: "#64748b" }}>{item.barcode || "-"}</td>
+                    <td style={tdStyle}>{item.quantity}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(item.unit_cost)}</td>
+                    <td style={{ ...tdStyle, color: "#64748b" }}>{item.expiry_date || "-"}</td>
+                    <td style={{ ...tdStyle, color: "#64748b" }}>{item.batch_no || "-"}</td>
+                    <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button onClick={() => handleEdit(item)} style={editBtnStyle}>
+                          Edit
+                        </button>
+                        <button onClick={() => handleDelete(item.id)} style={deleteBtnStyle}>
+                          Delete
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

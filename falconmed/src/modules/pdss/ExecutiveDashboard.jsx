@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import SkeletonCard from "../../components/SkeletonCard";
 import { supabase } from "../../lib/supabaseClient";
+import { useAnimatedCounter } from "../../hooks/useAnimatedCounter";
 import {
   buildExecutiveMetrics,
   buildExecutiveNarrative,
@@ -158,6 +160,19 @@ export default function ExecutiveDashboard() {
     return transferRows.slice(0, 5);
   }, [transferRows]);
 
+  const animTrackedDrugs = useAnimatedCounter(metrics.trackedDrugs);
+  const animHighRisk = useAnimatedCounter(metrics.highRiskShortages);
+  const animMedRisk = useAnimatedCounter(metrics.mediumRiskShortages);
+  const animLowRisk = useAnimatedCounter(metrics.lowRiskShortages);
+  const animTransferOpp = useAnimatedCounter(metrics.transferOpportunities);
+  const animTransferQty = useAnimatedCounter(metrics.totalSuggestedTransferQuantity);
+  const animExpiryLoss = useAnimatedCounter(financialKpis.estimatedExpiryLoss);
+  const animAtRisk = useAnimatedCounter(financialKpis.atRiskInventoryValue);
+  const animShortageExposure = useAnimatedCounter(financialKpis.highRiskShortageExposure);
+  const animTotalInvValue = useAnimatedCounter(inventoryFinancials.totalInventoryValue);
+  const animNearExpiryRisk = useAnimatedCounter(inventoryFinancials.nearExpiryRiskValue);
+  const animDeadStock = useAnimatedCounter(inventoryFinancials.deadStockValue);
+
   return (
     <div style={wrap}>
       <div style={heroCard}>
@@ -173,89 +188,127 @@ export default function ExecutiveDashboard() {
       {message ? <div style={messageBox}>{message}</div> : null}
 
       <div style={statsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Tracked Drugs</div>
-          <div style={statValue}>{metrics.trackedDrugs}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>High Risk Shortages</div>
-          <div style={{ ...statValue, color: "#b91c1c" }}>{metrics.highRiskShortages}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Medium Risk Shortages</div>
-          <div style={{ ...statValue, color: "#b45309" }}>{metrics.mediumRiskShortages}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Low Risk Shortages</div>
-          <div style={{ ...statValue, color: "#166534" }}>{metrics.lowRiskShortages}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Transfer Opportunities</div>
-          <div style={statValue}>{metrics.transferOpportunities}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Suggested Transfer Qty</div>
-          <div style={statValue}>{metrics.totalSuggestedTransferQuantity}</div>
-        </div>
+        {loading
+          ? Array.from({ length: 12 }).map((_, index) => (
+              <SkeletonCard
+                key={`pdss-stat-skeleton-${index}`}
+                style={{ ...statCard, borderTop: "3px solid #e2e8f0", minHeight: 118 }}
+                blocks={[
+                  { width: "52%", height: 10, gap: 12 },
+                  { width: index >= 6 ? "74%" : "48%", height: 30, gap: 0 },
+                ]}
+              />
+            ))
+          : (
+            <>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>Tracked Drugs</div>
+                <div style={statValue}>{animTrackedDrugs}</div>
+              </div>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>High Risk Shortages</div>
+                <div style={{ ...statValue, color: "#b91c1c" }}>{animHighRisk}</div>
+              </div>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>Medium Risk Shortages</div>
+                <div style={{ ...statValue, color: "#b45309" }}>{animMedRisk}</div>
+              </div>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>Low Risk Shortages</div>
+                <div style={{ ...statValue, color: "#166534" }}>{animLowRisk}</div>
+              </div>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>Transfer Opportunities</div>
+                <div style={statValue}>{animTransferOpp}</div>
+              </div>
+              <div className="ui-hover-lift" style={statCard}>
+                <div style={statLabel}>Suggested Transfer Qty</div>
+                <div style={statValue}>{animTransferQty}</div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
-          <div style={{ ...statLabel, color: "#92400e" }}>Expiry Loss (Est.)</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-            {loading ? "—" : `AED ${financialKpis.estimatedExpiryLoss.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+                <div style={{ ...statLabel, color: "#92400e" }}>Expiry Loss (Est.)</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+                  {`AED ${animExpiryLoss.toLocaleString()}`}
+                </div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
-          <div style={{ ...statLabel, color: "#92400e" }}>At-Risk Inventory</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-            {loading ? "—" : `AED ${financialKpis.atRiskInventoryValue.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+                <div style={{ ...statLabel, color: "#92400e" }}>At-Risk Inventory</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+                  {`AED ${animAtRisk.toLocaleString()}`}
+                </div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
-          <div style={{ ...statLabel, color: "#991b1b" }}>Shortage Exposure (High)</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
-            {loading ? "—" : `AED ${financialKpis.highRiskShortageExposure.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
+                <div style={{ ...statLabel, color: "#991b1b" }}>Shortage Exposure (High)</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
+                  {`AED ${animShortageExposure.toLocaleString()}`}
+                </div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}>
-          <div style={{ ...statLabel, color: "#0369a1" }}>Total Inventory Value</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#075985" }}>
-            {loading ? "—" : `AED ${inventoryFinancials.totalInventoryValue.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}>
+                <div style={{ ...statLabel, color: "#0369a1" }}>Total Inventory Value</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#075985" }}>
+                  {`AED ${animTotalInvValue.toLocaleString()}`}
+                </div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
-          <div style={{ ...statLabel, color: "#92400e" }}>Near-Expiry Risk Value</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-            {loading ? "—" : `AED ${inventoryFinancials.nearExpiryRiskValue.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
+                <div style={{ ...statLabel, color: "#92400e" }}>Near-Expiry Risk Value</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
+                  {`AED ${animNearExpiryRisk.toLocaleString()}`}
+                </div>
+              </div>
 
-        <div style={{ ...statCard, borderTop: "3px solid #dc2626" }}>
-          <div style={{ ...statLabel, color: "#991b1b" }}>Dead Stock Value</div>
-          <div style={{ ...statValue, fontSize: "22px", color: "#991b1b" }}>
-            {loading ? "—" : `AED ${inventoryFinancials.deadStockValue.toLocaleString()}`}
-          </div>
-        </div>
+              <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #dc2626" }}>
+                <div style={{ ...statLabel, color: "#991b1b" }}>Dead Stock Value</div>
+                <div style={{ ...statValue, fontSize: "22px", color: "#991b1b" }}>
+                  {`AED ${animDeadStock.toLocaleString()}`}
+                </div>
+              </div>
+            </>
+          )}
       </div>
 
-      <div style={summaryCard}>
-        <h3 style={sectionTitle}>Executive Summary</h3>
-        <p style={summaryText}>
-          {loading ? "Loading executive insight..." : executiveNarrative}
-        </p>
+      <div className="ui-hover-lift" style={summaryCard}>
+        {loading ? (
+          <SkeletonCard
+            style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 88 }}
+            blocks={[
+              { width: "26%", height: 16, gap: 16, radius: 10 },
+              { width: "100%", height: 12, gap: 10, radius: 10 },
+              { width: "94%", height: 12, gap: 10, radius: 10 },
+              { width: "88%", height: 12, gap: 0, radius: 10 },
+            ]}
+          />
+        ) : (
+          <>
+            <h3 style={sectionTitle}>Executive Summary</h3>
+            <p style={summaryText}>{executiveNarrative}</p>
+          </>
+        )}
       </div>
 
       <div style={tablesGrid}>
-        <div style={tableCard}>
+        <div className="ui-hover-lift" style={tableCard}>
           <div style={tableHead}>
             <h3 style={sectionTitleLeft}>Top High-Risk Drugs</h3>
           </div>
 
           {loading ? (
-            <div style={emptyState}>Loading shortage priorities...</div>
+            <div style={{ padding: "18px" }}>
+              <SkeletonCard
+                style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 212 }}
+                blocks={[
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 0, radius: 10 },
+                ]}
+              />
+            </div>
           ) : topHighRiskDrugs.length === 0 ? (
             <div style={emptyState}>No high-risk drugs at the moment.</div>
           ) : (
@@ -286,13 +339,24 @@ export default function ExecutiveDashboard() {
           )}
         </div>
 
-        <div style={tableCard}>
+        <div className="ui-hover-lift" style={tableCard}>
           <div style={tableHead}>
             <h3 style={sectionTitleLeft}>Top Transfer Opportunities</h3>
           </div>
 
           {loading ? (
-            <div style={emptyState}>Loading transfer opportunities...</div>
+            <div style={{ padding: "18px" }}>
+              <SkeletonCard
+                style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, minHeight: 212 }}
+                blocks={[
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 10, radius: 10 },
+                  { width: "100%", height: 34, gap: 0, radius: 10 },
+                ]}
+              />
+            </div>
           ) : topTransferOpportunities.length === 0 ? (
             <div style={emptyState}>No transfer opportunities at the moment.</div>
           ) : (
