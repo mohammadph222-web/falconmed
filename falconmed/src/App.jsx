@@ -8,6 +8,8 @@ import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
+import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
+import InventoryManagementPage from "./InventoryManagementPage.jsx";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 import PurchaseRequests from "./PurchaseRequests";
@@ -114,6 +116,18 @@ export default function App() {
         return (
           <div style={contentCard}>
             <NetworkIntelligence />
+          </div>
+        );
+      case "pharmacy-network":
+        return (
+          <div style={contentCard}>
+            <PharmacyNetwork />
+          </div>
+        );
+      case "inventory-management":
+        return (
+          <div style={contentCard}>
+            <InventoryManagementPage />
           </div>
         );
       default:
@@ -338,6 +352,20 @@ export default function App() {
             onClick={() => setPage("network")}
           >
             Network Intelligence
+          </button>
+
+          <button
+            style={page === "pharmacy-network" ? activeBtn : btn}
+            onClick={() => setPage("pharmacy-network")}
+          >
+            Pharmacy Network
+          </button>
+
+          <button
+            style={page === "inventory-management" ? activeBtn : btn}
+            onClick={() => setPage("inventory-management")}
+          >
+            Inventory Management
           </button>
         </div>
 
