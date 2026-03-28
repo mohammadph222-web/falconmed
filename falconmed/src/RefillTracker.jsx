@@ -277,271 +277,522 @@ function RefillTracker({ onBack }) {
     XLSX.writeFile(wb, "FalconMed_refill_export.xlsx");
   };
 
+  // ─── Style constants ────────────────────────────────────────────────────
+  const page = {
+    maxWidth: 1400,
+    margin: '0 auto',
+    padding: 0,
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+  };
+
+  const pageHeaderRow = {
+    display: 'flex',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: '28px',
+    paddingBottom: '20px',
+    borderBottom: '1px solid #f1f5f9',
+  };
+
+  const pageSub = {
+    margin: '4px 0 0 0',
+    fontSize: '14px',
+    color: '#64748b',
+    fontWeight: 400,
+  };
+
+  const headerActions = {
+    display: 'flex',
+    gap: '10px',
+    alignItems: 'center',
+  };
+
+  const backBtn = {
+    background: '#f1f5f9',
+    border: 'none',
+    borderRadius: '10px',
+    padding: '9px 16px',
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#475569',
+    cursor: 'pointer',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+  };
+
+  const exportBtn = {
+    background: 'white',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '10px',
+    padding: '9px 16px',
+    fontSize: '13px',
+    fontWeight: 600,
+    color: '#1e40af',
+    cursor: 'pointer',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+  };
+
+  const kpiGrid = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+    gap: '14px',
+    marginBottom: '24px',
+  };
+
+  const kpiCard = (accentColor) => ({
+    background: 'white',
+    borderRadius: '18px',
+    padding: '22px 20px 18px',
+    border: '1px solid #e8edf5',
+    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    borderTop: `4px solid ${accentColor}`,
+  });
+
+  const kpiLabel = {
+    fontSize: '10px',
+    fontWeight: 700,
+    color: '#94a3b8',
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    margin: '0 0 10px 0',
+  };
+
+  const kpiValue = {
+    fontSize: '34px',
+    fontWeight: 800,
+    color: '#0f172a',
+    margin: 0,
+    letterSpacing: '-0.02em',
+    lineHeight: 1.1,
+  };
+
+  const kpiHint = {
+    fontSize: '12px',
+    color: '#94a3b8',
+    margin: '4px 0 0 0',
+  };
+
+  const formCard = {
+    background: 'white',
+    borderRadius: '18px',
+    padding: '26px',
+    border: '1px solid #e8edf5',
+    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    marginBottom: '24px',
+  };
+
+  const sectionTitle = {
+    margin: '0 0 18px 0',
+    fontSize: '16px',
+    fontWeight: 800,
+    color: '#0f172a',
+    letterSpacing: '-0.01em',
+    paddingBottom: '12px',
+    borderBottom: '1px solid #f1f5f9',
+  };
+
+  const formGrid = {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '14px',
+  };
+
+  const fieldGroup = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '5px',
+  };
+
+  const fieldLabel = {
+    fontSize: '11px',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.05em',
+    color: '#374151',
+  };
+
+  const inputStyle = {
+    padding: '9px 12px',
+    border: '1.5px solid #e2e8f0',
+    borderRadius: '10px',
+    fontSize: '14px',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+    color: '#0f172a',
+    background: 'white',
+    outline: 'none',
+    width: '100%',
+    boxSizing: 'border-box',
+  };
+
+  const primaryBtn = {
+    background: '#1e40af',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    padding: '12px 28px',
+    fontSize: '15px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+    boxShadow: '0 2px 10px rgba(30,64,175,0.25)',
+    marginTop: '4px',
+  };
+
+  const tableCard = {
+    background: 'white',
+    borderRadius: '18px',
+    border: '1px solid #e8edf5',
+    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    overflow: 'hidden',
+  };
+
+  const tableHeaderRow = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '20px 26px 16px',
+    borderBottom: '1px solid #f1f5f9',
+    flexWrap: 'wrap',
+    gap: '12px',
+  };
+
+  const tableSectionTitle = {
+    margin: 0,
+    fontSize: '16px',
+    fontWeight: 800,
+    color: '#0f172a',
+    letterSpacing: '-0.01em',
+  };
+
+  const thStyle = {
+    padding: '10px 14px',
+    background: '#f8fafc',
+    fontWeight: 700,
+    color: '#64748b',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    position: 'sticky',
+    top: 0,
+    textAlign: 'left',
+    whiteSpace: 'nowrap',
+    borderBottom: '1px solid #f1f5f9',
+  };
+
+  const tdStyle = {
+    padding: '12px 14px',
+    fontSize: '13px',
+    color: '#334155',
+    borderBottom: '1px solid #f8fafc',
+    verticalAlign: 'middle',
+  };
+
+  const markCompleteBtn = {
+    background: '#dbeafe',
+    color: '#1e40af',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '5px 10px',
+    fontSize: '12px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+    marginRight: '6px',
+  };
+
+  const deleteBtn = {
+    background: '#fee2e2',
+    color: '#b91c1c',
+    border: 'none',
+    borderRadius: '8px',
+    padding: '5px 10px',
+    fontSize: '12px',
+    fontWeight: 700,
+    cursor: 'pointer',
+    fontFamily: "'Segoe UI', Arial, sans-serif",
+  };
+
+  const emptyState = {
+    padding: '40px 20px',
+    textAlign: 'center',
+    background: '#f8fafc',
+  };
+
+  // ─── JSX return ─────────────────────────────────────────────────────────
   return (
-    <div className="refill-tracker-container">
-      <div className="drug-search-header">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <h2>Refill Tracker</h2>
+    <div style={page}>
+      {/* Page header */}
+      <div style={pageHeaderRow}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '28px', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+            Refill Tracker
+          </h2>
+          <p style={pageSub}>Track and manage patient refill schedules</p>
+        </div>
+        <div style={headerActions}>
+          <button style={exportBtn} onClick={handleExport}>Export to Excel</button>
+          <button style={backBtn} onClick={onBack}>← Back</button>
+        </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="summary-cards">
-        <div className="summary-card">
-          <h3>Total Refills</h3>
-          <p className="summary-number">{summary.total}</p>
+      {/* KPI Cards */}
+      <div style={kpiGrid}>
+        <div style={kpiCard('#3b82f6')}>
+          <p style={kpiLabel}>Total Refills</p>
+          <p style={kpiValue}>{summary.total}</p>
+          <p style={kpiHint}>all records</p>
         </div>
-        <div className="summary-card">
-          <h3>Upcoming</h3>
-          <p className="summary-number upcoming">{summary.upcoming}</p>
+        <div style={kpiCard('#10b981')}>
+          <p style={kpiLabel}>Upcoming</p>
+          <p style={{ ...kpiValue, color: '#10b981' }}>{summary.upcoming}</p>
+          <p style={kpiHint}>scheduled refills</p>
         </div>
-        <div className="summary-card">
-          <h3>Due</h3>
-          <p className="summary-number due">{summary.due}</p>
+        <div style={kpiCard('#f59e0b')}>
+          <p style={kpiLabel}>Due</p>
+          <p style={{ ...kpiValue, color: '#f59e0b' }}>{summary.due}</p>
+          <p style={kpiHint}>due within 3 days</p>
         </div>
-        <div className="summary-card">
-          <h3>Overdue</h3>
-          <p className="summary-number overdue">{summary.overdue}</p>
+        <div style={kpiCard('#ef4444')}>
+          <p style={kpiLabel}>Overdue</p>
+          <p style={{ ...kpiValue, color: '#ef4444' }}>{summary.overdue}</p>
+          <p style={kpiHint}>past refill date</p>
+        </div>
+        <div style={kpiCard('#8b5cf6')}>
+          <p style={kpiLabel}>Completed</p>
+          <p style={{ ...kpiValue, color: '#8b5cf6' }}>{summary.completed}</p>
+          <p style={kpiHint}>fulfilled refills</p>
         </div>
       </div>
 
       {/* Add New Refill Form */}
-      <div className="form-container">
-        <h3>Add New Refill</h3>
-        <form onSubmit={handleSubmit} className="refill-form">
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="patient_name">Patient Name *</label>
+      <div style={formCard}>
+        <h3 style={sectionTitle}>Add New Refill</h3>
+        <form onSubmit={handleSubmit}>
+          <div style={formGrid}>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Patient Name *</label>
               <input
                 type="text"
-                id="patient_name"
                 name="patient_name"
                 value={formData.patient_name}
                 onChange={handleInputChange}
+                style={inputStyle}
                 required
               />
             </div>
-            <div className="form-group">
-              <label htmlFor="phone">Phone</label>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Phone</label>
               <input
                 type="tel"
-                id="phone"
                 name="phone"
                 value={formData.phone}
                 onChange={handleInputChange}
+                style={inputStyle}
               />
             </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="drug_name">Drug Name *</label>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Drug Name *</label>
               <div style={{ position: 'relative' }}>
-              <input
-                type="text"
-                id="drug_name"
-                name="drug_name"
-                value={drugSearch || formData.drug_name}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setDrugSearch(value);
-                  setFormData((prev) => ({ ...prev, drug_name: value }));
-                }}
-                onFocus={() => setShowDrugDropdown(true)}
-                required
-              />
-              {showDrugDropdown && filteredMedicines.length > 0 && (
-                <div
-                  style={{
+                <input
+                  type="text"
+                  name="drug_name"
+                  value={drugSearch || formData.drug_name}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setDrugSearch(value);
+                    setFormData((prev) => ({ ...prev, drug_name: value }));
+                  }}
+                  onFocus={() => setShowDrugDropdown(true)}
+                  style={inputStyle}
+                  required
+                />
+                {showDrugDropdown && filteredMedicines.length > 0 && (
+                  <div style={{
                     position: 'absolute',
-                    top: '44px',
+                    top: 'calc(100% + 6px)',
                     left: 0,
                     right: 0,
                     background: 'white',
-                    border: '1px solid #cbd5e1',
+                    border: '1.5px solid #e2e8f0',
                     borderRadius: '10px',
-                    boxShadow: '0 4px 12px rgba(15, 23, 42, 0.1)',
+                    boxShadow: '0 4px 12px rgba(15,23,42,0.1)',
                     zIndex: 1000,
                     maxHeight: '220px',
                     overflowY: 'auto',
-                  }}
-                >
-                  {filteredMedicines.map((med, index) => {
-                    const displayName = getDrugDisplayName(med);
-
-                    return (
-                      <div
-                        key={`med-${index}`}
-                        style={{
-                          padding: '10px 12px',
-                          borderBottom: '1px solid #f1f5f9',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => {
-                          setFormData((prev) => ({ ...prev, drug_name: displayName }));
-                          setDrugSearch(displayName);
-                          setShowDrugDropdown(false);
-                        }}
-                      >
-                        {displayName}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {showDrugDropdown && drugSearch && filteredMedicines.length === 0 && (
-                <div
-                  style={{
+                  }}>
+                    {filteredMedicines.map((med, index) => {
+                      const displayName = getDrugDisplayName(med);
+                      return (
+                        <div
+                          key={`med-${index}`}
+                          style={{ padding: '10px 12px', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', fontSize: '14px', color: '#0f172a' }}
+                          onClick={() => {
+                            setFormData((prev) => ({ ...prev, drug_name: displayName }));
+                            setDrugSearch(displayName);
+                            setShowDrugDropdown(false);
+                          }}
+                        >
+                          {displayName}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                {showDrugDropdown && drugSearch && filteredMedicines.length === 0 && (
+                  <div style={{
                     position: 'absolute',
-                    top: '44px',
+                    top: 'calc(100% + 6px)',
                     left: 0,
                     right: 0,
                     background: '#f8fafc',
-                    border: '1px solid #cbd5e1',
+                    border: '1.5px solid #e2e8f0',
                     borderRadius: '10px',
                     padding: '10px 12px',
                     color: '#64748b',
                     fontSize: '14px',
                     zIndex: 1000,
-                  }}
-                >
-                  No matching drugs found. You can type a manual item name.
-                </div>
-              )}
+                  }}>
+                    No matching drugs found. You can type a manual item name.
+                  </div>
+                )}
               </div>
             </div>
-            <div className="form-group">
-              <label htmlFor="dispense_date">Dispense Date *</label>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Dispense Date *</label>
               <input
                 type="date"
-                id="dispense_date"
                 name="dispense_date"
                 value={formData.dispense_date}
                 onChange={handleInputChange}
+                style={inputStyle}
                 required
               />
             </div>
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label htmlFor="quantity_dispensed">Quantity Dispensed</label>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Quantity Dispensed</label>
               <input
                 type="number"
-                id="quantity_dispensed"
                 name="quantity_dispensed"
                 value={formData.quantity_dispensed}
                 onChange={handleInputChange}
                 placeholder="e.g., 30"
                 min="0"
                 step="0.1"
+                style={inputStyle}
               />
             </div>
-            <div className="form-group">
-              <label htmlFor="daily_usage">Daily Usage</label>
+            <div style={fieldGroup}>
+              <label style={fieldLabel}>Daily Usage</label>
               <input
                 type="number"
-                id="daily_usage"
                 name="daily_usage"
                 value={formData.daily_usage}
                 onChange={handleInputChange}
                 placeholder="e.g., 1"
                 min="0.1"
                 step="0.1"
+                style={inputStyle}
               />
             </div>
+            <div style={{ ...fieldGroup, gridColumn: '1 / -1' }}>
+              <label style={fieldLabel}>Notes</label>
+              <textarea
+                name="notes"
+                value={formData.notes}
+                onChange={handleInputChange}
+                rows="3"
+                placeholder="Additional notes..."
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.5 }}
+              />
+            </div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <button type="submit" style={primaryBtn}>Add Refill</button>
+            </div>
           </div>
-          <div className="form-group full-width">
-            <label htmlFor="notes">Notes</label>
-            <textarea
-              id="notes"
-              name="notes"
-              value={formData.notes}
-              onChange={handleInputChange}
-              rows="3"
-              placeholder="Additional notes..."
-            />
-          </div>
-          <button type="submit" className="submit-button">Add Refill</button>
         </form>
       </div>
 
       {/* Refills Table */}
-      <div className="table-container">
-        <div className="table-header">
-          <h3>Refill Records ({filteredRefills.length} / {refills.length})</h3>
-          <div className="filter-buttons">
-            <button className={filterStatus === 'all' ? 'active' : ''} onClick={() => setFilterStatus('all')}>All</button>
-            <button className={filterStatus === 'upcoming' ? 'active' : ''} onClick={() => setFilterStatus('upcoming')}>Upcoming</button>
-            <button className={filterStatus === 'due' ? 'active' : ''} onClick={() => setFilterStatus('due')}>Due</button>
-            <button className={filterStatus === 'overdue' ? 'active' : ''} onClick={() => setFilterStatus('overdue')}>Overdue</button>
-            <button className={filterStatus === 'completed' ? 'active' : ''} onClick={() => setFilterStatus('completed')}>Completed</button>
+      <div style={tableCard}>
+        <div style={tableHeaderRow}>
+          <h3 style={tableSectionTitle}>
+            Refill Records{' '}
+            <span style={{ fontWeight: 400, color: '#94a3b8', fontSize: '14px' }}>
+              ({filteredRefills.length} / {refills.length})
+            </span>
+          </h3>
+          <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {['all', 'upcoming', 'due', 'overdue', 'completed'].map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                style={{
+                  border: filterStatus === s ? 'none' : '1.5px solid #e2e8f0',
+                  background: filterStatus === s ? '#1e40af' : '#f8fafc',
+                  color: filterStatus === s ? 'white' : '#334155',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  fontFamily: "'Segoe UI', Arial, sans-serif",
+                  textTransform: 'capitalize',
+                }}
+              >
+                {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
           </div>
-          <button onClick={handleExport} className="export-button">Export to Excel</button>
         </div>
         {refills.length === 0 ? (
-          <p className="no-records">No refill records found.</p>
+          <div style={emptyState}>
+            <p style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#475569' }}>No refill records yet</p>
+            <p style={{ margin: '6px 0 0 0', color: '#94a3b8', fontSize: '13px' }}>Add a new refill above to get started</p>
+          </div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table className="refills-table">
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr>
-                  <th>Patient</th>
-                  <th>Phone</th>
-                  <th>Drug</th>
-                  <th>Dispensed</th>
-                  <th>Daily Usage</th>
-                  <th>Days Supply</th>
-                  <th>Next Refill</th>
-                  <th>Status</th>
-                  <th>Notes</th>
-                  <th>Actions</th>
+                  {['Patient', 'Phone', 'Drug', 'Dispensed', 'Daily Usage', 'Days Supply', 'Next Refill', 'Status', 'Notes', 'Actions'].map((h) => (
+                    <th key={h} style={thStyle}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {filteredRefills.map((refill) => (
-                  <tr
-                    key={refill.id}
-                    className={
-                      refill.status === 'Overdue'
-                        ? 'overdue-row'
-                        : refill.status === 'Due'
-                        ? 'due-row'
-                        : refill.status === 'Upcoming'
-                        ? 'upcoming-row'
-                        : refill.status === 'Completed'
-                        ? 'completed-row'
-                        : ''
-                    }
-                  >
-                    <td>{refill.patient_name}</td>
-                    <td>{refill.phone}</td>
-                    <td>{refill.drug_name}</td>
-                    <td>{refill.quantity_dispensed}</td>
-                    <td>{refill.daily_usage}</td>
-                    <td>{refill.days_supply}</td>
-                    <td>{refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString() : 'N/A'}</td>
-                    <td>
-                      <span className={`status-badge ${refill.status.toLowerCase()}`}>
-                        {refill.status}
-                      </span>
-                    </td>
-                    <td>{refill.notes}</td>
-                    <td>
-                      {refill.status !== 'Completed' && (
-                        <button
-                          className="action-button"
-                          onClick={() => handleMarkCompleted(refill.id)}
-                        >
-                          Mark Completed
+                {filteredRefills.map((refill, i) => {
+                  const isEven = i % 2 === 1;
+                  let rowBg = isEven ? '#f9fafb' : 'white';
+                  if (refill.status === 'Overdue') rowBg = '#fee2e2';
+                  else if (refill.status === 'Due') rowBg = '#fef3c7';
+
+                  return (
+                    <tr key={refill.id} style={{ background: rowBg }}>
+                      <td style={{ ...tdStyle, fontWeight: 700, color: '#0f172a' }}>{refill.patient_name}</td>
+                      <td style={tdStyle}>{refill.phone}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600, color: '#0f172a' }}>{refill.drug_name}</td>
+                      <td style={tdStyle}>{refill.quantity_dispensed}</td>
+                      <td style={tdStyle}>{refill.daily_usage}</td>
+                      <td style={tdStyle}>{refill.days_supply}</td>
+                      <td style={tdStyle}>{refill.next_refill_date ? new Date(refill.next_refill_date).toLocaleDateString() : 'N/A'}</td>
+                      <td style={tdStyle}>
+                        <span className={`status-badge ${refill.status.toLowerCase()}`}>
+                          {refill.status}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, color: '#64748b', maxWidth: '160px' }}>{refill.notes}</td>
+                      <td style={{ ...tdStyle, whiteSpace: 'nowrap' }}>
+                        {refill.status !== 'Completed' && (
+                          <button style={markCompleteBtn} onClick={() => handleMarkCompleted(refill.id)}>
+                            ✓ Complete
+                          </button>
+                        )}
+                        <button style={deleteBtn} onClick={() => handleDelete(refill.id)}>
+                          Delete
                         </button>
-                      )}
-                      <button
-                        className="delete-button"
-                        onClick={() => handleDelete(refill.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -109,3 +109,28 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+.ui-hover-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ui-hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.1), 0 6px 12px rgba(15, 23, 42, 0.06);
+}
+
+@keyframes skeleton-pulse {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, #e9eef5 25%, #f8fafc 50%, #e9eef5 75%);
+  background-size: 200% 100%;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
