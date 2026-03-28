@@ -308,6 +308,8 @@ export default function ExpiryTracker({ user, profile }) {
           drug_name: form.drugName,
           batch_no: form.batchNo,
           quantity: Number(form.quantity),
+          unit_price: Number(form.unitPrice || 0),
+          location: form.location || "-",
           expiry_date: form.expiryDate,
           notes: form.notes,
         })
