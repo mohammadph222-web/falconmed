@@ -1,51 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import {
+  getDrugDisplayName,
+  getDrugUnitPrice,
+  loadDrugMaster,
+  searchDrugMaster,
+} from "./utils/drugMaster";
 
 const EXPIRY_TABLE = "expiry_records";
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeKey(key) {
-  return String(key || "")
-    .toLowerCase()
-    .replace(/[\s/_-]+/g, "")
-    .trim();
-}
-
-function getValue(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
-}
 
 const mapDbToUi = (row) => ({
   id: row.id,
@@ -115,81 +77,45 @@ export default function ExpiryTracker({ user, profile }) {
   };
   // Load drugs CSV for dropdown
   useEffect(() => {
-    const loadDrugs = async () => {
-      try {
-        const res = await fetch("/src/data/drugs_master.csv");
-        const text = await res.text();
+    let isMounted = true;
 
-        const lines = text
-          .split(/\r?\n/)
-          .filter((line) => line.trim() !== "");
-
-        if (lines.length < 2) {
-          setAllDrugs([]);
-          return;
+    loadDrugMaster()
+      .then((rows) => {
+        if (isMounted) {
+          setAllDrugs(rows || []);
         }
+      })
+      .catch((error) => {
+        console.error("Error loading drugs for expiry tracker:", error);
+        if (isMounted) {
+          setAllDrugs([]);
+        }
+      });
 
-        const rawHeaders = parseCSVLine(lines[0]);
-        const headers = rawHeaders.map((h) => normalizeKey(h));
-
-        const parsed = lines.slice(1).map((line) => {
-          const cols = parseCSVLine(line);
-          const rawRow = {};
-
-          headers.forEach((header, index) => {
-            rawRow[header] = cols[index] ?? "";
-          });
-
-          return {
-            brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
-            generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
-            strength: getValue(rawRow, ["strength"]),
-            dosage_form: getValue(rawRow, ["dosageform", "dosage", "form"]),
-            public_price: getValue(rawRow, ["publicprice", "price", "unitprice"]),
-          };
-        });
-
-        setAllDrugs(parsed);
-      } catch (error) {
-        console.error("Error loading drugs CSV for expiry tracker:", error);
-        setAllDrugs([]);
-      }
+    return () => {
+      isMounted = false;
     };
-
-    loadDrugs();
   }, []);
 
   // Filter drugs based on search
-  const filteredDrugs = useMemo(() => {
-    if (!drugSearch.trim() || !showDrugDropdown) return [];
-
-    const q = drugSearch.toLowerCase().trim();
-    return allDrugs
-      .filter((drug) => {
-        return (
-          drug.brand?.toLowerCase().includes(q) ||
-          drug.generic?.toLowerCase().includes(q) ||
-          drug.strength?.toLowerCase().includes(q) ||
-          drug.dosage_form?.toLowerCase().includes(q)
-        );
-      });
-  }, [allDrugs, drugSearch, showDrugDropdown]);
+  const filteredDrugs = useMemo(
+    () => (showDrugDropdown ? searchDrugMaster(allDrugs, drugSearch, 25) : []),
+    [allDrugs, drugSearch, showDrugDropdown]
+  );
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleDrugSelect = (drug) => {
-    const displayName = drug.brand
-      ? `${drug.brand}${drug.strength ? " " + drug.strength : ""}`
-      : `${drug.generic || "Unknown"}${drug.strength ? " " + drug.strength : ""}`;
+    const displayName = getDrugDisplayName(drug);
 
     if (!displayName || displayName === "Unknown") {
       console.error("Failed mapping selected drug to form name:", drug);
     }
 
-    const parsedPrice = Number.parseFloat(String(drug.public_price || "").replace(/[^0-9.]/g, ""));
-    const safePrice = Number.isFinite(parsedPrice) ? String(parsedPrice) : "";
+    const normalizedPrice = getDrugUnitPrice(drug, "public");
+    const safePrice = normalizedPrice !== null ? String(normalizedPrice) : "";
 
     if (drug.public_price && !safePrice) {
       console.error("Failed mapping selected drug price to form unitPrice:", drug);
@@ -206,9 +132,7 @@ export default function ExpiryTracker({ user, profile }) {
   };
 
   const buildDrugDisplayName = (drug) => {
-    return drug.brand
-      ? `${drug.brand}${drug.strength ? " " + drug.strength : ""}`
-      : `${drug.generic || "Unknown"}${drug.strength ? " " + drug.strength : ""}`;
+    return getDrugDisplayName(drug);
   };
 
   const formatDateInput = (date) => {
@@ -559,7 +483,7 @@ export default function ExpiryTracker({ user, profile }) {
                     style={drugOption}
                     onClick={() => handleDrugSelect(drug)}
                   >
-                    {drug.brand ? `${drug.brand}` : drug.generic}
+                    {drug.brand_name ? `${drug.brand_name}` : drug.generic_name}
                     {drug.strength && ` (${drug.strength})`}
                   </div>
                 ))}

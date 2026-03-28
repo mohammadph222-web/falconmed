@@ -1,51 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMaster";
 
 const DELIVERY_TABLE = "delivery_requests";
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeKey(key) {
-  return String(key || "")
-    .toLowerCase()
-    .replace(/[\s/_-]+/g, "")
-    .trim();
-}
-
-function getValue(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
-}
 
 const mapDbToUi = (row) => ({
   id: row.id,
@@ -114,66 +71,28 @@ export default function HomeDeliveryTracker() {
   }, []);
 
   useEffect(() => {
-    const loadDrugs = async () => {
-      try {
-        const response = await fetch("/src/data/drugs_master.csv");
-        if (!response.ok) {
-          throw new Error("Failed to load drug dataset");
+    let isMounted = true;
+
+    loadDrugMaster()
+      .then((rows) => {
+        if (isMounted) {
+          setAllDrugs(rows || []);
         }
-
-        const text = await response.text();
-        const lines = text
-          .split(/\r?\n/)
-          .filter((line) => line.trim() !== "");
-
-        if (lines.length < 2) {
-          setAllDrugs([]);
-          return;
-        }
-
-        const rawHeaders = parseCSVLine(lines[0]);
-        const headers = rawHeaders.map((header) => normalizeKey(header));
-
-        const parsed = lines.slice(1).map((line) => {
-          const cols = parseCSVLine(line);
-          const rawRow = {};
-
-          headers.forEach((header, index) => {
-            rawRow[header] = cols[index] ?? "";
-          });
-
-          return {
-            brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
-            generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
-            strength: getValue(rawRow, ["strength"]),
-            dosageForm: getValue(rawRow, ["dosageform", "dosage", "form"]),
-          };
-        });
-
-        setAllDrugs(parsed);
-      } catch (error) {
+      })
+      .catch((error) => {
         console.error("Failed to load delivery drug suggestions:", error?.message || error);
-        setAllDrugs([]);
-      }
-    };
+        if (isMounted) {
+          setAllDrugs([]);
+        }
+      });
 
-    void loadDrugs();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const filteredDrugs = useMemo(() => {
-    if (!itemSearch.trim() || !showDropdown) return [];
-
-    const query = itemSearch.toLowerCase().trim();
-    return allDrugs
-      .filter((drug) => {
-        return (
-          drug.brand?.toLowerCase().includes(query) ||
-          drug.generic?.toLowerCase().includes(query) ||
-          drug.strength?.toLowerCase().includes(query) ||
-          drug.dosageForm?.toLowerCase().includes(query)
-        );
-      })
-      .slice(0, 25);
+    return showDropdown ? searchDrugMaster(allDrugs, itemSearch, 25) : [];
   }, [allDrugs, itemSearch, showDropdown]);
 
   const handleChange = (field, value) => {
@@ -181,9 +100,7 @@ export default function HomeDeliveryTracker() {
   };
 
   const handleDrugSelect = (drug) => {
-    const displayName = drug.brand
-      ? `${drug.brand}${drug.strength ? ` (${drug.strength})` : ""}`
-      : `${drug.generic || "Unknown"}${drug.strength ? ` (${drug.strength})` : ""}`;
+    const displayName = getDrugDisplayName(drug);
 
     setForm((prev) => ({ ...prev, itemName: displayName }));
     setItemSearch(displayName);
@@ -321,9 +238,7 @@ export default function HomeDeliveryTracker() {
             {showDropdown && filteredDrugs.length > 0 && (
               <div style={dropdown}>
                 {filteredDrugs.map((drug, index) => {
-                  const label = drug.brand
-                    ? `${drug.brand}${drug.strength ? ` (${drug.strength})` : ""}`
-                    : `${drug.generic || "Unknown"}${drug.strength ? ` (${drug.strength})` : ""}`;
+                    const label = getDrugDisplayName(drug);
 
                   return (
                     <div
