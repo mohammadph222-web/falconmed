@@ -26,14 +26,12 @@ export default function App() {
   const [pdssView, setPdssView] = useState("executive-dashboard");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [dashboardCounts, setDashboardCounts] = useState({
-    pharmacies: 0,
-    inventoryRecords: 0,
-    nearExpiry: 0,
-    shortage: 0,
-    purchase: 0,
-    refill: 0,
-  });
+  const [activeSites, setActiveSites] = useState(0);
+  const [inventoryRecords, setInventoryRecords] = useState(0);
+  const [nearExpiry, setNearExpiry] = useState(0);
+  const [shortageRequests, setShortageRequests] = useState(0);
+  const [purchaseRequests, setPurchaseRequests] = useState(0);
+  const [refillRequests, setRefillRequests] = useState(0);
 
   const safeCount = async (tableName) => {
     if (!supabase) return 0;
@@ -53,7 +51,7 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
-    const loadDashboardCounts = async () => {
+    const loadDashboardMetrics = async () => {
       const [pharmaciesCount, inventoryCount, expiryCount, shortageCount, purchaseCount, refillCount] =
         await Promise.all([
           safeCount("pharmacies"),
@@ -66,29 +64,26 @@ export default function App() {
 
       if (!isMounted) return;
 
-      setDashboardCounts({
-        pharmacies: pharmaciesCount,
-        inventoryRecords: inventoryCount,
-        nearExpiry: expiryCount,
-        shortage: shortageCount,
-        purchase: purchaseCount,
-        refill: refillCount,
-      });
+      setActiveSites(pharmaciesCount || 0);
+      setInventoryRecords(inventoryCount || 0);
+      setNearExpiry(expiryCount || 0);
+      setShortageRequests(shortageCount || 0);
+      setPurchaseRequests(purchaseCount || 0);
+      setRefillRequests(refillCount || 0);
     };
 
-    void loadDashboardCounts();
+    void loadDashboardMetrics();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
-  const totalDrugsInDatabase = dashboardCounts.inventoryRecords;
-  const nearExpiryItems = dashboardCounts.nearExpiry;
-  const shortageRequestsToday = dashboardCounts.shortage;
-  const activeSites = dashboardCounts.pharmacies;
+  const totalDrugsInDatabase = inventoryRecords;
+  const nearExpiryItems = nearExpiry;
+  const shortageRequestsToday = shortageRequests;
   const activeUrgentActions =
-    Number(dashboardCounts.purchase || 0) + Number(dashboardCounts.refill || 0);
+    Number(purchaseRequests || 0) + Number(refillRequests || 0);
 
   const computedRiskScore =
     (Number(shortageRequestsToday) || 0) * 15 +
@@ -340,8 +335,7 @@ export default function App() {
 
                 <div style={insightBox}>
                   <span style={insightBullet}>◆</span>{" "}
-                  {totalDrugsInDatabase.toLocaleString()} inventory records are actively tracked. Current alerts show {nearExpiryItems.toLocaleString()} near-expiry
-                  items and {shortageRequestsToday.toLocaleString()} shortage requests.
+                  FalconMed is currently tracking {inventoryRecords.toLocaleString()} inventory records across {activeSites.toLocaleString()} pharmacy sites.
                 </div>
 
                 <div style={cardsGrid}>
