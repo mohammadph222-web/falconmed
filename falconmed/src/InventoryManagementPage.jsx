@@ -24,47 +24,65 @@ export default function InventoryManagementPage() {
   const [success, setSuccess] = useState("");
 
   useEffect(() => {
-    loadData();
+    fetchPharmacies();
   }, []);
 
-  async function loadData() {
+  useEffect(() => {
+    if (selectedPharmacyId) {
+      fetchInventory(selectedPharmacyId);
+    } else {
+      setInventory([]);
+      setLoading(false);
+    }
+  }, [selectedPharmacyId]);
+
+  async function fetchPharmacies() {
     setLoading(true);
     setError("");
-    setSuccess("");
 
-    const { data: pharmacyData, error: pharmacyError } = await supabase
+    const { data, error } = await supabase
       .from("pharmacies")
       .select("*")
       .order("name", { ascending: true });
 
-    if (pharmacyError) {
-      setError(pharmacyError.message);
+    if (error) {
+      console.error(error);
+      setError("Failed to load pharmacies.");
       setLoading(false);
       return;
     }
 
-    const { data: inventoryData, error: inventoryError } = await supabase
+    setPharmacies(data || []);
+
+    if (data && data.length > 0) {
+      setSelectedPharmacyId(String(data[0].id));
+    } else {
+      setLoading(false);
+    }
+  }
+
+  async function fetchInventory(pharmacyId) {
+    setLoading(true);
+    setError("");
+
+    const { data, error } = await supabase
       .from("pharmacy_inventory")
       .select("*")
-      .order("drug_name", { ascending: true });
+      .eq("pharmacy_id", pharmacyId)
+      .order("created_at", { ascending: false });
 
-    if (inventoryError) {
-      setError(inventoryError.message);
+    if (error) {
+      console.error(error);
+      setError("Failed to load inventory records.");
       setLoading(false);
       return;
     }
 
-    setPharmacies(pharmacyData || []);
-    setInventory(inventoryData || []);
-
-    if (!selectedPharmacyId && pharmacyData && pharmacyData.length > 0) {
-      setSelectedPharmacyId(pharmacyData[0].id);
-    }
-
+    setInventory(data || []);
     setLoading(false);
   }
 
-  function clearForm() {
+  function resetForm() {
     setDrug("");
     setBarcode("");
     setQty("");
@@ -76,265 +94,261 @@ export default function InventoryManagementPage() {
     setSuccess("");
   }
 
-  async function addDrug() {
+  async function handleSubmit(e) {
+    e.preventDefault();
+
     setError("");
     setSuccess("");
 
     if (!selectedPharmacyId) {
-      setError("Please choose a pharmacy.");
+      setError("Please select a pharmacy.");
       return;
     }
 
     if (!drug.trim()) {
-      setError("Please enter a drug name.");
+      setError("Please enter drug name.");
       return;
     }
 
     if (!qty || Number(qty) < 0) {
-      setError("Please enter a valid quantity.");
+      setError("Please enter valid quantity.");
       return;
     }
 
-    const { error: insertError } = await supabase
-      .from("pharmacy_inventory")
-      .insert([
-        {
-          pharmacy_id: selectedPharmacyId,
-          drug_name: drug.trim(),
-          barcode: barcode.trim() || null,
-          quantity: Number(qty || 0),
-          unit_cost: Number(cost || 0),
-          expiry_date: expiry || null,
-          batch_no: batch.trim() || null,
-        },
-      ]);
+    const payload = {
+      pharmacy_id: selectedPharmacyId,
+      drug: drug.trim(),
+      barcode: barcode.trim() || null,
+      quantity: Number(qty) || 0,
+      unit_cost: Number(cost) || 0,
+      expiry_date: expiry || null,
+      batch: batch.trim() || null,
+    };
 
-    if (insertError) {
-      setError(insertError.message);
-      return;
+    if (editingId) {
+      const { error } = await supabase
+        .from("pharmacy_inventory")
+        .update(payload)
+        .eq("id", editingId);
+
+      if (error) {
+        console.error(error);
+        setError("Failed to update record.");
+        return;
+      }
+
+      setSuccess("Inventory record updated successfully.");
+    } else {
+      const { error } = await supabase
+        .from("pharmacy_inventory")
+        .insert([payload]);
+
+      if (error) {
+        console.error(error);
+        setError("Failed to add record.");
+        return;
+      }
+
+      setSuccess("Drug added successfully.");
     }
 
-    setSuccess("Drug added successfully.");
-    clearForm();
-    await loadData();
+    resetForm();
+    fetchInventory(selectedPharmacyId);
   }
 
-  async function updateDrug() {
-    setError("");
-    setSuccess("");
-
-    if (!editingId) return;
-
-    if (!drug.trim()) {
-      setError("Please enter a drug name.");
-      return;
-    }
-
-    if (!qty || Number(qty) < 0) {
-      setError("Please enter a valid quantity.");
-      return;
-    }
-
-    const { error: updateError } = await supabase
-      .from("pharmacy_inventory")
-      .update({
-        drug_name: drug.trim(),
-        barcode: barcode.trim() || null,
-        quantity: Number(qty || 0),
-        unit_cost: Number(cost || 0),
-        expiry_date: expiry || null,
-        batch_no: batch.trim() || null,
-      })
-      .eq("id", editingId);
-
-    if (updateError) {
-      setError(updateError.message);
-      return;
-    }
-
-    setSuccess("Drug updated successfully.");
-    clearForm();
-    await loadData();
-  }
-
-  async function deleteDrug(id) {
-    setError("");
-    setSuccess("");
-
-    const ok = window.confirm("Delete this inventory item?");
-    if (!ok) return;
-
-    const { error: deleteError } = await supabase
-      .from("pharmacy_inventory")
-      .delete()
-      .eq("id", id);
-
-    if (deleteError) {
-      setError(deleteError.message);
-      return;
-    }
-
-    setSuccess("Drug deleted successfully.");
-    await loadData();
-  }
-
-  function editDrug(item) {
-    setDrug(item.drug_name || "");
+  function handleEdit(item) {
+    setEditingId(item.id);
+    setDrug(item.drug || "");
     setBarcode(item.barcode || "");
     setQty(item.quantity ?? "");
     setCost(item.unit_cost ?? "");
     setExpiry(item.expiry_date || "");
-    setBatch(item.batch_no || "");
-    setEditingId(item.id);
-    setError("");
-    setSuccess("");
+    setBatch(item.batch || "");
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  const selectedPharmacy = useMemo(() => {
-    return pharmacies.find((p) => p.id === selectedPharmacyId) || null;
-  }, [pharmacies, selectedPharmacyId]);
+  async function handleDelete(id) {
+    const confirmed = window.confirm("Are you sure you want to delete this record?");
+    if (!confirmed) return;
 
-  const filteredInventory = useMemo(() => {
-    if (!selectedPharmacyId) return [];
-    return inventory.filter((item) => item.pharmacy_id === selectedPharmacyId);
-  }, [inventory, selectedPharmacyId]);
+    const { error } = await supabase
+      .from("pharmacy_inventory")
+      .delete()
+      .eq("id", id);
 
-  const totalQty = filteredInventory.reduce(
-    (sum, item) => sum + Number(item.quantity || 0),
-    0
-  );
+    if (error) {
+      console.error(error);
+      setError("Failed to delete record.");
+      return;
+    }
 
-  const totalValue = filteredInventory.reduce(
-    (sum, item) =>
-      sum + Number(item.quantity || 0) * Number(item.unit_cost || 0),
-    0
-  );
+    setSuccess("Record deleted successfully.");
+    fetchInventory(selectedPharmacyId);
+  }
+
+  const totalItems = useMemo(() => {
+    return inventory.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+  }, [inventory]);
+
+  const totalValue = useMemo(() => {
+    return inventory.reduce(
+      (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0),
+      0
+    );
+  }, [inventory]);
+
+  const pageStyle = {
+    padding: "24px",
+    background: "#f5f7fb",
+    minHeight: "100vh",
+    fontFamily: "Arial, sans-serif",
+  };
+
+  const cardStyle = {
+    background: "#fff",
+    borderRadius: "18px",
+    padding: "24px",
+    boxShadow: "0 8px 24px rgba(0,0,0,0.06)",
+    marginBottom: "22px",
+  };
+
+  const titleStyle = {
+    fontSize: "34px",
+    fontWeight: "700",
+    marginBottom: "20px",
+    color: "#0f172a",
+  };
+
+  const sectionTitle = {
+    fontSize: "22px",
+    fontWeight: "700",
+    marginBottom: "18px",
+    color: "#0f172a",
+    textAlign: "center",
+  };
+
+  const labelStyle = {
+    display: "block",
+    fontWeight: "700",
+    marginBottom: "8px",
+    color: "#1e3557",
+    fontSize: "16px",
+  };
+
+  const inputStyle = {
+    width: "100%",
+    padding: "14px 16px",
+    borderRadius: "14px",
+    border: "1px solid #cbd5e1",
+    outline: "none",
+    fontSize: "16px",
+    boxSizing: "border-box",
+    background: "#fff",
+  };
+
+  const buttonStyle = {
+    padding: "14px 20px",
+    borderRadius: "14px",
+    border: "none",
+    background: "#2563eb",
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: "16px",
+    cursor: "pointer",
+  };
+
+  const secondaryButtonStyle = {
+    padding: "14px 20px",
+    borderRadius: "14px",
+    border: "1px solid #cbd5e1",
+    background: "#fff",
+    color: "#111827",
+    fontWeight: "700",
+    fontSize: "16px",
+    cursor: "pointer",
+  };
+
+  const gridStyle = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+    gap: "16px",
+  };
+
+  const summaryBox = {
+    background: "#eff6ff",
+    border: "1px solid #bfdbfe",
+    borderRadius: "16px",
+    padding: "18px",
+  };
 
   return (
-    <div style={{ padding: 28 }}>
-      <div
-        style={{
-          background: "#fff",
-          border: "1px solid #dbe3ee",
-          borderRadius: 24,
-          padding: 28,
-          boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
-        }}
-      >
-        <div style={{ textAlign: "center", marginBottom: 12 }}>
-          <h1 style={{ margin: 0, fontSize: 28, color: "#0f172a" }}>
-            Inventory Management
-          </h1>
-        </div>
+    <div style={pageStyle}>
+      <div style={titleStyle}>Inventory Management</div>
 
-        <p
+      {error && (
+        <div
           style={{
-            textAlign: "center",
-            color: "#475569",
-            fontSize: 16,
-            marginTop: 0,
-            marginBottom: 24,
+            background: "#fee2e2",
+            color: "#991b1b",
+            padding: "12px 16px",
+            borderRadius: "12px",
+            marginBottom: "16px",
+            fontWeight: "600",
           }}
         >
-          Add, edit, and delete pharmacy inventory records.
-        </p>
+          {error}
+        </div>
+      )}
 
-        {error ? (
-          <div
-            style={{
-              background: "#fde7e7",
-              color: "#b42318",
-              border: "1px solid #f3b4b4",
-              borderRadius: 14,
-              padding: "14px 18px",
-              marginBottom: 20,
-              textAlign: "center",
-              fontWeight: 600,
-            }}
-          >
-            {error}
+      {success && (
+        <div
+          style={{
+            background: "#dcfce7",
+            color: "#166534",
+            padding: "12px 16px",
+            borderRadius: "12px",
+            marginBottom: "16px",
+            fontWeight: "600",
+          }}
+        >
+          {success}
+        </div>
+      )}
+
+      <div style={cardStyle}>
+        <div style={gridStyle}>
+          <div>
+            <label style={labelStyle}>Select Pharmacy</label>
+            <select
+              value={selectedPharmacyId}
+              onChange={(e) => setSelectedPharmacyId(e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">Choose pharmacy</option>
+              {pharmacies.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
-        ) : null}
 
-        {success ? (
-          <div
-            style={{
-              background: "#e8f8ec",
-              color: "#137333",
-              border: "1px solid #b7e1c0",
-              borderRadius: 14,
-              padding: "14px 18px",
-              marginBottom: 20,
-              textAlign: "center",
-              fontWeight: 600,
-            }}
-          >
-            {success}
+          <div style={summaryBox}>
+            <div style={{ fontWeight: 700, fontSize: "16px", marginBottom: "8px" }}>
+              Inventory Summary
+            </div>
+            <div>Total Quantity: {totalItems}</div>
+            <div>Total Value: {formatCurrency(totalValue)}</div>
+            <div>Records: {inventory.length}</div>
           </div>
-        ) : null}
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 16,
-            marginBottom: 20,
-          }}
-        >
-          <MetricCard
-            label="SELECTED PHARMACY"
-            value={selectedPharmacy ? selectedPharmacy.name : "-"}
-          />
-          <MetricCard label="TOTAL QTY" value={totalQty} />
-          <MetricCard
-            label="TOTAL STOCK VALUE"
-            value={formatCurrency(totalValue)}
-          />
         </div>
+      </div>
 
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #dbe3ee",
-            borderRadius: 20,
-            padding: 20,
-            marginBottom: 20,
-          }}
-        >
-          <label style={labelStyle}>Choose Pharmacy</label>
-          <select
-            value={selectedPharmacyId}
-            onChange={(e) => setSelectedPharmacyId(e.target.value)}
-            style={inputStyle}
-          >
-            {pharmacies.map((pharmacy) => (
-              <option key={pharmacy.id} value={pharmacy.id}>
-                {pharmacy.name} - {pharmacy.location}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div style={cardStyle}>
+        <div style={sectionTitle}>{editingId ? "Edit Drug" : "Add Drug"}</div>
 
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #dbe3ee",
-            borderRadius: 20,
-            padding: 20,
-            marginBottom: 20,
-          }}
-        >
-          <h2 style={{ marginTop: 0, color: "#0f172a" }}>
-            {editingId ? "Edit Drug" : "Add Drug"}
-          </h2>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-              gap: 12,
-            }}
-          >
+        <form onSubmit={handleSubmit}>
+          <div style={gridStyle}>
             <div>
               <label style={labelStyle}>Drug Name</label>
               <input
@@ -358,10 +372,10 @@ export default function InventoryManagementPage() {
             <div>
               <label style={labelStyle}>Quantity</label>
               <input
+                type="number"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
                 placeholder="Quantity"
-                type="number"
                 style={inputStyle}
               />
             </div>
@@ -369,11 +383,11 @@ export default function InventoryManagementPage() {
             <div>
               <label style={labelStyle}>Unit Cost</label>
               <input
+                type="number"
+                step="0.01"
                 value={cost}
                 onChange={(e) => setCost(e.target.value)}
                 placeholder="Unit Cost"
-                type="number"
-                step="0.01"
                 style={inputStyle}
               />
             </div>
@@ -381,9 +395,9 @@ export default function InventoryManagementPage() {
             <div>
               <label style={labelStyle}>Expiry Date</label>
               <input
+                type="date"
                 value={expiry}
                 onChange={(e) => setExpiry(e.target.value)}
-                type="date"
                 style={inputStyle}
               />
             </div>
@@ -399,212 +413,91 @@ export default function InventoryManagementPage() {
             </div>
           </div>
 
-          <div style={{ marginTop: 16, display: "flex", gap: 12 }}>
-            {editingId ? (
-              <button onClick={updateDrug} style={primaryBtnStyle}>
-                Update Drug
-              </button>
-            ) : (
-              <button onClick={addDrug} style={primaryBtnStyle}>
-                Add Drug
-              </button>
-            )}
+          <div style={{ display: "flex", gap: "12px", marginTop: "22px", flexWrap: "wrap" }}>
+            <button type="submit" style={buttonStyle}>
+              {editingId ? "Update Drug" : "Add Drug"}
+            </button>
 
-            <button onClick={clearForm} style={secondaryBtnStyle}>
+            <button type="button" style={secondaryButtonStyle} onClick={resetForm}>
               Clear
             </button>
           </div>
-        </div>
+        </form>
+      </div>
 
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #dbe3ee",
-            borderRadius: 20,
-            padding: 22,
-            minHeight: 420,
-          }}
-        >
-          <h2 style={{ marginTop: 0, color: "#0f172a" }}>Inventory Records</h2>
+      <div style={cardStyle}>
+        <div style={sectionTitle}>Inventory Records</div>
 
-          {loading ? (
-            <div style={{ color: "#64748b" }}>Loading...</div>
-          ) : filteredInventory.length === 0 ? (
-            <div
+        {loading ? (
+          <div>Loading...</div>
+        ) : inventory.length === 0 ? (
+          <div>No inventory records found.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table
               style={{
-                border: "1px dashed #cbd5e1",
-                borderRadius: 18,
-                padding: 28,
-                textAlign: "center",
-                color: "#64748b",
+                width: "100%",
+                borderCollapse: "collapse",
+                background: "#fff",
               }}
             >
-              No inventory records found for this pharmacy.
-            </div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table
-                style={{
-                  width: "100%",
-                  borderCollapse: "collapse",
-                  fontSize: 14,
-                }}
-              >
-                <thead>
-                  <tr style={{ background: "#f8fafc", color: "#334155" }}>
-                    <th style={thStyle}>Drug</th>
-                    <th style={thStyle}>Barcode</th>
-                    <th style={thStyle}>Quantity</th>
-                    <th style={thStyle}>Unit Cost</th>
-                    <th style={thStyle}>Expiry Date</th>
-                    <th style={thStyle}>Batch</th>
-                    <th style={thStyle}>Actions</th>
+              <thead>
+                <tr style={{ background: "#f1f5f9", textAlign: "left" }}>
+                  <th style={{ padding: "14px" }}>Drug</th>
+                  <th style={{ padding: "14px" }}>Barcode</th>
+                  <th style={{ padding: "14px" }}>Quantity</th>
+                  <th style={{ padding: "14px" }}>Unit Cost</th>
+                  <th style={{ padding: "14px" }}>Expiry Date</th>
+                  <th style={{ padding: "14px" }}>Batch</th>
+                  <th style={{ padding: "14px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inventory.map((item) => (
+                  <tr key={item.id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={{ padding: "14px" }}>{item.drug || "-"}</td>
+                    <td style={{ padding: "14px" }}>{item.barcode || "-"}</td>
+                    <td style={{ padding: "14px" }}>{item.quantity}</td>
+                    <td style={{ padding: "14px" }}>{formatCurrency(item.unit_cost)}</td>
+                    <td style={{ padding: "14px" }}>{item.expiry_date || "-"}</td>
+                    <td style={{ padding: "14px" }}>{item.batch || "-"}</td>
+                    <td style={{ padding: "14px", display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => handleEdit(item)}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: "12px",
+                          border: "none",
+                          background: "#2563eb",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontWeight: "700",
+                        }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(item.id)}
+                        style={{
+                          padding: "10px 14px",
+                          borderRadius: "12px",
+                          border: "none",
+                          background: "#ef4444",
+                          color: "#fff",
+                          cursor: "pointer",
+                          fontWeight: "700",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {filteredInventory.map((item) => (
-                    <tr
-                      key={item.id}
-                      style={{ borderBottom: "1px solid #e2e8f0" }}
-                    >
-                      <td style={tdStyle}>{item.drug_name}</td>
-                      <td style={tdStyle}>{item.barcode || "-"}</td>
-                      <td style={tdStyle}>{item.quantity}</td>
-                      <td style={tdStyle}>{formatCurrency(item.unit_cost)}</td>
-                      <td style={tdStyle}>{item.expiry_date || "-"}</td>
-                      <td style={tdStyle}>{item.batch_no || "-"}</td>
-                      <td style={tdStyle}>
-                        <div style={{ display: "flex", gap: 8 }}>
-                          <button
-                            onClick={() => editDrug(item)}
-                            style={smallEditBtn}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => deleteDrug(item.id)}
-                            style={smallDeleteBtn}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
-function MetricCard({ label, value }) {
-  return (
-    <div
-      style={{
-        background: "#fff",
-        border: "1px solid #dbe3ee",
-        borderRadius: 18,
-        padding: 18,
-        minHeight: 110,
-        display: "flex",
-        flexDirection: "column",
-        justifyContent: "center",
-      }}
-    >
-      <div
-        style={{
-          fontSize: 12,
-          fontWeight: 800,
-          letterSpacing: "0.08em",
-          color: "#64748b",
-          marginBottom: 14,
-          textAlign: "center",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          fontSize: 28,
-          fontWeight: 900,
-          color: "#0f172a",
-          textAlign: "center",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-const inputStyle = {
-  width: "100%",
-  padding: "12px 14px",
-  borderRadius: 12,
-  border: "1px solid #cbd5e1",
-  fontSize: 15,
-  background: "#fff",
-  boxSizing: "border-box",
-};
-
-const labelStyle = {
-  display: "block",
-  marginBottom: 8,
-  fontWeight: 700,
-  color: "#334155",
-};
-
-const thStyle = {
-  textAlign: "left",
-  padding: "12px 10px",
-  borderBottom: "1px solid #e2e8f0",
-  fontWeight: 800,
-};
-
-const tdStyle = {
-  padding: "12px 10px",
-  color: "#0f172a",
-  verticalAlign: "middle",
-};
-
-const primaryBtnStyle = {
-  background: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: 12,
-  padding: "12px 18px",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const secondaryBtnStyle = {
-  background: "#fff",
-  color: "#0f172a",
-  border: "1px solid #cbd5e1",
-  borderRadius: 12,
-  padding: "12px 18px",
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-const smallEditBtn = {
-  background: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 12px",
-  cursor: "pointer",
-};
-
-const smallDeleteBtn = {
-  background: "#ef4444",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 12px",
-  cursor: "pointer",
-};
