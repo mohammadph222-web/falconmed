@@ -111,6 +111,8 @@ export default function CommandPalette({
         subtitle: item.subtitle || "Navigate",
         page: item.page,
         pdssView: item.pdssView,
+        locked: !!item.locked,
+        requiredPlanLabel: item.requiredPlanLabel || "",
         keywords: item.keywords || [],
       })),
     [navigationItems]
@@ -216,6 +218,7 @@ export default function CommandPalette({
                 key={item.id}
                 style={{
                   ...resultItem,
+                  ...(item.locked ? resultItemLocked : null),
                   ...(index === activeIndex ? resultItemActive : null),
                 }}
                 onMouseEnter={() => setActiveIndex(index)}
@@ -224,9 +227,15 @@ export default function CommandPalette({
                 <span style={resultIcon}>{item.icon}</span>
                 <span style={resultTextWrap}>
                   <span style={resultTitle}>{item.label}</span>
-                  <span style={resultSubtitle}>{item.subtitle}</span>
+                  <span style={resultSubtitle}>
+                    {item.locked && item.requiredPlanLabel
+                      ? `${item.subtitle} • ${item.requiredPlanLabel} plan`
+                      : item.subtitle}
+                  </span>
                 </span>
-                <span style={resultType}>{item.type === "drug" ? "Drug" : "Page"}</span>
+                <span style={item.locked ? resultTypeLocked : resultType}>
+                  {item.locked ? "Locked" : item.type === "drug" ? "Drug" : "Page"}
+                </span>
               </button>
             ))}
         </div>
@@ -324,6 +333,10 @@ const resultItemActive = {
   border: "1px solid #bfdbfe",
 };
 
+const resultItemLocked = {
+  opacity: 0.8,
+};
+
 const resultIcon = {
   width: "32px",
   height: "32px",
@@ -369,6 +382,13 @@ const resultType = {
   borderRadius: "999px",
   padding: "4px 8px",
   flexShrink: 0,
+};
+
+const resultTypeLocked = {
+  ...resultType,
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fde68a",
 };
 
 const emptyText = {

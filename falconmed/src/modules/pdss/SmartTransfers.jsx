@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
 import { calculateSmartTransferRecommendations } from "../../utils/pdss";
+import { riskBadgeStyles } from "../../utils/badgeStyles";
+import StatCard from "../../components/StatCard";
 
 async function safeFetch(table, columns) {
   if (!supabase) return { data: [], error: null };
@@ -22,24 +24,6 @@ function loadLocalArray(key) {
     return [];
   }
 }
-
-const priorityStyles = {
-  high: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-  },
-  medium: {
-    background: "#fef3c7",
-    color: "#92400e",
-    border: "1px solid #fde68a",
-  },
-  low: {
-    background: "#dcfce7",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
-  },
-};
 
 export default function SmartTransfers() {
   const [rows, setRows] = useState([]);
@@ -109,22 +93,34 @@ export default function SmartTransfers() {
       {message ? <div style={messageBox}>{message}</div> : null}
 
       <div style={statsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Suggestions</div>
-          <div style={statValue}>{summary.total ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>High Priority</div>
-          <div style={{ ...statValue, color: "#b91c1c" }}>{summary.high ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Medium Priority</div>
-          <div style={{ ...statValue, color: "#b45309" }}>{summary.medium ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Total Transfer Qty</div>
-          <div style={statValue}>{summary.quantity ?? 0}</div>
-        </div>
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={statValue}
+          label="Suggestions"
+          value={summary.total ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b91c1c" }}
+          label="High Priority"
+          value={summary.high ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b45309" }}
+          label="Medium Priority"
+          value={summary.medium ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={statValue}
+          label="Total Transfer Qty"
+          value={summary.quantity ?? 0}
+        />
       </div>
 
       <div style={tableCard}>
@@ -164,7 +160,7 @@ export default function SmartTransfers() {
                       <span
                         style={{
                           ...badge,
-                          ...(priorityStyles[row.priority] || priorityStyles.medium),
+                          ...(riskBadgeStyles[row.priority] || riskBadgeStyles.medium),
                         }}
                       >
                         {row.priority.toUpperCase()}

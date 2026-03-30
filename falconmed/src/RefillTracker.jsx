@@ -184,14 +184,41 @@ function RefillTracker({ onBack }) {
           request_date: formData.dispense_date,
           status: formData.status || 'Pending',
           notes: formData.notes,
+          created_at: new Date().toISOString(),
+          created_by: "falconmed.demo@preview",
         };
 
-        let { error } = await supabase
+        let insertResult = await supabase
           .from(REFILL_TABLE)
           .insert({
             ...basePayload,
             daily_usage: Number(formData.daily_usage || 0),
           });
+
+        let { error } = insertResult;
+
+        if (error && String(error.message || '').toLowerCase().includes('created_by')) {
+          const { created_by, ...payloadWithoutCreatedBy } = basePayload;
+
+          insertResult = await supabase
+            .from(REFILL_TABLE)
+            .insert({
+              ...payloadWithoutCreatedBy,
+              daily_usage: Number(formData.daily_usage || 0),
+            });
+
+          error = insertResult.error;
+
+          if (error && String(error.message || '').toLowerCase().includes('daily_usage')) {
+            console.error('Missing daily_usage column in refill_requests. Falling back without daily_usage:', error.message);
+
+            const retry = await supabase
+              .from(REFILL_TABLE)
+              .insert(payloadWithoutCreatedBy);
+
+            error = retry.error;
+          }
+        }
 
         if (error && String(error.message || '').toLowerCase().includes('daily_usage')) {
           console.error('Missing daily_usage column in refill_requests. Falling back without daily_usage:', error.message);
@@ -244,14 +271,52 @@ function RefillTracker({ onBack }) {
     void submit();
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm('Are you sure you want to delete this refill record?')) {
-      setRefills(prev => prev.filter(refill => refill.id !== id));
+  const handleDelete = async (id) => {
+    if (!window.confirm('Are you sure you want to delete this refill record?')) return;
+
+    try {
+      if (!supabase) {
+        console.error('Supabase is not configured. Unable to delete refill.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from(REFILL_TABLE)
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        console.error('Failed to delete refill request:', error.message);
+        return;
+      }
+
+      await loadRefills();
+    } catch (err) {
+      console.error('Refill delete error:', err?.message || err);
     }
   };
 
-  const handleMarkCompleted = (id) => {
-    setRefills(prev => prev.map(refill => refill.id === id ? { ...refill, status: 'Completed' } : refill));
+  const handleMarkCompleted = async (id) => {
+    try {
+      if (!supabase) {
+        console.error('Supabase is not configured. Unable to update refill status.');
+        return;
+      }
+
+      const { error } = await supabase
+        .from(REFILL_TABLE)
+        .update({ status: 'Completed' })
+        .eq('id', id);
+
+      if (error) {
+        console.error('Failed to mark refill as completed:', error.message);
+        return;
+      }
+
+      await loadRefills();
+    } catch (err) {
+      console.error('Refill completion update error:', err?.message || err);
+    }
   };
 
   const filteredRefills = useMemo(() => {

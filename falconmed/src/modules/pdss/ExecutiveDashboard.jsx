@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import SkeletonCard from "../../components/SkeletonCard";
+import StatCard from "../../components/StatCard";
 import { supabase } from "../../lib/supabaseClient";
 import { useAnimatedCounter } from "../../hooks/useAnimatedCounter";
 import {
@@ -12,6 +13,7 @@ import {
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
 import { buildDrugPriceMap } from "../../utils/drugPricing";
+import { riskBadgeStyles } from "../../utils/badgeStyles";
 
 async function safeFetch(table, columns) {
   if (!supabase) return { data: [], error: null };
@@ -33,24 +35,6 @@ function loadLocalArray(key) {
     return [];
   }
 }
-
-const riskStyles = {
-  high: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-  },
-  medium: {
-    background: "#fef3c7",
-    color: "#92400e",
-    border: "1px solid #fde68a",
-  },
-  low: {
-    background: "#dcfce7",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
-  },
-};
 
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
@@ -261,35 +245,65 @@ export default function ExecutiveDashboard() {
           ))
         ) : (
           <>
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #3b82f6" }}>
-              <div style={statLabel}>Active Sites</div>
-              <div style={statValue}>{animActiveSites}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#3b82f6"
+              label="Active Sites"
+              value={animActiveSites}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
 
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #8b5cf6" }}>
-              <div style={statLabel}>Inventory Records</div>
-              <div style={statValue}>{animInventoryRecords}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#8b5cf6"
+              label="Inventory Records"
+              value={animInventoryRecords}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
 
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #f59e0b" }}>
-              <div style={statLabel}>Near Expiry Items</div>
-              <div style={statValue}>{animNearExpiryItems}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#f59e0b"
+              label="Near Expiry Items"
+              value={animNearExpiryItems}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
 
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #ef4444" }}>
-              <div style={statLabel}>Shortage Requests</div>
-              <div style={statValue}>{animShortageRequests}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#ef4444"
+              label="Shortage Requests"
+              value={animShortageRequests}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
 
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #10b981" }}>
-              <div style={statLabel}>Purchase Requests</div>
-              <div style={statValue}>{animPurchaseRequests}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#10b981"
+              label="Purchase Requests"
+              value={animPurchaseRequests}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
 
-            <div className="ui-hover-lift" style={{ ...statCard, borderTop: "3px solid #06b6d4" }}>
-              <div style={statLabel}>Refill Requests</div>
-              <div style={statValue}>{animRefillRequests}</div>
-            </div>
+            <StatCard
+              className="ui-hover-lift"
+              style={statCard}
+              accentColor="#06b6d4"
+              label="Refill Requests"
+              value={animRefillRequests}
+              labelStyle={statLabel}
+              valueStyle={statValue}
+            />
           </>
         )}
       </div>
@@ -308,99 +322,119 @@ export default function ExecutiveDashboard() {
             ))
           : (
             <>
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>Tracked Drugs</div>
-                <div style={statValue}>{animTrackedDrugs}</div>
-              </div>
-
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>High Risk Shortages</div>
-                <div style={{ ...statValue, color: "#b91c1c" }}>{animHighRisk}</div>
-              </div>
-
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>Medium Risk Shortages</div>
-                <div style={{ ...statValue, color: "#b45309" }}>{animMedRisk}</div>
-              </div>
-
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>Low Risk Shortages</div>
-                <div style={{ ...statValue, color: "#166534" }}>{animLowRisk}</div>
-              </div>
-
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>Transfer Opportunities</div>
-                <div style={statValue}>{animTransferOpp}</div>
-              </div>
-
-              <div className="ui-hover-lift" style={statCard}>
-                <div style={statLabel}>Suggested Transfer Qty</div>
-                <div style={statValue}>{animTransferQty}</div>
-              </div>
-
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
-              >
-                <div style={{ ...statLabel, color: "#92400e" }}>Expiry Loss (Est.)</div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-                  {`AED ${animExpiryLoss.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="Tracked Drugs"
+                value={animTrackedDrugs}
+                labelStyle={statLabel}
+                valueStyle={statValue}
+              />
 
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
-              >
-                <div style={{ ...statLabel, color: "#92400e" }}>At-Risk Inventory</div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-                  {`AED ${animAtRisk.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="High Risk Shortages"
+                value={animHighRisk}
+                labelStyle={statLabel}
+                valueStyle={{ ...statValue, color: "#b91c1c" }}
+              />
 
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #ef4444" }}
-              >
-                <div style={{ ...statLabel, color: "#991b1b" }}>
-                  Shortage Exposure (High)
-                </div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}>
-                  {`AED ${animShortageExposure.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="Medium Risk Shortages"
+                value={animMedRisk}
+                labelStyle={statLabel}
+                valueStyle={{ ...statValue, color: "#b45309" }}
+              />
 
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #0ea5e9" }}
-              >
-                <div style={{ ...statLabel, color: "#0369a1" }}>Total Inventory Value</div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#075985" }}>
-                  {`AED ${animTotalInvValue.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="Low Risk Shortages"
+                value={animLowRisk}
+                labelStyle={statLabel}
+                valueStyle={{ ...statValue, color: "#166534" }}
+              />
 
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #f59e0b" }}
-              >
-                <div style={{ ...statLabel, color: "#92400e" }}>
-                  Near-Expiry Risk Value
-                </div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#b45309" }}>
-                  {`AED ${animNearExpiryRisk.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="Transfer Opportunities"
+                value={animTransferOpp}
+                labelStyle={statLabel}
+                valueStyle={statValue}
+              />
 
-              <div
+              <StatCard
                 className="ui-hover-lift"
-                style={{ ...statCard, borderTop: "3px solid #dc2626" }}
-              >
-                <div style={{ ...statLabel, color: "#991b1b" }}>Dead Stock Value</div>
-                <div style={{ ...statValue, fontSize: "22px", color: "#991b1b" }}>
-                  {`AED ${animDeadStock.toLocaleString()}`}
-                </div>
-              </div>
+                style={statCard}
+                label="Suggested Transfer Qty"
+                value={animTransferQty}
+                labelStyle={statLabel}
+                valueStyle={statValue}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#f59e0b"
+                label="Expiry Loss (Est.)"
+                value={`AED ${animExpiryLoss.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#92400e" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#f59e0b"
+                label="At-Risk Inventory"
+                value={`AED ${animAtRisk.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#92400e" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#ef4444"
+                label="Shortage Exposure (High)"
+                value={`AED ${animShortageExposure.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#991b1b" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#0ea5e9"
+                label="Total Inventory Value"
+                value={`AED ${animTotalInvValue.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#0369a1" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#075985" }}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#f59e0b"
+                label="Near-Expiry Risk Value"
+                value={`AED ${animNearExpiryRisk.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#92400e" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
+              />
+
+              <StatCard
+                className="ui-hover-lift"
+                style={statCard}
+                accentColor="#dc2626"
+                label="Dead Stock Value"
+                value={`AED ${animDeadStock.toLocaleString()}`}
+                labelStyle={{ ...statLabel, color: "#991b1b" }}
+                valueStyle={{ ...statValue, fontSize: "22px", color: "#991b1b" }}
+              />
             </>
           )}
       </div>
@@ -536,7 +570,7 @@ export default function ExecutiveDashboard() {
                         <span
                           style={{
                             ...badge,
-                            ...(riskStyles[row.priority] || riskStyles.medium),
+                            ...(riskBadgeStyles[row.priority] || riskBadgeStyles.medium),
                           }}
                         >
                           {row.priority.toUpperCase()}

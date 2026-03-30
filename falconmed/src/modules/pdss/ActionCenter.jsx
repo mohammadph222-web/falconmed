@@ -8,6 +8,8 @@ import {
   calculateSmartTransferRecommendations,
   filterActionItems,
 } from "../../utils/pdss";
+import { priorityBadgeStyles } from "../../utils/badgeStyles";
+import StatCard from "../../components/StatCard";
 
 async function safeFetch(table, columns) {
   if (!supabase) return { data: [], error: null };
@@ -30,11 +32,35 @@ function loadLocalArray(key) {
   }
 }
 
-const priorityStyles = {
-  high: { background: "#fee2e2", color: "#991b1b", border: "1px solid #fecaca" },
-  medium: { background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" },
-  low: { background: "#dcfce7", color: "#166534", border: "1px solid #bbf7d0" },
-};
+const priorityOrder = { high: 0, medium: 1, low: 2 };
+
+function extractDaysLeft(row) {
+  const details = String(row?.details || "");
+  const match = details.match(/(\d+)\s*day/i);
+  if (!match) return Number.POSITIVE_INFINITY;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function normalizeAction(row) {
+  const type = String(row?.type || "").toLowerCase();
+  const action = String(row?.action || "").toLowerCase();
+  const priority = String(row?.priority || "medium").toLowerCase();
+
+  if (type.includes("transfer") || action.includes("transfer")) return "Transfer stock";
+  if (type.includes("expiry") || action.includes("expiry")) return "Prioritize batch usage";
+  if (type.includes("shortage") || action.includes("shortage")) {
+    return priority === "high" ? "Reorder now" : "Review shortage manually";
+  }
+  if (priority === "low") return "Monitor only";
+  return row?.action || "Review action";
+}
+
+function normalizeDetails(row) {
+  const details = String(row?.details || "").trim();
+  if (!details) return "Operational signal detected. Review this item for action.";
+  return details;
+}
 
 export default function ActionCenter() {
   const [actions, setActions] = useState([]);
@@ -114,8 +140,34 @@ export default function ActionCenter() {
     void load();
   }, []);
 
-  const summary = useMemo(() => buildActionSummary(actions), [actions]);
-  const filtered = useMemo(() => filterActionItems(actions, filterKey), [actions, filterKey]);
+  const prioritizedActions = useMemo(() => {
+    const normalized = (actions || []).map((row) => {
+      const daysLeft = extractDaysLeft(row);
+      const riskValue = Number(row?.riskValue || row?.suggestedQuantity || 0);
+      return {
+        ...row,
+        action: normalizeAction(row),
+        details: normalizeDetails(row),
+        _priorityRank: priorityOrder[String(row?.priority || "medium").toLowerCase()] ?? 3,
+        _daysLeft: daysLeft,
+        _riskValue: Number.isFinite(riskValue) ? riskValue : 0,
+      };
+    });
+
+    normalized.sort((a, b) => {
+      if (a._priorityRank !== b._priorityRank) return a._priorityRank - b._priorityRank;
+      if (a._daysLeft !== b._daysLeft) return a._daysLeft - b._daysLeft;
+      return b._riskValue - a._riskValue;
+    });
+
+    return normalized;
+  }, [actions]);
+
+  const summary = useMemo(() => buildActionSummary(prioritizedActions), [prioritizedActions]);
+  const filtered = useMemo(
+    () => filterActionItems(prioritizedActions, filterKey),
+    [prioritizedActions, filterKey]
+  );
 
   const openModal = (row) => {
     setModalRow(row);
@@ -206,10 +258,34 @@ export default function ActionCenter() {
       {message ? <div style={messageBox}>{message}</div> : null}
 
       <div style={statsGrid}>
-        <div style={statCard}><div style={statLabel}>Total Actions</div><div style={statValue}>{summary.total ?? 0}</div></div>
-        <div style={statCard}><div style={statLabel}>High Priority</div><div style={{ ...statValue, color: "#b91c1c" }}>{summary.high ?? 0}</div></div>
-        <div style={statCard}><div style={statLabel}>Medium Priority</div><div style={{ ...statValue, color: "#b45309" }}>{summary.medium ?? 0}</div></div>
-        <div style={statCard}><div style={statLabel}>Low Priority</div><div style={{ ...statValue, color: "#166534" }}>{summary.low ?? 0}</div></div>
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={statValue}
+          label="Total Actions"
+          value={summary.total ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b91c1c" }}
+          label="High Priority"
+          value={summary.high ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b45309" }}
+          label="Medium Priority"
+          value={summary.medium ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#166534" }}
+          label="Low Priority"
+          value={summary.low ?? 0}
+        />
       </div>
 
       <div style={filterBar}>
@@ -254,7 +330,7 @@ export default function ActionCenter() {
                 {filtered.map((row) => (
                   <tr key={row.id}>
                     <td style={td}>
-                      <span style={{ ...badge, ...(priorityStyles[row.priority] || priorityStyles.medium) }}>
+                      <span style={{ ...badge, ...(priorityBadgeStyles[row.priority] || priorityBadgeStyles.medium) }}>
                         {String(row.priority || "medium").toUpperCase()}
                       </span>
                     </td>
@@ -285,66 +361,68 @@ export default function ActionCenter() {
 
 const wrap = { display: "grid", gap: "16px" };
 const headerCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  border: "1px solid #e2e8f0",
+  background: "linear-gradient(145deg, #ffffff 0%, #f7fbff 100%)",
+  borderRadius: "18px",
+  padding: "24px",
+  boxShadow: "0 16px 32px rgba(15, 23, 42, 0.09)",
+  border: "1px solid #dce6f2",
 };
-const title = { margin: 0, color: "#0f172a" };
-const subtitle = { marginTop: "8px", marginBottom: 0, color: "#475569" };
+const title = { margin: 0, color: "#0f172a", fontSize: "28px", letterSpacing: "-0.02em" };
+const subtitle = { marginTop: "8px", marginBottom: 0, color: "#5b6b85", fontSize: "14px" };
 const messageBox = {
-  background: "#eff6ff",
-  color: "#1d4ed8",
+  background: "#eef5ff",
+  color: "#1e40af",
   borderRadius: "12px",
   padding: "12px 14px",
-  border: "1px solid #bfdbfe",
+  border: "1px solid #cfe0ff",
   fontSize: "14px",
 };
 const statsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
+  gap: "14px",
 };
 const statCard = {
-  background: "white",
+  background: "linear-gradient(180deg, #ffffff 0%, #f9fcff 100%)",
   borderRadius: "16px",
   padding: "20px",
-  boxShadow: "0 4px 14px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e2e8f0",
-  borderTop: "3px solid #e2e8f0",
+  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.07)",
+  border: "1px solid #dfe8f4",
+  borderTop: "4px solid #d7e3f4",
 };
 const statLabel = {
-  color: "#64748b",
+  color: "#6b7b94",
   fontSize: "11px",
   fontWeight: 700,
-  letterSpacing: "0.06em",
+  letterSpacing: "0.08em",
   textTransform: "uppercase",
   marginBottom: "8px",
 };
-const statValue = { marginTop: "10px", fontSize: "28px", color: "#0f172a", fontWeight: 700 };
+const statValue = { marginTop: "10px", fontSize: "30px", color: "#0f172a", fontWeight: 800 };
 const filterBar = { display: "flex", flexWrap: "wrap", gap: "10px" };
 const filterBtn = {
-  border: "1px solid #cbd5e1",
+  border: "1px solid #d4deea",
   background: "#ffffff",
   color: "#334155",
   borderRadius: "999px",
-  padding: "8px 14px",
+  padding: "8px 15px",
   fontSize: "13px",
   fontWeight: 600,
   cursor: "pointer",
+  boxShadow: "0 2px 8px rgba(15, 23, 42, 0.04)",
 };
 const activeFilterBtn = {
   ...filterBtn,
-  background: "#2563eb",
-  border: "1px solid #2563eb",
+  background: "#1d4ed8",
+  border: "1px solid #1d4ed8",
   color: "#ffffff",
+  boxShadow: "0 8px 16px rgba(29, 78, 216, 0.24)",
 };
 const tableCard = {
   background: "white",
   borderRadius: "16px",
-  boxShadow: "0 4px 16px rgba(15, 23, 42, 0.06)",
-  border: "1px solid #e2e8f0",
+  boxShadow: "0 12px 26px rgba(15, 23, 42, 0.08)",
+  border: "1px solid #dfe8f4",
   overflow: "hidden",
 };
 const tableWrap = { width: "100%", overflowX: "auto" };
@@ -353,17 +431,17 @@ const th = {
   textAlign: "left",
   fontSize: "11px",
   fontWeight: 700,
-  letterSpacing: "0.05em",
+  letterSpacing: "0.08em",
   textTransform: "uppercase",
   color: "#64748b",
-  background: "#f8fafc",
-  borderBottom: "2px solid #e2e8f0",
-  padding: "12px 14px",
+  background: "#f4f8fd",
+  borderBottom: "1px solid #dce7f4",
+  padding: "13px 14px",
 };
 const td = {
   color: "#334155",
-  padding: "12px 14px",
-  borderBottom: "1px solid #f1f5f9",
+  padding: "13px 14px",
+  borderBottom: "1px solid #edf2f8",
   fontSize: "14px",
 };
 const tdDrug = { ...td, fontWeight: 600, color: "#0f172a" };
@@ -372,23 +450,25 @@ const badge = {
   alignItems: "center",
   justifyContent: "center",
   borderRadius: "999px",
-  fontSize: "12px",
+  fontSize: "11px",
   fontWeight: 700,
-  letterSpacing: "0.04em",
-  padding: "5px 10px",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  padding: "5px 11px",
 };
 const emptyState = { padding: "24px", color: "#64748b" };
 
 const prBtn = {
-  padding: "6px 12px",
-  background: "#2563eb",
+  padding: "7px 13px",
+  background: "linear-gradient(135deg, #2563eb 0%, #1e40af 100%)",
   color: "white",
   border: "none",
-  borderRadius: "8px",
+  borderRadius: "9px",
   fontSize: "12px",
   fontWeight: 700,
   cursor: "pointer",
   whiteSpace: "nowrap",
+  boxShadow: "0 8px 14px rgba(37,99,235,0.24)",
 };
 
 const modalOverlay = {

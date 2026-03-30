@@ -7,20 +7,21 @@ import {
   loadDrugMaster,
   searchDrugMaster,
 } from "./utils/drugMaster";
+import { loadPharmaciesWithFallback } from "./utils/pharmacyData";
 
-const EXPIRY_TABLE = "expiry_records";
+const EXPIRY_TABLE = "pharmacy_inventory";
 
 const mapDbToUi = (row) => ({
   id: row.id,
-  drugName: row.drug_name || "",
-  batchNo: row.batch_no || "",
+  pharmacyId: String(row.pharmacy_id ?? ""),
+  drugName: row.drug_name || row.drug || "",
+  batchNo: row.batch_no || row.batch || "",
   quantity: Number(row.quantity || 0),
   expiryDate: row.expiry_date || "",
-  unitPrice: Number(row.unit_price || 0),
-  location: row.location || "-",
-  notes: row.notes || "",
-  status: row.status || "Active",
-  value: Number(row.value || 0),
+  // unit_cost in pharmacy_inventory maps to unitPrice for display compatibility
+  unitPrice: Number(row.unit_cost || 0),
+  status: "Active", // derived from expiryDate in getStatus()
+  value: 0,          // computed at render time
 });
 
 export default function ExpiryTracker({ user, profile }) {
@@ -28,6 +29,10 @@ export default function ExpiryTracker({ user, profile }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [generatingTestData, setGeneratingTestData] = useState(false);
+
+  // Pharmacy selector (needed for inserts into pharmacy_inventory)
+  const [pharmacies, setPharmacies] = useState([]);
+  const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
 
   // Drug search and dropdown state
   const [allDrugs, setAllDrugs] = useState([]);
@@ -41,8 +46,6 @@ export default function ExpiryTracker({ user, profile }) {
     quantity: "",
     expiryDate: "",
     unitPrice: "",
-    location: "",
-    notes: "",
   });
 
   const today = new Date();
@@ -76,6 +79,16 @@ export default function ExpiryTracker({ user, profile }) {
         return badgeOk;
     }
   };
+  // Load pharmacies for the Add-Item pharmacy selector
+  useEffect(() => {
+    loadPharmaciesWithFallback().then(({ data }) => {
+      setPharmacies(data || []);
+      if (data && data.length > 0 && !selectedPharmacyId) {
+        setSelectedPharmacyId(String(data[0].id));
+      }
+    });
+  }, []);
+
   // Load drugs CSV for dropdown
   useEffect(() => {
     let isMounted = true;
@@ -183,20 +196,36 @@ export default function ExpiryTracker({ user, profile }) {
     setMessage("");
 
     try {
+      const nowIso = new Date().toISOString();
       const rows = Array.from({ length: 20 }).map(() => {
         const picked = allDrugs[randomInt(0, allDrugs.length - 1)] || {};
         const pickedName = buildDrugDisplayName(picked);
 
         return {
+          pharmacy_id: selectedPharmacyId || null,
           drug_name: pickedName && pickedName !== "Unknown" ? pickedName : "Unknown",
           batch_no: randomBatchNo(),
           expiry_date: randomExpiryDate(),
           quantity: randomInt(5, 120),
-          notes: "test_stock",
+          unit_cost: 0,
+          created_at: nowIso,
+          created_by: "falconmed.demo@preview",
         };
       });
 
-      const { error } = await supabase.from(EXPIRY_TABLE).insert(rows);
+      let insertResult = await supabase.from(EXPIRY_TABLE).insert(rows);
+
+      if (insertResult.error) {
+        const msg = String(insertResult.error.message || "").toLowerCase();
+        const createdByMissing = msg.includes("created_by") && msg.includes("column");
+
+        if (createdByMissing) {
+          const fallbackRows = rows.map(({ created_by, ...rest }) => rest);
+          insertResult = await supabase.from(EXPIRY_TABLE).insert(fallbackRows);
+        }
+      }
+
+      const { error } = insertResult;
 
       if (error) {
         console.error("Failed to generate test inventory:", error.message);
@@ -207,7 +236,8 @@ export default function ExpiryTracker({ user, profile }) {
       const { data: refreshed, error: refreshError } = await supabase
         .from(EXPIRY_TABLE)
         .select("*")
-        .order("created_at", { ascending: false });
+        .not("expiry_date", "is", null)
+        .order("expiry_date", { ascending: true });
 
       if (refreshError) {
         console.error("Failed to refresh after test inventory generation:", refreshError.message);
@@ -249,7 +279,8 @@ export default function ExpiryTracker({ user, profile }) {
         const { data, error } = await supabase
           .from(EXPIRY_TABLE)
           .select("*")
-          .order("created_at", { ascending: false });
+          .not("expiry_date", "is", null)
+          .order("expiry_date", { ascending: true });
 
         if (error) {
           setItems([]);
@@ -297,25 +328,46 @@ export default function ExpiryTracker({ user, profile }) {
       !form.drugName ||
       !form.batchNo ||
       !form.quantity ||
-      !form.expiryDate
+      !form.expiryDate ||
+      !selectedPharmacyId
     ) {
+      setMessage("Please fill in all required fields and select a pharmacy.");
       return;
     }
 
     try {
-      const { data, error } = await supabase
+      const payload = {
+        pharmacy_id: selectedPharmacyId,
+        drug_name: form.drugName,
+        batch_no: form.batchNo,
+        quantity: Number(form.quantity),
+        unit_cost: Number(form.unitPrice || 0),
+        expiry_date: form.expiryDate,
+        created_at: new Date().toISOString(),
+        created_by: "falconmed.demo@preview",
+      };
+
+      let insertResult = await supabase
         .from(EXPIRY_TABLE)
-        .insert({
-          drug_name: form.drugName,
-          batch_no: form.batchNo,
-          quantity: Number(form.quantity),
-          unit_price: Number(form.unitPrice || 0),
-          location: form.location || "-",
-          expiry_date: form.expiryDate,
-          notes: form.notes,
-        })
+        .insert(payload)
         .select("*")
         .single();
+
+      if (insertResult.error) {
+        const msg = String(insertResult.error.message || "").toLowerCase();
+        const createdByMissing = msg.includes("created_by") && msg.includes("column");
+
+        if (createdByMissing) {
+          const { created_by, ...fallbackPayload } = payload;
+          insertResult = await supabase
+            .from(EXPIRY_TABLE)
+            .insert(fallbackPayload)
+            .select("*")
+            .single();
+        }
+      }
+
+      const { data, error } = insertResult;
 
       if (error) {
         setMessage("Failed to save expiry item.");
@@ -329,7 +381,8 @@ export default function ExpiryTracker({ user, profile }) {
           const { data: refreshed, error: refreshError } = await supabase
             .from(EXPIRY_TABLE)
             .select("*")
-            .order("created_at", { ascending: false });
+            .not("expiry_date", "is", null)
+            .order("expiry_date", { ascending: true });
 
           if (refreshError) {
             console.error("Failed to refresh expiry records after insert:", refreshError.message);
@@ -392,8 +445,6 @@ export default function ExpiryTracker({ user, profile }) {
       quantity: "",
       expiryDate: "",
       unitPrice: "",
-      notes: "",
-      location: "",
     });
     setSelectedDrug(null);
     setDrugSearch("");
@@ -583,7 +634,7 @@ export default function ExpiryTracker({ user, profile }) {
           </div>
 
           <div>
-            <div style={fieldLabel}>Unit Price (AED)</div>
+            <div style={fieldLabel}>Unit Cost (AED)</div>
             <input
               style={input}
               type="number"
@@ -594,23 +645,20 @@ export default function ExpiryTracker({ user, profile }) {
           </div>
 
           <div>
-            <div style={fieldLabel}>Location</div>
-            <input
+            <div style={fieldLabel}>Pharmacy *</div>
+            <select
               style={input}
-              placeholder="e.g. Shelf A3"
-              value={form.location}
-              onChange={(e) => handleChange("location", e.target.value)}
-            />
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div style={fieldLabel}>Notes</div>
-            <textarea
-              style={textarea}
-              placeholder="Storage conditions, supplier info…"
-              value={form.notes}
-              onChange={(e) => handleChange("notes", e.target.value)}
-            />
+              value={selectedPharmacyId}
+              onChange={(e) => setSelectedPharmacyId(e.target.value)}
+              required
+            >
+              <option value="">-- Select Pharmacy --</option>
+              {pharmacies.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
@@ -642,18 +690,17 @@ export default function ExpiryTracker({ user, profile }) {
                 <th style={th}>Drug</th>
                 <th style={th}>Batch</th>
                 <th style={th}>Qty</th>
-                <th style={th}>Unit Price</th>
+                <th style={th}>Unit Cost</th>
                 <th style={th}>Value</th>
                 <th style={th}>Expiry Date</th>
-                <th style={th}>Location</th>
-                <th style={th}>Notes</th>
+                <th style={th}>Pharmacy ID</th>
                 <th style={th}>Status</th>
               </tr>
             </thead>
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="9" style={emptyCell}>
+                  <td colSpan="8" style={emptyCell}>
                     Loading expiry records…
                   </td>
                 </tr>
@@ -674,8 +721,7 @@ export default function ExpiryTracker({ user, profile }) {
                     <td style={td}>{item.unitPrice} AED</td>
                     <td style={{ ...td, fontWeight: 600 }}>{value.toLocaleString()} AED</td>
                     <td style={{ ...td, color: "#64748b" }}>{item.expiryDate}</td>
-                    <td style={{ ...td, color: "#64748b" }}>{item.location}</td>
-                    <td style={{ ...td, color: "#64748b", maxWidth: "160px" }}>{item.notes}</td>
+                    <td style={{ ...td, color: "#64748b" }}>{item.pharmacyId || "-"}</td>
                     <td style={td}>
                       <span style={getStatusStyle(status)}>{status}</span>
                     </td>
@@ -685,7 +731,7 @@ export default function ExpiryTracker({ user, profile }) {
 
               {!loading && items.length === 0 && (
                 <tr>
-                  <td colSpan="9" style={emptyCell}>
+                  <td colSpan="8" style={emptyCell}>
                     No expiry items found. Use the form above to add your first item.
                   </td>
                 </tr>

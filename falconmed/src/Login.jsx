@@ -1,25 +1,26 @@
 import { useState } from "react";
-import { supabase, supabaseError } from "./lib/supabaseClient";
+import { useAuthContext } from "./lib/authContext";
 
-export default function Login({ onLogin }) {
+export default function Login() {
   const [email, setEmail] = useState("admin@falconmed.com");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const { error: authError, signIn } = useAuthContext();
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setMessage("");
 
-    if (supabaseError) {
-      setMessage("Supabase init error: " + supabaseError);
+    if (authError) {
+      setMessage("Supabase init error: " + authError);
       setLoading(false);
       return;
     }
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const { error } = await signIn({
         email,
         password,
       });
@@ -27,8 +28,7 @@ export default function Login({ onLogin }) {
       if (error) {
         setMessage(error.message);
       } else {
-        setMessage("Login successful");
-        if (onLogin) onLogin(data.user);
+        setMessage("");
       }
     } catch (err) {
       setMessage("Connection error: " + (err?.message || "Unknown error"));

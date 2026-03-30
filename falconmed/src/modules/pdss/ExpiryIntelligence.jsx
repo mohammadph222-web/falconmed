@@ -5,6 +5,8 @@ import {
   buildExpiryNarrative,
   calculateExpiryIntelligence,
 } from "../../utils/pdss";
+import { riskBadgeStyles } from "../../utils/badgeStyles";
+import StatCard from "../../components/StatCard";
 
 async function safeFetch(table, columns) {
   if (!supabase) return { data: [], error: null };
@@ -26,24 +28,6 @@ function loadLocalArray(key) {
     return [];
   }
 }
-
-const riskStyles = {
-  high: {
-    background: "#fee2e2",
-    color: "#991b1b",
-    border: "1px solid #fecaca",
-  },
-  medium: {
-    background: "#fef3c7",
-    color: "#92400e",
-    border: "1px solid #fde68a",
-  },
-  low: {
-    background: "#dcfce7",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
-  },
-};
 
 export default function ExpiryIntelligence() {
   const [rows, setRows] = useState([]);
@@ -112,26 +96,41 @@ export default function ExpiryIntelligence() {
       {message ? <div style={messageBox}>{message}</div> : null}
 
       <div style={statsGrid}>
-        <div style={statCard}>
-          <div style={statLabel}>Near Expiry Batches</div>
-          <div style={statValue}>{metrics.nearExpiryBatches ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>High Expiry Risk</div>
-          <div style={{ ...statValue, color: "#b91c1c" }}>{metrics.highExpiryRisk ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Medium Expiry Risk</div>
-          <div style={{ ...statValue, color: "#b45309" }}>{metrics.mediumExpiryRisk ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Low Expiry Risk</div>
-          <div style={{ ...statValue, color: "#166534" }}>{metrics.lowExpiryRisk ?? 0}</div>
-        </div>
-        <div style={statCard}>
-          <div style={statLabel}>Estimated At-Risk Qty</div>
-          <div style={statValue}>{metrics.estimatedAtRiskQuantity ?? 0}</div>
-        </div>
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={statValue}
+          label="Near Expiry Batches"
+          value={metrics.nearExpiryBatches ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b91c1c" }}
+          label="High Expiry Risk"
+          value={metrics.highExpiryRisk ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#b45309" }}
+          label="Medium Expiry Risk"
+          value={metrics.mediumExpiryRisk ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={{ ...statValue, color: "#166534" }}
+          label="Low Expiry Risk"
+          value={metrics.lowExpiryRisk ?? 0}
+        />
+        <StatCard
+          style={statCard}
+          labelStyle={statLabel}
+          valueStyle={statValue}
+          label="Estimated At-Risk Qty"
+          value={metrics.estimatedAtRiskQuantity ?? 0}
+        />
       </div>
 
       <div style={summaryCard}>
@@ -172,7 +171,7 @@ export default function ExpiryIntelligence() {
                       <span
                         style={{
                           ...badge,
-                          ...(riskStyles[row.expiryRiskLevel] || riskStyles.medium),
+                          ...(riskBadgeStyles[row.expiryRiskLevel] || riskBadgeStyles.medium),
                         }}
                       >
                         {row.expiryRiskLevel.toUpperCase()}

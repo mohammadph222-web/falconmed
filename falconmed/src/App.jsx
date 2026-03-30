@@ -1,10 +1,13 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import CommandPalette from "./components/CommandPalette";
+import FeatureGate from "./components/FeatureGate";
 import SkeletonCard from "./components/SkeletonCard";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
+import useSubscription from "./hooks/useSubscription";
 import useCommandPaletteShortcut from "./hooks/useCommandPaletteShortcut";
+import Login from "./Login";
 import { supabase } from "./lib/supabaseClient";
-import LandingPage from "./LandingPage";
+import { useAuthContext } from "./lib/authContext";
 import DrugSearch from "./DrugSearch";
 import ExpiryTracker from "./ExpiryTracker";
 import ShortageTracker from "./ShortageTracker";
@@ -13,25 +16,95 @@ import Billing from "./Billing";
 import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
+import StockMovementSystem from "./StockMovementSystem";
 import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
 import InventoryManagementPage from "./InventoryManagementPage.jsx";
+import SubscriptionCenter from "./SubscriptionCenter";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
 import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 import PurchaseRequests from "./PurchaseRequests";
 import NetworkIntelligence from "./modules/network/NetworkIntelligence";
+import {
+  canAccessPage,
+  getRequiredPlan,
+  getUpgradeMessage,
+  PLAN_LABELS,
+} from "./config/featureAccess";
+
+const NAVIGATION_SECTIONS = [
+  {
+    label: "Core",
+    items: [
+      { label: "Dashboard", subtitle: "Overview and live ops", page: "dashboard", icon: "⌂", keywords: ["home", "overview", "kpi"] },
+      { label: "Subscription Center", subtitle: "Plans and entitlement visibility", page: "subscription-center", icon: "¤", keywords: ["subscription", "plans", "upgrade", "billing"] },
+      { label: "Drug Intelligence", subtitle: "Search and inspect drug data", page: "drugsearch", icon: "⌕", keywords: ["drug", "master", "search"] },
+      { label: "Expiry Tracker", subtitle: "Near-expiry and expired stock", page: "expiry", icon: "◷", keywords: ["expiry", "near expiry", "expired"] },
+      { label: "Shortage Tracker", subtitle: "Shortage requests and status", page: "shortage", icon: "!", keywords: ["shortage", "stockout"] },
+      { label: "Analytics", subtitle: "Operational reports", page: "reports", icon: "▤", keywords: ["reports", "analytics", "insights"] },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      { label: "Labeling Suite", subtitle: "Generate labels", page: "labels", icon: "#", keywords: ["label", "print"] },
+      { label: "Billing", subtitle: "Billing and invoice tools", page: "billing", icon: "$", keywords: ["invoice", "bill"] },
+      { label: "Refill Tracker", subtitle: "Track refill schedules", page: "refill", icon: "↺", keywords: ["refill", "patient"] },
+      { label: "PDSS", subtitle: "Executive dashboard", page: "pdss", pdssView: "executive-dashboard", icon: "⚙", keywords: ["pdss", "decision support", "executive"] },
+      { label: "Purchase Requests", subtitle: "Manage purchase requests", page: "purchases", icon: "+", keywords: ["purchase", "procurement"] },
+      { label: "Stocktaking", subtitle: "Count and variance checks", page: "stocktaking", icon: "✓", keywords: ["stocktaking", "count"] },
+      { label: "Stock Movement", subtitle: "Record stock movement transactions", page: "stock-movement", icon: "⇄", keywords: ["stock movement", "transfer", "receive", "issue"] },
+    ],
+  },
+  {
+    label: "Intelligence",
+    items: [
+      { label: "Network Intelligence", subtitle: "Cross-site network signals", page: "network", icon: "◎", keywords: ["network", "intelligence"] },
+      { label: "Pharmacy Network", subtitle: "Pharmacy-level inventory view", page: "pharmacy-network", icon: "◉", keywords: ["pharmacy", "branches"] },
+      { label: "Inventory Management", subtitle: "Inventory add/edit workflow", page: "inventory-management", icon: "▦", keywords: ["inventory", "stock"] },
+    ],
+  },
+];
+
+function formatStatusLabel(status) {
+  if (!status) return "Inactive";
+
+  return String(status)
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getAccessModeNotice(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+
+  if (normalized === "unavailable") {
+    return "Subscription unavailable — limited access mode";
+  }
+
+  if (normalized === "inactive") {
+    return "Starter access active";
+  }
+
+  return "";
+}
 
 export default function App() {
-  const [showLanding, setShowLanding] = useState(true);
+  const { user, loading: authLoading, signOut } = useAuthContext();
+  const { plan, status: subscriptionStatus, loading: subscriptionLoading } = useSubscription(user);
   const [page, setPage] = useState("dashboard");
   const [pdssView, setPdssView] = useState("executive-dashboard");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [accessNotice, setAccessNotice] = useState("");
   const [activeSites, setActiveSites] = useState(0);
   const [inventoryRecords, setInventoryRecords] = useState(0);
   const [nearExpiry, setNearExpiry] = useState(0);
   const [shortageRequests, setShortageRequests] = useState(0);
   const [purchaseRequests, setPurchaseRequests] = useState(0);
   const [refillRequests, setRefillRequests] = useState(0);
+  const [recentActivity, setRecentActivity] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
 
   const safeCount = async (tableName) => {
     if (!supabase) return 0;
@@ -48,7 +121,68 @@ export default function App() {
     }
   };
 
+  const loadRecentActivity = async () => {
+    if (!supabase) {
+      setRecentActivity([]);
+      setActivityLoading(false);
+      return;
+    }
+    setActivityLoading(true);
+
+    const safeQuery = async (table, columns) => {
+      try {
+        const { data, error } = await supabase
+          .from(table)
+          .select(columns)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        if (error) return [];
+        return data || [];
+      } catch {
+        return [];
+      }
+    };
+
+    const [movements] = await Promise.all([
+      safeQuery("stock_movements", "movement_type,drug_name,quantity,from_pharmacy,to_pharmacy,created_at,created_by"),
+    ]);
+
+    const items = [];
+
+    const resolveCreatedAt = (createdAt) => {
+      const ts = createdAt ? new Date(createdAt).getTime() : Number.NaN;
+      return Number.isFinite(ts) ? createdAt : null;
+    };
+
+    for (const r of movements) {
+      const createdAt = resolveCreatedAt(r.created_at);
+      items.push({
+        type: "MOVEMENT",
+        title: `${r.movement_type || "Movement"} - ${r.drug_name || "Unknown"}`,
+        subtitle: `${Number(r.quantity || 0)} units | ${r.from_pharmacy || "-"} → ${r.to_pharmacy || "-"}`,
+        created_at: createdAt,
+        created_by: r.created_by || "",
+      });
+    }
+
+    items.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : Number.NEGATIVE_INFINITY;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : Number.NEGATIVE_INFINITY;
+      return tb - ta;
+    });
+
+    setRecentActivity(items.slice(0, 5));
+    setActivityLoading(false);
+  };
+
   useEffect(() => {
+    if (!user || page !== "dashboard") return;
+    void loadRecentActivity();
+  }, [page, user]);
+
+  useEffect(() => {
+    if (!user) return undefined;
+
     let isMounted = true;
 
     const loadDashboardMetrics = async () => {
@@ -77,7 +211,7 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user]);
 
   const totalDrugsInDatabase = inventoryRecords;
   const nearExpiryItems = nearExpiry;
@@ -106,7 +240,7 @@ export default function App() {
         : riskBadgeHigh;
 
   useEffect(() => {
-    if (showLanding || page !== "dashboard") {
+    if (!user || page !== "dashboard") {
       setDashboardLoading(false);
       return;
     }
@@ -114,7 +248,7 @@ export default function App() {
     setDashboardLoading(true);
     const timer = window.setTimeout(() => setDashboardLoading(false), 700);
     return () => window.clearTimeout(timer);
-  }, [page, showLanding]);
+  }, [page, user]);
 
   const animDrugs = useAnimatedCounter(totalDrugsInDatabase);
   const animNearExpiry = useAnimatedCounter(nearExpiryItems);
@@ -123,125 +257,132 @@ export default function App() {
   const animRiskScore = useAnimatedCounter(operationalRiskScore);
   const animFinancialImpact = useAnimatedCounter(financialImpact);
 
-  useCommandPaletteShortcut(
-    () => {
-      if (showLanding) return;
-      setPaletteOpen((prev) => !prev);
-    },
-    true
+  const handlePaletteToggle = useCallback(() => {
+    if (!user) return;
+    setPaletteOpen((prev) => !prev);
+  }, [user]);
+
+  useCommandPaletteShortcut(handlePaletteToggle, true);
+
+  const navigationSections = useMemo(
+    () =>
+      NAVIGATION_SECTIONS.map((section) => ({
+        ...section,
+        items: section.items.map((item) => {
+          const requiredPlan = getRequiredPlan(item.page);
+
+          return {
+            ...item,
+            requiredPlan,
+            requiredPlanLabel: PLAN_LABELS[requiredPlan],
+            locked: !canAccessPage(plan, item.page),
+          };
+        }),
+      })),
+    [plan]
   );
 
-  const commandNavigationItems = [
-    { label: "Dashboard", subtitle: "Overview and live ops", page: "dashboard", icon: "⌂", keywords: ["home", "overview", "kpi"] },
-    { label: "Drug Intelligence", subtitle: "Search and inspect drug data", page: "drugsearch", icon: "⌕", keywords: ["drug", "master", "search"] },
-    { label: "Expiry Tracker", subtitle: "Near-expiry and expired stock", page: "expiry", icon: "◷", keywords: ["expiry", "near expiry", "expired"] },
-    { label: "Shortage Tracker", subtitle: "Shortage requests and status", page: "shortage", icon: "!", keywords: ["shortage", "stockout"] },
-    { label: "Analytics", subtitle: "Operational reports", page: "reports", icon: "▤", keywords: ["reports", "analytics", "insights"] },
-    { label: "Labeling Suite", subtitle: "Generate labels", page: "labels", icon: "#", keywords: ["label", "print"] },
-    { label: "Billing", subtitle: "Billing and invoice tools", page: "billing", icon: "$", keywords: ["invoice", "bill"] },
-    { label: "Refill Tracker", subtitle: "Track refill schedules", page: "refill", icon: "↺", keywords: ["refill", "patient"] },
-    { label: "PDSS", subtitle: "Executive dashboard", page: "pdss", pdssView: "executive-dashboard", icon: "⚙", keywords: ["pdss", "decision support", "executive"] },
-    { label: "Purchase Requests", subtitle: "Manage purchase requests", page: "purchases", icon: "+", keywords: ["purchase", "procurement"] },
-    { label: "Stocktaking", subtitle: "Count and variance checks", page: "stocktaking", icon: "✓", keywords: ["stocktaking", "count"] },
-    { label: "Network Intelligence", subtitle: "Cross-site network signals", page: "network", icon: "◎", keywords: ["network", "intelligence"] },
-    { label: "Pharmacy Network", subtitle: "Pharmacy-level inventory view", page: "pharmacy-network", icon: "◉", keywords: ["pharmacy", "branches"] },
-    { label: "Inventory Management", subtitle: "Inventory add/edit workflow", page: "inventory-management", icon: "▦", keywords: ["inventory", "stock"] },
-  ];
+  const commandNavigationItems = useMemo(
+    () => navigationSections.flatMap((section) => section.items),
+    [navigationSections]
+  );
 
-  const handleCommandSelect = (selection) => {
+  const handleNavigationRequest = useCallback((selection) => {
     if (!selection?.page) return;
+
+    if (!canAccessPage(plan, selection.page)) {
+      setAccessNotice(getUpgradeMessage(selection.page));
+      return;
+    }
+
+    setAccessNotice("");
 
     if (selection.page === "pdss" && selection.pdssView) {
       setPdssView(selection.pdssView);
     }
 
     setPage(selection.page);
-  };
+  }, [plan]);
 
-  if (showLanding) {
-    return <LandingPage onAccess={() => setShowLanding(false)} />;
+  const handleSignOut = useCallback(async () => {
+    await signOut();
+    setAccessNotice("");
+    setPaletteOpen(false);
+    setPage("dashboard");
+    setPdssView("executive-dashboard");
+  }, [signOut]);
+
+  useEffect(() => {
+    if (!accessNotice) return undefined;
+
+    const timer = window.setTimeout(() => setAccessNotice(""), 4200);
+    return () => window.clearTimeout(timer);
+  }, [accessNotice]);
+
+  if (authLoading || (user && subscriptionLoading)) {
+    return (
+      <div style={sessionShell}>
+        <div style={sessionCard}>
+          <div style={sessionBadge}>FalconMed</div>
+          <h1 style={sessionTitle}>Loading workspace</h1>
+          <p style={sessionText}>Restoring your session and verifying plan access.</p>
+        </div>
+      </div>
+    );
   }
+
+  if (!user) {
+    return <Login />;
+  }
+
+  const renderGuardedPage = (targetPage, title, children) => (
+    <div style={contentCard}>
+      <FeatureGate
+        allowed={canAccessPage(plan, targetPage)}
+        title={title}
+        message={getUpgradeMessage(targetPage)}
+      >
+        {children}
+      </FeatureGate>
+    </div>
+  );
 
   const renderPage = () => {
     switch (page) {
+      case "subscription-center":
+        return renderGuardedPage(
+          "subscription-center",
+          "Subscription Center",
+          <SubscriptionCenter plan={plan} status={subscriptionStatus} />
+        );
       case "drugsearch":
-        return (
-          <div style={contentCard}>
-            <DrugSearch />
-          </div>
-        );
+        return renderGuardedPage("drugsearch", "Drug Intelligence", <DrugSearch />);
       case "expiry":
-        return (
-          <div style={contentCard}>
-            <ExpiryTracker />
-          </div>
-        );
+        return renderGuardedPage("expiry", "Expiry Tracker", <ExpiryTracker />);
       case "shortage":
-        return (
-          <div style={contentCard}>
-            <ShortageTracker />
-          </div>
-        );
+        return renderGuardedPage("shortage", "Shortage Tracker", <ShortageTracker />);
       case "reports":
-        return (
-          <div style={contentCard}>
-            <Reports />
-          </div>
-        );
+        return renderGuardedPage("reports", "Analytics", <Reports />);
       case "labels":
-        return (
-          <div style={contentCard}>
-            <LabelBuilder />
-          </div>
-        );
+        return renderGuardedPage("labels", "Labeling Suite", <LabelBuilder />);
       case "billing":
-        return (
-          <div style={contentCard}>
-            <Billing />
-          </div>
-        );
+        return renderGuardedPage("billing", "Billing", <Billing />);
       case "refill":
-        return (
-          <div style={contentCard}>
-            <RefillTracker />
-          </div>
-        );
+        return renderGuardedPage("refill", "Refill Tracker", <RefillTracker />);
       case "pdss":
-        return (
-          <div style={contentCard}>
-            <PDSSWorkspace initialView={pdssView} />
-          </div>
-        );
+        return renderGuardedPage("pdss", "PDSS", <PDSSWorkspace initialView={pdssView} />);
       case "purchases":
-        return (
-          <div style={contentCard}>
-            <PurchaseRequests />
-          </div>
-        );
+        return renderGuardedPage("purchases", "Purchase Requests", <PurchaseRequests />);
       case "stocktaking":
-        return (
-          <div style={contentCard}>
-            <Stocktaking />
-          </div>
-        );
+        return renderGuardedPage("stocktaking", "Stocktaking", <Stocktaking />);
+      case "stock-movement":
+        return renderGuardedPage("stock-movement", "Stock Movement", <StockMovementSystem />);
       case "network":
-        return (
-          <div style={contentCard}>
-            <NetworkIntelligence />
-          </div>
-        );
+        return renderGuardedPage("network", "Network Intelligence", <NetworkIntelligence />);
       case "pharmacy-network":
-        return (
-          <div style={contentCard}>
-            <PharmacyNetwork />
-          </div>
-        );
+        return renderGuardedPage("pharmacy-network", "Pharmacy Network", <PharmacyNetwork />);
       case "inventory-management":
-        return (
-          <div style={contentCard}>
-            <InventoryManagementPage />
-          </div>
-        );
+        return renderGuardedPage("inventory-management", "Inventory Management", <InventoryManagementPage />);
       default:
         return (
           <>
@@ -339,25 +480,25 @@ export default function App() {
                 </div>
 
                 <div style={cardsGrid}>
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
                     <div style={statValue}>{animDrugs.toLocaleString()}</div>
                     <div style={kpiHint}>Active formulary records across FalconMed.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #2f4f9f" }}>
                     <div style={statLabel}>NEAR EXPIRY ITEMS</div>
                     <div style={statValue}>{animNearExpiry}</div>
                     <div style={kpiHint}>Items requiring near-term stock planning.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #3557ab" }}>
                     <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
                     <div style={statValue}>{animShortageToday}</div>
                     <div style={kpiHint}>Current shortage pressure logged today.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #10b981" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #4267bb" }}>
                     <div style={statLabel}>ACTIVE SITES</div>
                     <div style={statValue}>{animActiveSites}</div>
                     <div style={kpiHint}>Sites currently contributing activity data.</div>
@@ -369,10 +510,10 @@ export default function App() {
                       ...statCard,
                       borderTop:
                         riskLevel === "Low"
-                          ? "4px solid #16a34a"
+                          ? "4px solid #4267bb"
                           : riskLevel === "Medium"
-                            ? "4px solid #f59e0b"
-                            : "4px solid #ef4444",
+                            ? "4px solid #2f4f9f"
+                            : "4px solid #1f3c88",
                     }}
                   >
                     <div style={statLabel}>OPERATIONAL RISK SCORE</div>
@@ -381,7 +522,7 @@ export default function App() {
                     <div style={riskHint}>Driven by shortage risk and urgent pharmacy actions.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #0ea5e9" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>INVENTORY FINANCIAL IMPACT</div>
                     <div style={{ ...statValue, fontSize: "26px" }}>
                       AED {animFinancialImpact.toLocaleString()}
@@ -395,44 +536,44 @@ export default function App() {
                 <div style={contentCard}>
                   <h3 style={sectionTitle}>Recent Activity</h3>
 
-                  <div style={activityItem}>
-                    <div style={activityBarBlue} />
-                    <div style={activityContent}>
-                      <div style={activityTitleRow}>
-                        <span style={activityTagBlue}>Refill</span>
-                        <span style={activityTitle}>Refill Created</span>
-                      </div>
-                      <div style={activityText}>
-                        Refill request created: sample medicine entry
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={activityItem}>
-                    <div style={activityBarRed} />
-                    <div style={activityContent}>
-                      <div style={activityTitleRow}>
-                        <span style={activityTagRed}>Shortage</span>
-                        <span style={activityTitle}>Shortage Created</span>
-                      </div>
-                      <div style={activityText}>
-                        Shortage request created: sample shortage item
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={{ ...activityItem, borderBottom: "none" }}>
-                    <div style={activityBarOrange} />
-                    <div style={activityContent}>
-                      <div style={activityTitleRow}>
-                        <span style={activityTagOrange}>Expiry</span>
-                        <span style={activityTitle}>Expiry Added</span>
-                      </div>
-                      <div style={activityText}>
-                        Expiry item added: sample expiry medicine
-                      </div>
-                    </div>
-                  </div>
+                  {activityLoading ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>Loading activity...</div>
+                  ) : recentActivity.length === 0 ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>No recent activity found.</div>
+                  ) : (
+                    recentActivity.map((item, idx) => {
+                      const isLast = idx === recentActivity.length - 1;
+                      const barColor =
+                        item.type === "SHORTAGE" ? "#2f4f9f" :
+                        item.type === "EXPIRY" ? "#4267bb" : "#1f3c88";
+                      const tagBg =
+                        item.type === "SHORTAGE" ? "#e3ebff" :
+                        item.type === "EXPIRY" ? "#edf2ff" : "#eaf0ff";
+                      const tagColor =
+                        item.type === "SHORTAGE" ? "#2f4f9f" :
+                        item.type === "EXPIRY" ? "#4267bb" : "#1f3c88";
+                      return (
+                        <div
+                          key={`activity-${idx}`}
+                          style={{ ...activityItem, ...(isLast ? { borderBottom: "none" } : {}) }}
+                        >
+                          <div style={{ ...activityBarBlue, background: barColor }} />
+                          <div style={activityContent}>
+                            <div style={activityTitleRow}>
+                              <span style={{ ...activityTagBase, background: tagBg, color: tagColor }}>
+                                {item.type}
+                              </span>
+                              <span style={activityTitle}>{item.title}</span>
+                            </div>
+                            <div style={activityText}>{item.subtitle}</div>
+                            {item.created_by ? (
+                              <div style={{ ...activityText, fontSize: "12px" }}>by {item.created_by}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
                 <div style={contentCard}>
@@ -480,6 +621,7 @@ export default function App() {
               <div>
                 <h2 style={brandTitle}>FalconMed</h2>
                 <p style={brandSub}>Pharmacy Intelligence</p>
+                <p style={brandTagline}>Pharmacy Intelligence Platform</p>
               </div>
             </div>
           </div>
@@ -489,108 +631,49 @@ export default function App() {
               <div style={avatarCircle}>FM</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={userLabel}>Active Session</div>
-                <div style={userEmail}>falconmed.demo@preview</div>
+                <div style={userEmail}>{user?.email || "Signed in"}</div>
+                <div style={planRow}>
+                  <span style={planBadge}>{PLAN_LABELS[plan]}</span>
+                  <span style={planStatusBadge}>{formatStatusLabel(subscriptionStatus)}</span>
+                </div>
+                {getAccessModeNotice(subscriptionStatus) ? (
+                  <div style={planHint}>{getAccessModeNotice(subscriptionStatus)}</div>
+                ) : null}
               </div>
             </div>
+            <button style={signOutButton} onClick={handleSignOut}>
+              Sign out
+            </button>
           </div>
 
-          <div style={navSectionLabel}>Core</div>
+          {navigationSections.map((section, sectionIndex) => (
+            <div key={section.label}>
+              {sectionIndex > 0 ? <div style={navDivider} /> : null}
+              <div style={navSectionLabel}>{section.label}</div>
 
-          <button
-            style={page === "dashboard" ? activeBtn : btn}
-            onClick={() => setPage("dashboard")}
-          >
-            Dashboard
-          </button>
-          <button
-            style={page === "drugsearch" ? activeBtn : btn}
-            onClick={() => setPage("drugsearch")}
-          >
-            Drug Intelligence
-          </button>
-          <button
-            style={page === "expiry" ? activeBtn : btn}
-            onClick={() => setPage("expiry")}
-          >
-            Expiry Tracker
-          </button>
-          <button
-            style={page === "shortage" ? activeBtn : btn}
-            onClick={() => setPage("shortage")}
-          >
-            Shortage Tracker
-          </button>
-          <button
-            style={page === "reports" ? activeBtn : btn}
-            onClick={() => setPage("reports")}
-          >
-            Analytics
-          </button>
-
-          <div style={navDivider} />
-          <div style={navSectionLabel}>Operations</div>
-
-          <button
-            style={page === "labels" ? activeBtn : btn}
-            onClick={() => setPage("labels")}
-          >
-            Labeling Suite
-          </button>
-          <button
-            style={page === "billing" ? activeBtn : btn}
-            onClick={() => setPage("billing")}
-          >
-            Billing
-          </button>
-          <button
-            style={page === "refill" ? activeBtn : btn}
-            onClick={() => setPage("refill")}
-          >
-            Refill Tracker
-          </button>
-          <button
-            style={page === "pdss" ? activeBtn : btn}
-            onClick={() => {
-              setPdssView("executive-dashboard");
-              setPage("pdss");
-            }}
-          >
-            PDSS
-          </button>
-          <button
-            style={page === "purchases" ? activeBtn : btn}
-            onClick={() => setPage("purchases")}
-          >
-            Purchase Requests
-          </button>
-          <button
-            style={page === "stocktaking" ? activeBtn : btn}
-            onClick={() => setPage("stocktaking")}
-          >
-            Stocktaking
-          </button>
-
-          <div style={navDivider} />
-          <div style={navSectionLabel}>Intelligence</div>
-
-          <button
-            style={page === "network" ? activeBtn : btn}
-            onClick={() => setPage("network")}
-          >
-            Network Intelligence
-          </button>
-          <button
-            style={page === "pharmacy-network" ? activeBtn : btn}
-            onClick={() => setPage("pharmacy-network")}
-          >
-            Pharmacy Network
-          </button>
-          <button
-            style={page === "inventory-management" ? activeBtn : btn}
-            onClick={() => setPage("inventory-management")}
-          >
-            Inventory Management
-          </button>
+              {section.items.map((item) => (
+                <button
+                  key={item.page}
+                  style={
+                    page === item.page
+                      ? item.locked
+                        ? lockedActiveBtn
+                        : activeBtn
+                      : item.locked
+                        ? lockedBtn
+                        : btn
+                  }
+                  onClick={() => handleNavigationRequest(item)}
+                >
+                  <span style={navButtonRow}>
+                    <span>{item.label}</span>
+                    {item.locked ? <span style={lockIndicator}>Locked</span> : null}
+                  </span>
+                  {item.locked ? <span style={navMetaText}>{item.requiredPlanLabel} plan</span> : null}
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
 
         <div style={demoFooter}>
@@ -598,17 +681,29 @@ export default function App() {
             <span style={footerLiveDot} />
             <span>Platform Online</span>
           </div>
-          <div>FalconMed v1.0 · Stable</div>
+          <div>FalconMed v1.0</div>
         </div>
       </aside>
 
-      <main style={main}>{renderPage()}</main>
+      <main style={main}>
+        {accessNotice ? (
+          <div style={accessNoticeCard}>
+            <div style={accessNoticeTitle}>Plan Access</div>
+            <div style={accessNoticeText}>{accessNotice}</div>
+          </div>
+        ) : null}
+        {renderPage()}
+        <footer style={appFooter}>
+          <div style={appFooterTitle}>FalconMed v1.0</div>
+          <div style={appFooterSub}>Pharmacy Intelligence Platform</div>
+        </footer>
+      </main>
 
       <CommandPalette
         isOpen={paletteOpen}
         onClose={() => setPaletteOpen(false)}
         navigationItems={commandNavigationItems}
-        onSelectPage={handleCommandSelect}
+        onSelectPage={handleNavigationRequest}
       />
     </div>
   );
@@ -617,20 +712,20 @@ export default function App() {
 const layout = {
   display: "flex",
   minHeight: "100vh",
-  background: "#eef2f7",
-  fontFamily: "'Segoe UI', Arial, sans-serif",
+  background: "#f6f8fb",
+  fontFamily: "'Inter', system-ui, sans-serif",
 };
 
 const sidebar = {
   width: "280px",
   minWidth: "280px",
-  background: "#0c1322",
+  background: "#0f1c3f",
   color: "white",
-  padding: "28px 16px 24px",
+  padding: "28px 18px 24px",
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
-  boxShadow: "3px 0 20px rgba(0,0,0,0.18)",
+  boxShadow: "6px 0 24px rgba(15, 28, 63, 0.24)",
   position: "sticky",
   top: 0,
   height: "100vh",
@@ -651,16 +746,16 @@ const brandLogoRow = {
 };
 
 const brandIconBox = {
-  width: "38px",
-  height: "38px",
+  width: "36px",
+  height: "36px",
   borderRadius: "10px",
-  background: "#1e40af",
+  background: "linear-gradient(135deg,#1f3c88,#3b82f6)",
   color: "white",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  fontSize: "19px",
-  fontWeight: 900,
+  fontSize: "18px",
+  fontWeight: 700,
   flexShrink: 0,
   letterSpacing: "-0.02em",
 };
@@ -676,18 +771,27 @@ const brandTitle = {
 
 const brandSub = {
   marginTop: "3px",
-  marginBottom: 0,
+  marginBottom: "2px",
   fontSize: "11px",
-  color: "#7c95b8",
+  color: "#b6c3e3",
   letterSpacing: "0.02em",
+};
+
+const brandTagline = {
+  marginTop: 0,
+  marginBottom: 0,
+  fontSize: "12px",
+  color: "#dbe7ff",
+  opacity: 0.8,
+  letterSpacing: "0.01em",
 };
 
 const userCard = {
   background: "rgba(255,255,255,0.05)",
-  border: "1px solid rgba(255,255,255,0.08)",
-  borderRadius: "12px",
-  padding: "11px 13px",
-  marginBottom: "8px",
+  border: "1px solid rgba(255,255,255,0.12)",
+  borderRadius: "16px",
+  padding: "12px 14px",
+  marginBottom: "12px",
 };
 
 const userCardRow = {
@@ -700,7 +804,7 @@ const avatarCircle = {
   width: "34px",
   height: "34px",
   borderRadius: "50%",
-  background: "#1e40af",
+  background: "#1f3c88",
   color: "white",
   display: "flex",
   alignItems: "center",
@@ -713,7 +817,7 @@ const avatarCircle = {
 
 const userLabel = {
   fontSize: "10px",
-  color: "#7c95b8",
+  color: "#b6c3e3",
   marginBottom: "3px",
   letterSpacing: "0.06em",
   textTransform: "uppercase",
@@ -727,60 +831,209 @@ const userEmail = {
   fontWeight: 600,
 };
 
+const planRow = {
+  display: "flex",
+  alignItems: "center",
+  gap: "8px",
+  flexWrap: "wrap",
+  marginTop: "8px",
+};
+
+const planBadge = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  background: "rgba(59,130,246,0.16)",
+  color: "#dbeafe",
+  border: "1px solid rgba(147,197,253,0.28)",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+};
+
+const planStatusBadge = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.08)",
+  color: "#cbd5e1",
+  border: "1px solid rgba(255,255,255,0.12)",
+  fontSize: "11px",
+  fontWeight: 600,
+};
+
+const planHint = {
+  marginTop: "8px",
+  color: "#9fb2de",
+  fontSize: "11px",
+  lineHeight: 1.5,
+};
+
+const signOutButton = {
+  width: "100%",
+  marginTop: "12px",
+  padding: "9px 12px",
+  borderRadius: "10px",
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.06)",
+  color: "#ffffff",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
 const navSectionLabel = {
   fontSize: "10px",
   fontWeight: 700,
-  color: "#4a6080",
+  color: "#9fb2de",
   letterSpacing: "0.1em",
   textTransform: "uppercase",
-  padding: "14px 14px 6px",
+  padding: "16px 14px 8px",
 };
 
 const navDivider = {
   height: "1px",
-  background: "rgba(255,255,255,0.06)",
-  margin: "10px 2px 4px",
+  background: "rgba(255,255,255,0.12)",
+  margin: "14px 4px 6px",
+};
+
+const navButtonRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
+};
+
+const lockIndicator = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "3px 8px",
+  borderRadius: "999px",
+  background: "rgba(251,191,36,0.14)",
+  color: "#fde68a",
+  fontSize: "10px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  flexShrink: 0,
+};
+
+const navMetaText = {
+  display: "block",
+  marginTop: "4px",
+  fontSize: "11px",
+  color: "#9fb2de",
+  fontWeight: 500,
 };
 
 const btn = {
   display: "block",
   width: "100%",
   padding: "10px 14px",
-  marginTop: "3px",
+  marginTop: "6px",
   background: "transparent",
-  color: "#94a3b8",
-  border: "none",
+  color: "#e2e8ff",
+  border: "1px solid transparent",
   borderRadius: "10px",
   cursor: "pointer",
   textAlign: "left",
   fontSize: "14px",
-  fontWeight: 500,
+  fontWeight: 600,
   letterSpacing: "0.01em",
-  transition: "background 0.15s, color 0.15s",
+  transition: "background 0.2s, color 0.2s",
 };
 
 const activeBtn = {
   ...btn,
-  background: "#1e40af",
+  background: "rgba(255,255,255,0.08)",
   color: "#ffffff",
   fontWeight: 700,
-  boxShadow: "0 2px 12px rgba(30,64,175,0.35)",
+  borderRadius: "10px",
+  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.16)",
+};
+
+const lockedBtn = {
+  ...btn,
+  color: "#b6c3e3",
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.08)",
+};
+
+const lockedActiveBtn = {
+  ...lockedBtn,
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.14)",
 };
 
 const main = {
   flex: 1,
-  padding: "32px",
+  padding: "24px",
   minWidth: 0,
   maxWidth: "1400px",
 };
 
+const sessionShell = {
+  minHeight: "100vh",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "24px",
+  background: "#f6f8fb",
+};
+
+const sessionCard = {
+  width: "min(520px, 100%)",
+  background: "white",
+  borderRadius: "18px",
+  border: "1px solid #e5eaf2",
+  boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+  padding: "28px",
+};
+
+const sessionBadge = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "6px 12px",
+  borderRadius: "999px",
+  background: "#eef2fb",
+  color: "#1f3c88",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  border: "1px solid #d6dff5",
+};
+
+const sessionTitle = {
+  marginTop: "16px",
+  marginBottom: "8px",
+  fontSize: "30px",
+  lineHeight: 1.2,
+  color: "#0f172a",
+  letterSpacing: "-0.03em",
+};
+
+const sessionText = {
+  margin: 0,
+  color: "#64748b",
+  fontSize: "15px",
+  lineHeight: 1.7,
+};
+
 const headerCard = {
   background: "white",
-  borderRadius: "20px",
-  padding: "26px 32px",
-  boxShadow: "0 2px 16px rgba(15, 23, 42, 0.07)",
-  marginBottom: "24px",
-  borderLeft: "5px solid #1e40af",
+  borderRadius: "14px",
+  padding: "24px",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
+  marginBottom: "22px",
+  borderLeft: "5px solid #1f3c88",
 };
 
 const headerRow = {
@@ -792,17 +1045,17 @@ const headerRow = {
 
 const headerTitle = {
   margin: 0,
-  fontSize: "32px",
-  fontWeight: 800,
+  fontSize: "24px",
+  fontWeight: 700,
   lineHeight: 1.2,
   letterSpacing: "-0.02em",
-  color: "#0f172a",
+  color: "#1a1a1a",
 };
 
 const headerText = {
   marginTop: "7px",
   marginBottom: 0,
-  color: "#64748b",
+  color: "#6b7280",
   fontSize: "15px",
   lineHeight: 1.6,
 };
@@ -811,9 +1064,9 @@ const liveStatusBadge = {
   display: "inline-flex",
   alignItems: "center",
   gap: "7px",
-  background: "#dcfce7",
-  border: "1px solid #bbf7d0",
-  color: "#166534",
+  background: "#eef2fb",
+  border: "1px solid #d6dff5",
+  color: "#1f3c88",
   fontSize: "12px",
   fontWeight: 700,
   padding: "6px 14px",
@@ -828,24 +1081,24 @@ const liveStatusDot = {
   width: "7px",
   height: "7px",
   borderRadius: "50%",
-  background: "#16a34a",
+  background: "#1f3c88",
   display: "inline-block",
   flexShrink: 0,
 };
 
 const insightBox = {
-  background: "#eff6ff",
-  border: "1px solid #bfdbfe",
-  borderRadius: "14px",
-  padding: "14px 18px",
-  marginBottom: "24px",
-  color: "#1e3a5f",
+  background: "#eef2fb",
+  border: "1px solid #d6dff5",
+  borderRadius: "16px",
+  padding: "20px",
+  marginBottom: "22px",
+  color: "#1f3c88",
   fontSize: "14px",
   lineHeight: 1.7,
 };
 
 const insightBullet = {
-  color: "#1e40af",
+  color: "#1f3c88",
   fontWeight: 700,
   marginRight: "2px",
 };
@@ -853,17 +1106,17 @@ const insightBullet = {
 const cardsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))",
-  gap: "18px",
-  marginBottom: "28px",
+  gap: "24px",
+  marginBottom: "22px",
 };
 
 const statCard = {
   background: "white",
-  borderRadius: "18px",
-  padding: "22px 20px 18px",
-  boxShadow: "0 2px 14px rgba(15, 23, 42, 0.06)",
+  borderRadius: "14px",
+  padding: "18px",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
   textAlign: "center",
-  border: "1px solid #e8edf5",
+  border: "1px solid #e5eaf2",
 };
 
 const statLabel = {
@@ -878,7 +1131,7 @@ const statLabel = {
 const statValue = {
   fontSize: "34px",
   fontWeight: 800,
-  color: "#0f172a",
+  color: "#1a1a1a",
   letterSpacing: "-0.02em",
   lineHeight: 1.1,
 };
@@ -905,23 +1158,23 @@ const riskBadgeBase = {
 
 const riskBadgeLow = {
   ...riskBadgeBase,
-  background: "#dcfce7",
-  color: "#166534",
-  border: "1px solid #bbf7d0",
+  background: "#edf2ff",
+  color: "#4267bb",
+  border: "1px solid #d6e0ff",
 };
 
 const riskBadgeMedium = {
   ...riskBadgeBase,
-  background: "#fef3c7",
-  color: "#92400e",
-  border: "1px solid #fde68a",
+  background: "#eaf0ff",
+  color: "#2f4f9f",
+  border: "1px solid #d2defe",
 };
 
 const riskBadgeHigh = {
   ...riskBadgeBase,
-  background: "#fee2e2",
-  color: "#991b1b",
-  border: "1px solid #fecaca",
+  background: "#e5ecff",
+  color: "#1f3c88",
+  border: "1px solid #cddaff",
 };
 
 const riskHint = {
@@ -942,25 +1195,48 @@ const financialSubline = {
 
 const contentCard = {
   background: "white",
-  borderRadius: "18px",
-  padding: "26px",
-  boxShadow: "0 2px 14px rgba(15, 23, 42, 0.06)",
-  marginBottom: "24px",
-  border: "1px solid #e8edf5",
+  borderRadius: "14px",
+  padding: "18px",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
+  marginBottom: "22px",
+  border: "1px solid #e5eaf2",
+};
+
+const accessNoticeCard = {
+  background: "#eff6ff",
+  border: "1px solid #bfdbfe",
+  color: "#1d4ed8",
+  borderRadius: "14px",
+  padding: "16px 18px",
+  marginBottom: "18px",
+  boxShadow: "0 10px 26px rgba(29, 78, 216, 0.08)",
+};
+
+const accessNoticeTitle = {
+  fontSize: "12px",
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  marginBottom: "4px",
+};
+
+const accessNoticeText = {
+  fontSize: "14px",
+  lineHeight: 1.6,
 };
 
 const sectionTitle = {
   marginTop: 0,
   marginBottom: "16px",
-  fontSize: "18px",
-  fontWeight: 800,
+  fontSize: "24px",
+  fontWeight: 700,
   lineHeight: 1.3,
-  color: "#0f172a",
+  color: "#1a1a1a",
   letterSpacing: "-0.01em",
 };
 
 const sectionText = {
-  color: "#64748b",
+  color: "#6b7280",
   fontSize: "15px",
   lineHeight: 1.7,
   marginBottom: 0,
@@ -978,7 +1254,7 @@ const activityBarBlue = {
   width: "4px",
   minHeight: "40px",
   borderRadius: "4px",
-  background: "#3b82f6",
+  background: "#1f3c88",
   marginTop: "2px",
   flexShrink: 0,
 };
@@ -987,7 +1263,7 @@ const activityBarRed = {
   width: "4px",
   minHeight: "40px",
   borderRadius: "4px",
-  background: "#ef4444",
+  background: "#2f4f9f",
   marginTop: "2px",
   flexShrink: 0,
 };
@@ -996,7 +1272,7 @@ const activityBarOrange = {
   width: "4px",
   minHeight: "40px",
   borderRadius: "4px",
-  background: "#f59e0b",
+  background: "#4267bb",
   marginTop: "2px",
   flexShrink: 0,
 };
@@ -1025,30 +1301,30 @@ const activityTagBase = {
 
 const activityTagBlue = {
   ...activityTagBase,
-  background: "#dbeafe",
-  color: "#1e40af",
+  background: "#eaf0ff",
+  color: "#1f3c88",
 };
 
 const activityTagRed = {
   ...activityTagBase,
-  background: "#fee2e2",
-  color: "#b91c1c",
+  background: "#e3ebff",
+  color: "#2f4f9f",
 };
 
 const activityTagOrange = {
   ...activityTagBase,
-  background: "#fef3c7",
-  color: "#92400e",
+  background: "#edf2ff",
+  color: "#4267bb",
 };
 
 const activityTitle = {
   fontWeight: 700,
-  color: "#0f172a",
+  color: "#1a1a1a",
   fontSize: "14px",
 };
 
 const activityText = {
-  color: "#64748b",
+  color: "#6b7280",
   fontSize: "13px",
   lineHeight: 1.6,
 };
@@ -1065,20 +1341,20 @@ const featurePill = {
   alignItems: "center",
   padding: "5px 12px",
   borderRadius: "999px",
-  background: "#eff6ff",
-  color: "#1e40af",
+  background: "#eef2fb",
+  color: "#1f3c88",
   fontSize: "12px",
   fontWeight: 600,
-  border: "1px solid #bfdbfe",
+  border: "1px solid #d6dff5",
   letterSpacing: "0.01em",
 };
 
 const demoFooter = {
-  color: "#4a6080",
+  color: "#b6c3e3",
   fontSize: "12px",
   textAlign: "center",
   paddingTop: "20px",
-  borderTop: "1px solid rgba(255,255,255,0.07)",
+  borderTop: "1px solid rgba(255,255,255,0.12)",
   lineHeight: 1.8,
 };
 
@@ -1088,7 +1364,7 @@ const footerLiveRow = {
   justifyContent: "center",
   gap: "6px",
   marginBottom: "4px",
-  color: "#6ee7b7",
+  color: "#dbe7ff",
   fontWeight: 600,
 };
 
@@ -1096,7 +1372,31 @@ const footerLiveDot = {
   width: "6px",
   height: "6px",
   borderRadius: "50%",
-  background: "#22c55e",
+  background: "#8fb0ff",
   display: "inline-block",
   flexShrink: 0,
+};
+
+const appFooter = {
+  marginTop: "24px",
+  marginBottom: "8px",
+  padding: "20px",
+  borderRadius: "14px",
+  background: "#ffffff",
+  border: "1px solid #e5eaf2",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
+  textAlign: "center",
+};
+
+const appFooterTitle = {
+  color: "#1a1a1a",
+  fontSize: "14px",
+  fontWeight: 700,
+  marginBottom: "4px",
+};
+
+const appFooterSub = {
+  color: "#6b7280",
+  fontSize: "12px",
+  fontWeight: 500,
 };

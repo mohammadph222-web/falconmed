@@ -2,27 +2,20 @@ import { useEffect, useMemo, useState } from "react";
 import InsightCard from "./components/InsightCard";
 import { supabase } from "./lib/supabaseClient";
 import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMaster";
+import { loadPharmaciesWithFallback } from "./utils/pharmacyData";
 
-const SHORTAGE_TABLE = "shortage_requests";
+// Read/write to pharmacy_inventory — items where quantity is at or below this threshold.
+const SHORTAGE_TABLE = "pharmacy_inventory";
+const SHORTAGE_THRESHOLD = 10;
 
 const mapDbToUi = (row) => ({
   id: row.id,
-  drugName: row.drug_name || "",
-  quantityRequested: Number(row.quantity_requested || 0),
-  patientName: row.patient_name || "",
-  contactNumber: row.contact_number || "",
-  requestDate: row.request_date || "",
-  status: row.status || "Pending",
-  notes: row.notes || "",
-});
-
-const toReportRecord = (item) => ({
-  id: item.id,
-  drug_name: item.drugName,
-  quantity: item.quantityRequested,
-  requested_at: item.requestDate,
-  status: item.status,
-  created_at: item.requestDate,
+  pharmacyId: String(row.pharmacy_id ?? ""),
+  drugName: row.drug_name || row.drug || "",
+  batchNo: row.batch_no || row.batch || "",
+  quantity: Number(row.quantity ?? 0),
+  expiryDate: row.expiry_date || "",
+  unitCost: Number(row.unit_cost || 0),
 });
 
 export default function ShortageTracker({ user, profile }) {
@@ -30,23 +23,34 @@ export default function ShortageTracker({ user, profile }) {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
+  const [pharmacies, setPharmacies] = useState([]);
+  const [pharmacyNameMap, setPharmacyNameMap] = useState(new Map());
+
   const [allDrugs, setAllDrugs] = useState([]);
   const [drugSearch, setDrugSearch] = useState("");
   const [showDrugDropdown, setShowDrugDropdown] = useState(false);
 
   const [form, setForm] = useState({
     drugName: "",
-    quantityRequested: "",
-    patientName: "",
-    contactNumber: "",
-    requestDate: "",
-    status: "Pending",
-    notes: "",
+    pharmacyId: "",
+    quantity: "0",
+    batchNo: "",
+    expiryDate: "",
   });
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
+
+  useEffect(() => {
+    loadPharmaciesWithFallback().then(({ data }) => {
+      const list = data || [];
+      setPharmacies(list);
+      const nameMap = new Map();
+      list.forEach((p) => nameMap.set(String(p.id), p.name || String(p.id)));
+      setPharmacyNameMap(nameMap);
+    });
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -91,22 +95,18 @@ export default function ShortageTracker({ user, profile }) {
         const { data, error } = await supabase
           .from(SHORTAGE_TABLE)
           .select("*")
-          .order("created_at", { ascending: false });
+          .lte("quantity", SHORTAGE_THRESHOLD)
+          .order("quantity", { ascending: true });
 
         if (error) {
           setItems([]);
           setMessage("Failed to load shortage records.");
           console.error("Failed to load shortage records:", error.message);
-          localStorage.setItem("falconmed_shortages", JSON.stringify([]));
           return;
         }
 
         const mapped = (data || []).map(mapDbToUi);
         setItems(mapped);
-        localStorage.setItem(
-          "falconmed_shortages",
-          JSON.stringify(mapped.map(toReportRecord))
-        );
       } catch (err) {
         setItems([]);
         setMessage("Failed to load shortage records.");
@@ -123,200 +123,126 @@ export default function ShortageTracker({ user, profile }) {
     e.preventDefault();
     setMessage("");
 
-    if (
-      !form.drugName ||
-      !form.quantityRequested ||
-      !form.patientName ||
-      !form.contactNumber ||
-      !form.requestDate
-    ) {
+    if (!form.drugName || !form.pharmacyId) {
+      setMessage("Please select a drug and a pharmacy.");
       return;
     }
 
     try {
-      const { data, error } = await supabase
+      const payload = {
+        pharmacy_id: form.pharmacyId,
+        drug_name: form.drugName,
+        quantity: Number(form.quantity ?? 0),
+        batch_no: form.batchNo || null,
+        expiry_date: form.expiryDate || null,
+        unit_cost: 0,
+        created_at: new Date().toISOString(),
+        created_by: "falconmed.demo@preview",
+      };
+
+      let insertResult = await supabase
         .from(SHORTAGE_TABLE)
-        .insert({
-          drug_name: form.drugName,
-          quantity_requested: Number(form.quantityRequested),
-          patient_name: form.patientName,
-          contact_number: form.contactNumber,
-          request_date: form.requestDate,
-          status: form.status,
-          notes: form.notes,
-        })
+        .insert(payload)
         .select("*")
         .single();
 
+      if (insertResult.error) {
+        const msg = String(insertResult.error.message || "").toLowerCase();
+        const createdByMissing = msg.includes("created_by") && msg.includes("column");
+        if (createdByMissing) {
+          const { created_by, ...fallbackPayload } = payload;
+          insertResult = await supabase
+            .from(SHORTAGE_TABLE)
+            .insert(fallbackPayload)
+            .select("*")
+            .single();
+        }
+      }
+
+      const { error } = insertResult;
       if (error) {
-        setMessage("Failed to save shortage request.");
-        console.error("Failed to save shortage request:", error.message);
+        setMessage("Failed to record shortage item.");
+        console.error("Failed to record shortage item:", error.message);
         return;
       }
 
-      const newItem = mapDbToUi(data);
-
-      try {
-        const { data: refreshed, error: refreshError } = await supabase
-          .from(SHORTAGE_TABLE)
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (refreshError) {
-          console.error("Failed to refresh shortage requests after insert:", refreshError.message);
-          setItems((prev) => {
-            const next = [newItem, ...prev];
-            localStorage.setItem(
-              "falconmed_shortages",
-              JSON.stringify(next.map(toReportRecord))
-            );
-            return next;
-          });
-        } else {
-          const mapped = (refreshed || []).map(mapDbToUi);
-          setItems(mapped);
-          localStorage.setItem(
-            "falconmed_shortages",
-            JSON.stringify(mapped.map(toReportRecord))
-          );
-        }
-      } catch (refreshErr) {
-        console.error(
-          "Failed to refresh shortage requests after insert:",
-          refreshErr?.message || "Unknown error"
-        );
-        setItems((prev) => {
-          const next = [newItem, ...prev];
-          localStorage.setItem(
-            "falconmed_shortages",
-            JSON.stringify(next.map(toReportRecord))
-          );
-          return next;
-        });
-      }
-
-      try {
-        const { error: activityError } = await supabase.from("activity_log").insert({
-          module: "Shortage",
-          action: "Created",
-          description: `Shortage request created: ${form.drugName} (${form.quantityRequested})`,
-        });
-
-        if (activityError) {
-          console.error("Failed to log shortage activity:", activityError.message);
-        }
-      } catch (activityErr) {
-        console.error("Shortage activity log error:", activityErr?.message || "Unknown error");
-      }
+      // Refresh low-stock list
+      const { data: refreshed } = await supabase
+        .from(SHORTAGE_TABLE)
+        .select("*")
+        .lte("quantity", SHORTAGE_THRESHOLD)
+        .order("quantity", { ascending: true });
+      setItems((refreshed || []).map(mapDbToUi));
+      setMessage("Shortage item recorded successfully.");
     } catch (err) {
-      setMessage("Failed to save shortage request.");
+      setMessage("Failed to record shortage item.");
       console.error("Shortage save error:", err?.message || "Unknown error");
       return;
     }
 
-    setForm({
-      drugName: "",
-      quantityRequested: "",
-      patientName: "",
-      contactNumber: "",
-      requestDate: "",
-      status: "Pending",
-      notes: "",
-    });
+    setForm({ drugName: "", pharmacyId: "", quantity: "0", batchNo: "", expiryDate: "" });
+    setDrugSearch("");
   };
 
-  const updateStatus = async (id, newStatus) => {
-    setMessage("");
+  const handleRestock = async (id) => {
+    const raw = window.prompt("Enter new stock quantity for this item:", "0");
+    if (raw === null) return;
+    const newQty = Number(raw);
+    if (!Number.isFinite(newQty) || newQty < 0) return;
 
-    try {
-      const { error } = await supabase
-        .from(SHORTAGE_TABLE)
-        .update({ status: newStatus })
-        .eq("id", id);
+    const { error } = await supabase
+      .from(SHORTAGE_TABLE)
+      .update({ quantity: newQty })
+      .eq("id", id);
 
-      if (error) {
-        setMessage("Failed to update status.");
-        console.error("Failed to update shortage status:", error.message);
-        return;
-      }
-
-      setItems((prev) => {
-        const next = prev.map((item) =>
-          item.id === id ? { ...item, status: newStatus } : item
-        );
-        localStorage.setItem(
-          "falconmed_shortages",
-          JSON.stringify(next.map(toReportRecord))
-        );
-        return next;
-      });
-    } catch (err) {
-      setMessage("Failed to update status.");
-      console.error("Shortage status update error:", err?.message || "Unknown error");
+    if (error) {
+      console.error("Restock failed:", error.message);
+      setMessage("Failed to update stock quantity.");
+      return;
     }
+
+    // Refresh list (restocked items above threshold disappear from the shortage view)
+    const { data: refreshed } = await supabase
+      .from(SHORTAGE_TABLE)
+      .select("*")
+      .lte("quantity", SHORTAGE_THRESHOLD)
+      .order("quantity", { ascending: true });
+    setItems((refreshed || []).map(mapDbToUi));
   };
 
   const totals = useMemo(() => {
-    const pending = items.filter((x) => x.status === "Pending").length;
-    const ordered = items.filter((x) => x.status === "Ordered").length;
-    const completed = items.filter((x) => x.status === "Completed").length;
-    const totalQty = items.reduce(
-      (sum, x) => sum + Number(x.quantityRequested || 0),
-      0
-    );
-
-    return { pending, ordered, completed, totalQty };
+    const outOfStock = items.filter((x) => x.quantity === 0).length;
+    const critical = items.filter((x) => x.quantity > 0 && x.quantity <= 5).length;
+    const lowStock = items.filter((x) => x.quantity > 5 && x.quantity <= SHORTAGE_THRESHOLD).length;
+    return { outOfStock, critical, lowStock, total: items.length };
   }, [items]);
 
   const shortageInsight = useMemo(() => {
     if (loading || items.length === 0) return null;
 
-    const unresolved = items.filter((item) => item.status === "Pending" || item.status === "Ordered");
-    if (unresolved.length === 0) return null;
+    const outOfStockItems = items.filter((item) => item.quantity === 0);
+    if (outOfStockItems.length === 0) return null;
 
-    const byDrug = new Map();
-    unresolved.forEach((item) => {
-      const key = String(item.drugName || "").trim().toLowerCase();
-      if (!key) return;
-      byDrug.set(key, (byDrug.get(key) || 0) + 1);
-    });
-
-    let strongestDrug = "";
-    let strongestCount = 0;
-    byDrug.forEach((count, key) => {
-      if (count > strongestCount) {
-        strongestCount = count;
-        strongestDrug = key;
-      }
-    });
-
-    if (strongestCount < 2) return null;
-
-    const titleCaseDrug = strongestDrug
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-      .join(" ");
+    const mostUrgent = outOfStockItems[0];
 
     return {
       icon: "⚠",
       tone: "warning",
-      title: "Smart Insight: Cross-Pharmacy Signal",
-      message: `${titleCaseDrug || "A shared item"} appears in ${strongestCount} unresolved requests, suggesting multi-site shortage pressure.`,
+      title: "Smart Insight: Stock Depletion Alert",
+      message: `${outOfStockItems.length} item${outOfStockItems.length === 1 ? "" : "s"} completely out of stock. Urgent restocking required — starting with ${mostUrgent?.drugName || "unknown drug"}.`,
     };
   }, [items, loading]);
 
-  const getStatusStyle = (status) => {
-    switch (status) {
-      case "Pending":
-        return badgePending;
-      case "Ordered":
-        return badgeOrdered;
-      case "Completed":
-        return badgeCompleted;
-      default:
-        return badgePending;
-    }
+  const getStatusStyle = (qty) => {
+    if (qty === 0) return badgeOutOfStock;
+    if (qty <= 5) return badgeCritical;
+    return badgeLowStock;
+  };
+
+  const getStatusLabel = (qty) => {
+    if (qty === 0) return "Out of Stock";
+    if (qty <= 5) return "Critical";
+    return "Low Stock";
   };
 
   return (
@@ -325,31 +251,31 @@ export default function ShortageTracker({ user, profile }) {
       <div style={pageHeaderRow}>
         <div>
           <h1 style={pageTitle}>Shortage Tracker</h1>
-          <p style={pageSub}>Log and manage drug shortage requests across all sites.</p>
+          <p style={pageSub}>Monitor low-stock and out-of-stock drugs across all pharmacies (from pharmacy_inventory).</p>
         </div>
       </div>
 
       {/* KPI strip */}
       <div style={cardsGrid}>
+        <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
+          <div style={statLabel}>Out of Stock</div>
+          <div style={statValue}>{totals.outOfStock}</div>
+          <div style={statHint}>Zero units available</div>
+        </div>
         <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
-          <div style={statLabel}>Pending</div>
-          <div style={statValue}>{totals.pending}</div>
-          <div style={statHint}>Awaiting action</div>
+          <div style={statLabel}>Critical (1–5)</div>
+          <div style={statValue}>{totals.critical}</div>
+          <div style={statHint}>Urgent restock needed</div>
         </div>
         <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
-          <div style={statLabel}>Ordered</div>
-          <div style={statValue}>{totals.ordered}</div>
-          <div style={statHint}>In procurement</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #10b981" }}>
-          <div style={statLabel}>Completed</div>
-          <div style={statValue}>{totals.completed}</div>
-          <div style={statHint}>Fulfilled requests</div>
+          <div style={statLabel}>Low Stock (6–10)</div>
+          <div style={statValue}>{totals.lowStock}</div>
+          <div style={statHint}>Monitor closely</div>
         </div>
         <div style={{ ...statCard, borderTop: "4px solid #8b5cf6" }}>
-          <div style={statLabel}>Total Qty Requested</div>
-          <div style={statValue}>{totals.totalQty.toLocaleString()}</div>
-          <div style={statHint}>Units across all requests</div>
+          <div style={statLabel}>Total Shortage Items</div>
+          <div style={statValue}>{totals.total}</div>
+          <div style={statHint}>From pharmacy_inventory</div>
         </div>
       </div>
 
@@ -405,7 +331,7 @@ export default function ShortageTracker({ user, profile }) {
           </div>
 
           <div>
-            <div style={fieldLabel}>Drug Name</div>
+            <div style={fieldLabel}>Drug Name *</div>
             <input
               style={input}
               placeholder="Drug name"
@@ -415,72 +341,56 @@ export default function ShortageTracker({ user, profile }) {
           </div>
 
           <div>
-            <div style={fieldLabel}>Quantity Requested</div>
-            <input
-              style={input}
-              type="number"
-              placeholder="e.g. 20"
-              value={form.quantityRequested}
-              onChange={(e) => handleChange("quantityRequested", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Patient Name</div>
-            <input
-              style={input}
-              placeholder="Patient name"
-              value={form.patientName}
-              onChange={(e) => handleChange("patientName", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Contact Number</div>
-            <input
-              style={input}
-              placeholder="e.g. 050 000 0000"
-              value={form.contactNumber}
-              onChange={(e) => handleChange("contactNumber", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Request Date</div>
-            <input
-              style={input}
-              type="date"
-              value={form.requestDate}
-              onChange={(e) => handleChange("requestDate", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Status</div>
+            <div style={fieldLabel}>Pharmacy *</div>
             <select
               style={input}
-              value={form.status}
-              onChange={(e) => handleChange("status", e.target.value)}
+              value={form.pharmacyId}
+              onChange={(e) => handleChange("pharmacyId", e.target.value)}
+              required
             >
-              <option value="Pending">Pending</option>
-              <option value="Ordered">Ordered</option>
-              <option value="Completed">Completed</option>
+              <option value="">-- Select Pharmacy --</option>
+              {pharmacies.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
             </select>
           </div>
 
           <div>
-            <div style={fieldLabel}>Notes</div>
+            <div style={fieldLabel}>Current Stock Qty</div>
             <input
               style={input}
-              placeholder="Optional notes"
-              value={form.notes}
-              onChange={(e) => handleChange("notes", e.target.value)}
+              type="number"
+              placeholder="e.g. 0"
+              value={form.quantity}
+              onChange={(e) => handleChange("quantity", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Batch No.</div>
+            <input
+              style={input}
+              placeholder="e.g. BATCH-10001"
+              value={form.batchNo}
+              onChange={(e) => handleChange("batchNo", e.target.value)}
+            />
+          </div>
+
+          <div>
+            <div style={fieldLabel}>Expiry Date</div>
+            <input
+              style={input}
+              type="date"
+              value={form.expiryDate}
+              onChange={(e) => handleChange("expiryDate", e.target.value)}
             />
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
             <button type="submit" style={primaryBtn}>
-              Add Request
+              Record Shortage Item
             </button>
           </div>
         </form>
@@ -488,7 +398,7 @@ export default function ShortageTracker({ user, profile }) {
 
       {/* Table */}
       <div style={tableCard}>
-        <h2 style={sectionTitle}>Tracked Requests</h2>
+        <h2 style={sectionTitle}>Low-Stock &amp; Out-of-Stock Items</h2>
 
         {shortageInsight && (
           <InsightCard
@@ -505,21 +415,20 @@ export default function ShortageTracker({ user, profile }) {
             <thead>
               <tr>
                 <th style={th}>Drug</th>
-                <th style={th}>Qty</th>
-                <th style={th}>Patient</th>
-                <th style={th}>Contact</th>
-                <th style={th}>Date</th>
+                <th style={th}>Pharmacy</th>
+                <th style={th}>Qty in Stock</th>
+                <th style={th}>Batch</th>
+                <th style={th}>Expiry Date</th>
                 <th style={th}>Status</th>
-                <th style={th}>Notes</th>
-                <th style={th}>Update Status</th>
+                <th style={th}>Action</th>
               </tr>
             </thead>
 
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="8" style={emptyCell}>
-                    Loading shortage requests…
+                  <td colSpan="7" style={emptyCell}>
+                    Loading shortage data…
                   </td>
                 </tr>
               )}
@@ -530,46 +439,31 @@ export default function ShortageTracker({ user, profile }) {
                   style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
                 >
                   <td style={{ ...td, fontWeight: 700 }}>{item.drugName}</td>
-                  <td style={td}>{item.quantityRequested}</td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.patientName}</td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.contactNumber}</td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.requestDate}</td>
-                  <td style={td}>
-                    <span style={getStatusStyle(item.status)}>{item.status}</span>
+                  <td style={{ ...td, color: "#64748b" }}>
+                    {pharmacyNameMap.get(item.pharmacyId) || item.pharmacyId || "-"}
                   </td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.notes || "-"}</td>
+                  <td style={td}>{item.quantity}</td>
+                  <td style={{ ...td, color: "#64748b" }}>{item.batchNo || "-"}</td>
+                  <td style={{ ...td, color: "#64748b" }}>{item.expiryDate || "-"}</td>
                   <td style={td}>
-                    <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                      <button
-                        style={smallBtnPending}
-                        onClick={() => updateStatus(item.id, "Pending")}
-                        type="button"
-                      >
-                        Pending
-                      </button>
-                      <button
-                        style={smallBtnOrdered}
-                        onClick={() => updateStatus(item.id, "Ordered")}
-                        type="button"
-                      >
-                        Ordered
-                      </button>
-                      <button
-                        style={smallBtnCompleted}
-                        onClick={() => updateStatus(item.id, "Completed")}
-                        type="button"
-                      >
-                        Completed
-                      </button>
-                    </div>
+                    <span style={getStatusStyle(item.quantity)}>{getStatusLabel(item.quantity)}</span>
+                  </td>
+                  <td style={td}>
+                    <button
+                      style={smallBtnRestock}
+                      onClick={() => handleRestock(item.id)}
+                      type="button"
+                    >
+                      Restock
+                    </button>
                   </td>
                 </tr>
               ))}
 
               {!loading && items.length === 0 && (
                 <tr>
-                  <td colSpan="8" style={emptyCell}>
-                    No shortage requests found. Use the form above to log your first request.
+                  <td colSpan="7" style={emptyCell}>
+                    No low-stock items found. All drugs are above the threshold ({SHORTAGE_THRESHOLD} units).
                   </td>
                 </tr>
               )}
@@ -827,51 +721,35 @@ const badgeBase = {
   letterSpacing: "0.04em",
 };
 
-const badgePending = {
+const badgeOutOfStock = {
+  ...badgeBase,
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+};
+
+const badgeCritical = {
   ...badgeBase,
   background: "#fef3c7",
   color: "#92400e",
   border: "1px solid #fde68a",
 };
 
-const badgeOrdered = {
+const badgeLowStock = {
   ...badgeBase,
   background: "#dbeafe",
   color: "#1d4ed8",
   border: "1px solid #bfdbfe",
 };
 
-const badgeCompleted = {
-  ...badgeBase,
-  background: "#dcfce7",
-  color: "#166534",
-  border: "1px solid #bbf7d0",
-};
-
-const smallBtnBase = {
-  padding: "5px 10px",
+const smallBtnRestock = {
+  padding: "5px 12px",
   border: "none",
   borderRadius: "8px",
   cursor: "pointer",
   fontSize: "11px",
   fontWeight: 700,
   letterSpacing: "0.02em",
-};
-
-const smallBtnPending = {
-  ...smallBtnBase,
-  background: "#fef3c7",
-  color: "#92400e",
-};
-
-const smallBtnOrdered = {
-  ...smallBtnBase,
-  background: "#dbeafe",
-  color: "#1d4ed8",
-};
-
-const smallBtnCompleted = {
-  ...smallBtnBase,
   background: "#dcfce7",
   color: "#166534",
 };
