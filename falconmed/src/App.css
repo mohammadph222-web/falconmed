@@ -278,3 +278,14 @@ label {
     font-size: 0.88rem;
   }
 }
+
+.card,
+.dashboard-card {
+  transition: all 0.2s ease;
+}
+
+.card:hover,
+.dashboard-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+}

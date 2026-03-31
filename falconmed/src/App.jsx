@@ -751,6 +751,8 @@ export default function App() {
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #2f4f9f" }}>
                     <div style={statLabel}>NEAR EXPIRY ITEMS</div>
                     <div style={statValue}>{animNearExpiry}</div>
+                    <div style={expiryRiskMiniLabel}>Estimated Expiry Risk</div>
+                    <div style={expiryRiskMiniValue}>AED estimate unavailable</div>
                     <div style={kpiHint}>Items requiring near-term stock planning.</div>
                   </div>
 
@@ -1547,6 +1549,18 @@ const kpiHint = {
   fontSize: "12px",
   color: "#94a3b8",
   lineHeight: 1.5,
+};
+
+const expiryRiskMiniLabel = {
+  marginTop: "6px",
+  fontSize: "12px",
+  color: "#6b7280",
+  fontWeight: 600,
+};
+
+const expiryRiskMiniValue = {
+  fontSize: "12px",
+  color: "#6b7280",
 };
 
 const riskBadgeBase = {
