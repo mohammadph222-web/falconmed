@@ -1300,11 +1300,12 @@ const btn = {
 
 const activeBtn = {
   ...btn,
-  background: "rgba(255,255,255,0.08)",
+  background: "rgba(59,130,246,0.14)",
   color: "#ffffff",
   fontWeight: 700,
   borderRadius: "10px",
-  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.16)",
+  borderLeft: "3px solid #3b82f6",
+  boxShadow: "inset 0 0 0 1px rgba(59,130,246,0.22), 0 1px 3px rgba(15,23,42,0.14)",
 };
 
 const lockedBtn = {
