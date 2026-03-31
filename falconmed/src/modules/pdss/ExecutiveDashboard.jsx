@@ -12,12 +12,14 @@ import {
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
 import { buildDrugPriceMap } from "../../utils/drugPricing";
+import { generateAiRecommendations } from "../../utils/recommendationEngine";
 import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
 
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
   const [transferRows, setTransferRows] = useState([]);
+  const [expiryRows, setExpiryRows] = useState([]);
   const [financialKpis, setFinancialKpis] = useState({
     estimatedExpiryLoss: 0,
     atRiskInventoryValue: 0,
@@ -107,6 +109,7 @@ export default function ExecutiveDashboard() {
 
       setShortageRows(computedShortageRows);
       setTransferRows(computedTransferRows);
+      setExpiryRows(computedExpiryRows);
 
       setFinancialKpis(
         calculateFinancialKpis({
@@ -179,6 +182,17 @@ export default function ExecutiveDashboard() {
     return transferRows.slice(0, 5);
   }, [transferRows]);
 
+  const recommendations = useMemo(
+    () =>
+      generateAiRecommendations({
+        shortageRows,
+        transferRows,
+        expiryRows,
+        maxRecommendations: 3,
+      }),
+    [shortageRows, transferRows, expiryRows]
+  );
+
   const animActiveSites = useAnimatedCounter(snapshotCounts.activeSites);
   const animInventoryRecords = useAnimatedCounter(snapshotCounts.inventoryRecords);
   const animNearExpiryItems = useAnimatedCounter(snapshotCounts.nearExpiryItems);
@@ -198,6 +212,57 @@ export default function ExecutiveDashboard() {
   const animTotalInvValue = useAnimatedCounter(inventoryFinancials.totalInventoryValue);
   const animNearExpiryRisk = useAnimatedCounter(inventoryFinancials.nearExpiryRiskValue);
   const animDeadStock = useAnimatedCounter(inventoryFinancials.deadStockValue);
+
+  const statusMeta = {
+    stable: {
+      label: "STABLE",
+      accent: "#22c55e",
+      badge: {
+        color: "#166534",
+        background: "#dcfce7",
+        border: "1px solid #86efac",
+      },
+    },
+    warning: {
+      label: "WARNING",
+      accent: "#f59e0b",
+      badge: {
+        color: "#92400e",
+        background: "#fef3c7",
+        border: "1px solid #fcd34d",
+      },
+    },
+    critical: {
+      label: "CRITICAL",
+      accent: "#ef4444",
+      badge: {
+        color: "#991b1b",
+        background: "#fee2e2",
+        border: "1px solid #fca5a5",
+      },
+    },
+  };
+
+  const renderStatusCard = ({ label, value, status = "stable", valueStyle = statValue }) => {
+    const currentStatus = statusMeta[status] || statusMeta.stable;
+
+    return (
+      <StatCard
+        className="ui-hover-lift pdss-card"
+        style={statCard}
+        accentColor={currentStatus.accent}
+        accentBorderWidth={3}
+        label={
+          <div style={cardHeaderRow}>
+            <span style={statLabelInline}>{label}</span>
+            <span style={{ ...statusBadge, ...currentStatus.badge }}>[ {currentStatus.label} ]</span>
+          </div>
+        }
+        value={value}
+        valueStyle={valueStyle}
+      />
+    );
+  };
 
   return (
     <div style={wrap}>
@@ -228,65 +293,12 @@ export default function ExecutiveDashboard() {
           ))
         ) : (
           <>
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#3b82f6"
-              label="Active Sites"
-              value={animActiveSites}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
-
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#8b5cf6"
-              label="Inventory Records"
-              value={animInventoryRecords}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
-
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#f59e0b"
-              label="Near Expiry Items"
-              value={animNearExpiryItems}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
-
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#ef4444"
-              label="Shortage Requests"
-              value={animShortageRequests}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
-
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#10b981"
-              label="Purchase Requests"
-              value={animPurchaseRequests}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
-
-            <StatCard
-              className="ui-hover-lift"
-              style={statCard}
-              accentColor="#06b6d4"
-              label="Refill Requests"
-              value={animRefillRequests}
-              labelStyle={statLabel}
-              valueStyle={statValue}
-            />
+            {renderStatusCard({ label: "Active Sites", value: animActiveSites, status: "stable" })}
+            {renderStatusCard({ label: "Inventory Records", value: animInventoryRecords, status: "stable" })}
+            {renderStatusCard({ label: "Near Expiry Items", value: animNearExpiryItems, status: "warning" })}
+            {renderStatusCard({ label: "Shortage Requests", value: animShortageRequests, status: "critical" })}
+            {renderStatusCard({ label: "Purchase Requests", value: animPurchaseRequests, status: "warning" })}
+            {renderStatusCard({ label: "Refill Requests", value: animRefillRequests, status: "stable" })}
           </>
         )}
       </div>
@@ -305,124 +317,68 @@ export default function ExecutiveDashboard() {
             ))
           : (
             <>
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="Tracked Drugs"
-                value={animTrackedDrugs}
-                labelStyle={statLabel}
-                valueStyle={statValue}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="High Risk Shortages"
-                value={animHighRisk}
-                labelStyle={statLabel}
-                valueStyle={{ ...statValue, color: "#b91c1c" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="Medium Risk Shortages"
-                value={animMedRisk}
-                labelStyle={statLabel}
-                valueStyle={{ ...statValue, color: "#b45309" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="Low Risk Shortages"
-                value={animLowRisk}
-                labelStyle={statLabel}
-                valueStyle={{ ...statValue, color: "#166534" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="Transfer Opportunities"
-                value={animTransferOpp}
-                labelStyle={statLabel}
-                valueStyle={statValue}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                label="Suggested Transfer Qty"
-                value={animTransferQty}
-                labelStyle={statLabel}
-                valueStyle={statValue}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#f59e0b"
-                label="Expiry Loss (Est.)"
-                value={`AED ${animExpiryLoss.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#92400e" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#f59e0b"
-                label="At-Risk Inventory"
-                value={`AED ${animAtRisk.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#92400e" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#ef4444"
-                label="Shortage Exposure (High)"
-                value={`AED ${animShortageExposure.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#991b1b" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#b91c1c" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#0ea5e9"
-                label="Total Inventory Value"
-                value={`AED ${animTotalInvValue.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#0369a1" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#075985" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#f59e0b"
-                label="Near-Expiry Risk Value"
-                value={`AED ${animNearExpiryRisk.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#92400e" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#b45309" }}
-              />
-
-              <StatCard
-                className="ui-hover-lift"
-                style={statCard}
-                accentColor="#dc2626"
-                label="Dead Stock Value"
-                value={`AED ${animDeadStock.toLocaleString()}`}
-                labelStyle={{ ...statLabel, color: "#991b1b" }}
-                valueStyle={{ ...statValue, fontSize: "22px", color: "#991b1b" }}
-              />
+              {renderStatusCard({ label: "Tracked Drugs", value: animTrackedDrugs, status: "stable" })}
+              {renderStatusCard({
+                label: "High Risk Shortages",
+                value: animHighRisk,
+                status: "critical",
+                valueStyle: { ...statValue, color: "#b91c1c" },
+              })}
+              {renderStatusCard({
+                label: "Medium Risk Shortages",
+                value: animMedRisk,
+                status: "warning",
+                valueStyle: { ...statValue, color: "#b45309" },
+              })}
+              {renderStatusCard({
+                label: "Low Risk Shortages",
+                value: animLowRisk,
+                status: "stable",
+                valueStyle: { ...statValue, color: "#166534" },
+              })}
+              {renderStatusCard({ label: "Transfer Opportunities", value: animTransferOpp, status: "warning" })}
+              {renderStatusCard({ label: "Suggested Transfer Qty", value: animTransferQty, status: "warning" })}
+              {renderStatusCard({
+                label: "Expiry Loss (Est.)",
+                value: `AED ${animExpiryLoss.toLocaleString()}`,
+                status: "critical",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
+              })}
+              {renderStatusCard({
+                label: "At-Risk Inventory",
+                value: `AED ${animAtRisk.toLocaleString()}`,
+                status: "warning",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
+              })}
+              {renderStatusCard({
+                label: "Shortage Exposure (High)",
+                value: `AED ${animShortageExposure.toLocaleString()}`,
+                status: "critical",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#b91c1c" },
+              })}
+              {renderStatusCard({
+                label: "Total Inventory Value",
+                value: `AED ${animTotalInvValue.toLocaleString()}`,
+                status: "stable",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#075985" },
+              })}
+              {renderStatusCard({
+                label: "Near-Expiry Risk Value",
+                value: `AED ${animNearExpiryRisk.toLocaleString()}`,
+                status: "warning",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
+              })}
+              {renderStatusCard({
+                label: "Dead Stock Value",
+                value: `AED ${animDeadStock.toLocaleString()}`,
+                status: "critical",
+                valueStyle: { ...statValue, fontSize: "22px", color: "#991b1b" },
+              })}
             </>
           )}
       </div>
 
-      <div className="ui-hover-lift" style={summaryCard}>
+      <div className="ui-hover-lift pdss-card stable" style={{ ...summaryCard, borderTop: "3px solid #22c55e" }}>
         {loading ? (
           <SkeletonCard
             style={{
@@ -441,16 +397,65 @@ export default function ExecutiveDashboard() {
           />
         ) : (
           <>
-            <h3 style={sectionTitle}>Executive Summary</h3>
+            <div style={sectionHeaderRow}>
+              <h3 style={sectionTitle}>Executive Summary</h3>
+              <span style={{ ...statusBadge, ...statusMeta.stable.badge }}>[ {statusMeta.stable.label} ]</span>
+            </div>
             <p style={summaryText}>{executiveNarrative}</p>
           </>
         )}
       </div>
 
+      <div className="ui-hover-lift pdss-card warning" style={{ ...summaryCard, borderTop: "3px solid #f59e0b" }}>
+        {loading ? (
+          <SkeletonCard
+            style={{
+              background: "transparent",
+              border: "none",
+              boxShadow: "none",
+              padding: 0,
+              minHeight: 96,
+            }}
+            blocks={[
+              { width: "34%", height: 16, gap: 14, radius: 10 },
+              { width: "100%", height: 14, gap: 10, radius: 10 },
+              { width: "92%", height: 14, gap: 10, radius: 10 },
+              { width: "96%", height: 14, gap: 0, radius: 10 },
+            ]}
+          />
+        ) : (
+          <>
+            <div style={sectionHeaderRow}>
+              <h3 style={sectionTitle}>FalconMed Recommendations</h3>
+              <span style={{ ...statusBadge, ...statusMeta.warning.badge }}>[ {statusMeta.warning.label} ]</span>
+            </div>
+            {recommendations.length === 0 ? (
+              <p style={summaryText}>No recommendation is available from current operational data.</p>
+            ) : (
+              <div style={recommendationList}>
+                {recommendations.map((item, index) => (
+                  <div key={`${item.kind}-${index}`} style={recommendationItem}>
+                    <div style={recommendationTitle}>{item.title}</div>
+                    <div style={recommendationAction}>{item.action}</div>
+                    <div style={recommendationReason}>Reason: {item.reason}</div>
+                    <div style={recommendationSaving}>
+                      Estimated saving: AED {Number(item.estimatedFinancialImpact || 0).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
       <div style={tablesGrid}>
-        <div className="ui-hover-lift" style={tableCard}>
+        <div className="ui-hover-lift pdss-card critical" style={{ ...tableCard, borderTop: "3px solid #ef4444" }}>
           <div style={tableHead}>
-            <h3 style={sectionTitleLeft}>Top High-Risk Drugs</h3>
+            <div style={sectionHeaderRow}>
+              <h3 style={sectionTitleLeft}>Top High-Risk Drugs</h3>
+              <span style={{ ...statusBadge, ...statusMeta.critical.badge }}>[ {statusMeta.critical.label} ]</span>
+            </div>
           </div>
 
           {loading ? (
@@ -502,9 +507,12 @@ export default function ExecutiveDashboard() {
           )}
         </div>
 
-        <div className="ui-hover-lift" style={tableCard}>
+        <div className="ui-hover-lift pdss-card warning" style={{ ...tableCard, borderTop: "3px solid #f59e0b" }}>
           <div style={tableHead}>
-            <h3 style={sectionTitleLeft}>Top Transfer Opportunities</h3>
+            <div style={sectionHeaderRow}>
+              <h3 style={sectionTitleLeft}>Top Transfer Opportunities</h3>
+              <span style={{ ...statusBadge, ...statusMeta.warning.badge }}>[ {statusMeta.warning.label} ]</span>
+            </div>
           </div>
 
           {loading ? (
@@ -643,6 +651,42 @@ const statLabel = {
   marginBottom: "8px",
 };
 
+const statLabelInline = {
+  color: "#64748b",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const cardHeaderRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
+  marginBottom: "8px",
+};
+
+const sectionHeaderRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "12px",
+  marginBottom: "10px",
+};
+
+const statusBadge = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: "11px",
+  fontWeight: 600,
+  padding: "3px 8px",
+  borderRadius: "999px",
+  letterSpacing: "0.04em",
+  whiteSpace: "nowrap",
+};
+
 const statValue = {
   marginTop: "10px",
   color: "#0f172a",
@@ -660,7 +704,7 @@ const summaryCard = {
 
 const sectionTitle = {
   marginTop: 0,
-  marginBottom: "10px",
+  marginBottom: 0,
   color: "#0f172a",
 };
 
@@ -674,6 +718,42 @@ const summaryText = {
   color: "#475569",
   lineHeight: 1.7,
   fontSize: "15px",
+};
+
+const recommendationList = {
+  display: "grid",
+  gap: "12px",
+};
+
+const recommendationItem = {
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "12px 14px",
+  background: "#f8fafc",
+};
+
+const recommendationTitle = {
+  color: "#0f172a",
+  fontWeight: 700,
+  marginBottom: "4px",
+};
+
+const recommendationAction = {
+  color: "#1e293b",
+  fontSize: "14px",
+  marginBottom: "4px",
+};
+
+const recommendationReason = {
+  color: "#475569",
+  fontSize: "13px",
+};
+
+const recommendationSaving = {
+  marginTop: "6px",
+  color: "#0f766e",
+  fontSize: "13px",
+  fontWeight: 700,
 };
 
 const tablesGrid = {

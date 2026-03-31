@@ -385,14 +385,21 @@ export default function App() {
     Number(shortageRiskExposure || 0);
 
   const riskLevel =
-    operationalRiskScore <= 30 ? "Low" : operationalRiskScore <= 60 ? "Medium" : "High";
+    operationalRiskScore <= 30
+      ? "Stable"
+      : operationalRiskScore <= 60
+        ? "Needs Attention"
+        : "Critical";
 
   const riskBadgeStyle =
-    riskLevel === "Low"
-      ? riskBadgeLow
-      : riskLevel === "Medium"
-        ? riskBadgeMedium
-        : riskBadgeHigh;
+    riskLevel === "Stable"
+      ? riskBadgeStable
+      : riskLevel === "Needs Attention"
+        ? riskBadgeAttention
+        : riskBadgeCritical;
+
+  const riskAccentColor =
+    riskLevel === "Stable" ? "#16a34a" : riskLevel === "Needs Attention" ? "#ca8a04" : "#dc2626";
 
   const dashboardDataStatus = useMemo(() => {
     const freshest = recentActivity.reduce((latest, item) => {
@@ -478,6 +485,16 @@ export default function App() {
   const animActiveSites = useAnimatedCounter(activeSites);
   const animRiskScore = useAnimatedCounter(operationalRiskScore);
   const animFinancialImpact = useAnimatedCounter(financialImpact);
+
+  const transfersToday = useMemo(
+    () =>
+      recentActivity.filter((item) =>
+        String(item?.type || "").toLowerCase().includes("transfer")
+      ).length,
+    [recentActivity]
+  );
+
+  const recentActionsCount = recentActivity.length;
 
   const handlePaletteToggle = useCallback(() => {
     if (!user) return;
@@ -741,6 +758,20 @@ export default function App() {
                   FalconMed is currently tracking {inventoryRecords.toLocaleString()} inventory records across {activeSites.toLocaleString()} pharmacy sites.
                 </div>
 
+                <div
+                  className="ui-hover-lift"
+                  style={{
+                    ...riskKpiCard,
+                    ...(isCommandCenterMode ? commandModeRiskKpiCard : null),
+                    borderTop: `4px solid ${riskAccentColor}`,
+                  }}
+                >
+                  <div style={statLabel}>OPERATIONAL RISK SCORE</div>
+                  <div style={riskKpiValue}>{animRiskScore} / 100</div>
+                  <div style={riskBadgeStyle}>Status: {riskLevel}</div>
+                  <div style={riskHint}>Calculated from shortage count, near-expiry count, and urgent actions.</div>
+                </div>
+
                 <div style={{ ...cardsGrid, ...(isCommandCenterMode ? commandModeCardsGrid : null) }}>
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
@@ -752,7 +783,7 @@ export default function App() {
                     <div style={statLabel}>NEAR EXPIRY ITEMS</div>
                     <div style={statValue}>{animNearExpiry}</div>
                     <div style={expiryRiskMiniLabel}>Estimated Expiry Risk</div>
-                    <div style={expiryRiskMiniValue}>AED estimate unavailable</div>
+                    <div style={expiryRiskMiniValue}>Financial estimate unavailable</div>
                     <div style={kpiHint}>Items requiring near-term stock planning.</div>
                   </div>
 
@@ -768,23 +799,26 @@ export default function App() {
                     <div style={kpiHint}>Sites currently contributing activity data.</div>
                   </div>
 
-                  <div
-                    className="ui-hover-lift"
-                    style={{
-                      ...statCard,
-                      ...(isCommandCenterMode ? commandModeStatCard : null),
-                      borderTop:
-                        riskLevel === "Low"
-                          ? "4px solid #4267bb"
-                          : riskLevel === "Medium"
-                            ? "4px solid #2f4f9f"
-                            : "4px solid #1f3c88",
-                    }}
-                  >
-                    <div style={statLabel}>OPERATIONAL RISK SCORE</div>
-                    <div style={statValue}>{animRiskScore} / 100</div>
-                    <div style={riskBadgeStyle}>{riskLevel}</div>
-                    <div style={riskHint}>Driven by shortage risk and urgent pharmacy actions.</div>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #0ea5e9" }}>
+                    <div style={statLabel}>LIVE OPERATIONS</div>
+                    <div style={liveOpsGrid}>
+                      <div style={liveOpsRow}>
+                        <span style={liveOpsLabel}>Stock Movements Today</span>
+                        <strong style={liveOpsValue}>{Number(liveOperationsToday || 0).toLocaleString()}</strong>
+                      </div>
+                      <div style={liveOpsRow}>
+                        <span style={liveOpsLabel}>Transfers Today</span>
+                        <strong style={liveOpsValue}>{Number(transfersToday || 0).toLocaleString()}</strong>
+                      </div>
+                      <div style={liveOpsRow}>
+                        <span style={liveOpsLabel}>Purchase Requests</span>
+                        <strong style={liveOpsValue}>{Number(purchaseRequests || 0).toLocaleString()}</strong>
+                      </div>
+                      <div style={liveOpsRow}>
+                        <span style={liveOpsLabel}>Recent Actions</span>
+                        <strong style={liveOpsValue}>{Number(recentActionsCount || 0).toLocaleString()}</strong>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
@@ -1527,6 +1561,21 @@ const commandModeStatCard = {
   transformOrigin: "center",
 };
 
+const riskKpiCard = {
+  background: "white",
+  borderRadius: "14px",
+  padding: "20px",
+  boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
+  border: "1px solid #e5eaf2",
+  marginBottom: "20px",
+  textAlign: "left",
+};
+
+const commandModeRiskKpiCard = {
+  padding: "24px",
+  marginBottom: "24px",
+};
+
 const statLabel = {
   fontSize: "10px",
   color: "#94a3b8",
@@ -1542,6 +1591,11 @@ const statValue = {
   color: "#1a1a1a",
   letterSpacing: "-0.02em",
   lineHeight: 1.1,
+};
+
+const riskKpiValue = {
+  ...statValue,
+  fontSize: "40px",
 };
 
 const kpiHint = {
@@ -1576,25 +1630,25 @@ const riskBadgeBase = {
   marginTop: "10px",
 };
 
-const riskBadgeLow = {
+const riskBadgeStable = {
   ...riskBadgeBase,
-  background: "#edf2ff",
-  color: "#4267bb",
-  border: "1px solid #d6e0ff",
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #86efac",
 };
 
-const riskBadgeMedium = {
+const riskBadgeAttention = {
   ...riskBadgeBase,
-  background: "#eaf0ff",
-  color: "#2f4f9f",
-  border: "1px solid #d2defe",
+  background: "#fef9c3",
+  color: "#854d0e",
+  border: "1px solid #fde047",
 };
 
-const riskBadgeHigh = {
+const riskBadgeCritical = {
   ...riskBadgeBase,
-  background: "#e5ecff",
-  color: "#1f3c88",
-  border: "1px solid #cddaff",
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fca5a5",
 };
 
 const riskHint = {
@@ -1602,6 +1656,30 @@ const riskHint = {
   fontSize: "12px",
   color: "#94a3b8",
   lineHeight: 1.5,
+};
+
+const liveOpsGrid = {
+  marginTop: "6px",
+  display: "grid",
+  gap: "6px",
+};
+
+const liveOpsRow = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
+};
+
+const liveOpsLabel = {
+  fontSize: "12px",
+  color: "#6b7280",
+};
+
+const liveOpsValue = {
+  fontSize: "16px",
+  color: "#0f172a",
+  fontWeight: 700,
 };
 
 const financialSubline = {
