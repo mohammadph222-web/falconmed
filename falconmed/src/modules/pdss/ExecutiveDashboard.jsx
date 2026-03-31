@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import SkeletonCard from "../../components/SkeletonCard";
 import StatCard from "../../components/StatCard";
-import { supabase } from "../../lib/supabaseClient";
 import { useAnimatedCounter } from "../../hooks/useAnimatedCounter";
 import {
   buildExecutiveMetrics,
@@ -13,28 +12,8 @@ import {
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
 import { buildDrugPriceMap } from "../../utils/drugPricing";
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(3000);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
 
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
@@ -75,22 +54,26 @@ export default function ExecutiveDashboard() {
       ] = await Promise.all([
         safeFetch(
           "shortage_requests",
-          "drug_name,quantity_requested,status,request_date,created_at"
+          "drug_name,quantity_requested,status,request_date,created_at",
+          3000
         ),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          3000
         ),
         safeFetch(
           "expiry_records",
-          "drug_name,quantity,location,batch_no,expiry_date,created_at"
+          "drug_name,quantity,location,batch_no,expiry_date,created_at",
+          3000
         ),
-        safeFetch("pharmacies", "id,name"),
+        safeFetch("pharmacies", "id,name", 3000),
         safeFetch(
           "pharmacy_inventory",
-          "id,drug_name,quantity,unit_cost,expiry_date,batch_no,pharmacy_id"
+          "id,drug_name,quantity,unit_cost,expiry_date,batch_no,pharmacy_id",
+          3000
         ),
-        safeFetch("purchase_requests", "id,status,drug_name,created_at"),
+        safeFetch("purchase_requests", "id,status,drug_name,created_at", 3000),
       ]);
 
       const localShortages = loadLocalArray("falconmed_shortages");

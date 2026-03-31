@@ -94,6 +94,7 @@ export default function App() {
   const { plan, status: subscriptionStatus, loading: subscriptionLoading } = useSubscription(user);
   const [page, setPage] = useState("dashboard");
   const [pdssView, setPdssView] = useState("executive-dashboard");
+  const [commandCenterMode, setCommandCenterMode] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [accessNotice, setAccessNotice] = useState("");
@@ -105,6 +106,9 @@ export default function App() {
   const [refillRequests, setRefillRequests] = useState(0);
   const [recentActivity, setRecentActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [liveOperationsToday, setLiveOperationsToday] = useState(0);
+  const [inventoryRiskHeatmap, setInventoryRiskHeatmap] = useState([]);
+  const [heatmapLoading, setHeatmapLoading] = useState(false);
 
   const safeCount = async (tableName) => {
     if (!supabase) return 0;
@@ -124,6 +128,7 @@ export default function App() {
   const loadRecentActivity = async () => {
     if (!supabase) {
       setRecentActivity([]);
+      setLiveOperationsToday(0);
       setActivityLoading(false);
       return;
     }
@@ -135,7 +140,7 @@ export default function App() {
           .from(table)
           .select(columns)
           .order("created_at", { ascending: false })
-          .limit(20);
+          .limit(10);
         if (error) return [];
         return data || [];
       } catch {
@@ -147,6 +152,28 @@ export default function App() {
       safeQuery("stock_movements", "movement_type,drug_name,quantity,from_pharmacy,to_pharmacy,created_at,created_by"),
     ]);
 
+    const safeTodayCount = async () => {
+      try {
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const tomorrowStart = new Date(todayStart);
+        tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+
+        const { count, error } = await supabase
+          .from("stock_movements")
+          .select("*", { count: "exact", head: true })
+          .gte("created_at", todayStart.toISOString())
+          .lt("created_at", tomorrowStart.toISOString());
+
+        if (error) return 0;
+        return Number.isFinite(count) ? count : 0;
+      } catch {
+        return 0;
+      }
+    };
+
+    const todayCount = await safeTodayCount();
+
     const items = [];
 
     const resolveCreatedAt = (createdAt) => {
@@ -154,13 +181,33 @@ export default function App() {
       return Number.isFinite(ts) ? createdAt : null;
     };
 
+    const resolveMovementTone = (movementType) => {
+      const normalized = String(movementType || "").trim().toLowerCase();
+
+      if (normalized.includes("transfer")) return "transfer";
+      if (normalized.includes("receive") || normalized === "add") return "receive";
+      if (normalized.includes("adjust")) return "adjustment";
+      if (normalized.includes("delete")) return "delete";
+      if (normalized.includes("update")) return "update";
+      return "default";
+    };
+
     for (const r of movements) {
       const createdAt = resolveCreatedAt(r.created_at);
+      const movementLabel = String(r.movement_type || "Movement").trim() || "Movement";
+      const qty = Number(r.quantity || 0);
+      const locations = [
+        r.from_pharmacy ? `From ${r.from_pharmacy}` : "",
+        r.to_pharmacy ? `To ${r.to_pharmacy}` : "",
+      ].filter(Boolean);
+
       items.push({
-        type: "MOVEMENT",
-        title: `${r.movement_type || "Movement"} - ${r.drug_name || "Unknown"}`,
-        subtitle: `${Number(r.quantity || 0)} units | ${r.from_pharmacy || "-"} → ${r.to_pharmacy || "-"}`,
+        type: movementLabel,
+        tone: resolveMovementTone(movementLabel),
+        title: r.drug_name || "Unknown drug",
+        subtitle: `Qty ${qty}${locations.length > 0 ? ` | ${locations.join(" • ")}` : ""}`,
         created_at: createdAt,
+        timestampLabel: createdAt ? new Date(createdAt).toLocaleString() : "Unknown time",
         created_by: r.created_by || "",
       });
     }
@@ -171,13 +218,114 @@ export default function App() {
       return tb - ta;
     });
 
-    setRecentActivity(items.slice(0, 5));
+    setRecentActivity(items.slice(0, 10));
+    setLiveOperationsToday(todayCount);
     setActivityLoading(false);
   };
 
   useEffect(() => {
     if (!user || page !== "dashboard") return;
     void loadRecentActivity();
+  }, [page, user]);
+
+  const loadInventoryRiskHeatmap = async () => {
+    if (!supabase) {
+      setInventoryRiskHeatmap([]);
+      setHeatmapLoading(false);
+      return;
+    }
+
+    setHeatmapLoading(true);
+
+    try {
+      const [{ data: pharmacies, error: pharmaciesError }, { data: inventory, error: inventoryError }] = await Promise.all([
+        supabase.from("pharmacies").select("id,name").limit(2000),
+        supabase.from("pharmacy_inventory").select("pharmacy_id,quantity,expiry_date").limit(10000),
+      ]);
+
+      if (pharmaciesError || inventoryError) {
+        setInventoryRiskHeatmap([]);
+        return;
+      }
+
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const nearExpiryLimit = new Date(now);
+      nearExpiryLimit.setDate(nearExpiryLimit.getDate() + 180);
+
+      const pharmacyMap = new Map();
+      (pharmacies || []).forEach((p) => {
+        const key = String(p?.id ?? "");
+        if (!key) return;
+
+        pharmacyMap.set(key, {
+          pharmacyName: String(p?.name || "Unknown Pharmacy"),
+          lowStockCount: 0,
+          nearExpiryCount: 0,
+        });
+      });
+
+      (inventory || []).forEach((row) => {
+        const key = String(row?.pharmacy_id ?? "");
+        if (!key) return;
+
+        if (!pharmacyMap.has(key)) {
+          pharmacyMap.set(key, {
+            pharmacyName: "Unknown Pharmacy",
+            lowStockCount: 0,
+            nearExpiryCount: 0,
+          });
+        }
+
+        const entry = pharmacyMap.get(key);
+        const qty = Number(row?.quantity ?? 0);
+        if (Number.isFinite(qty) && qty <= 10) {
+          entry.lowStockCount += 1;
+        }
+
+        const expiryRaw = row?.expiry_date;
+        if (expiryRaw) {
+          const expiryDate = new Date(expiryRaw);
+          if (!Number.isNaN(expiryDate.getTime()) && expiryDate >= now && expiryDate <= nearExpiryLimit) {
+            entry.nearExpiryCount += 1;
+          }
+        }
+      });
+
+      const byName = new Map();
+      Array.from(pharmacyMap.values()).forEach((entry) => {
+        const normalizedName = String(entry?.pharmacyName || "Unknown Pharmacy").trim().toLowerCase();
+        if (!byName.has(normalizedName)) {
+          byName.set(normalizedName, {
+            pharmacyName: String(entry?.pharmacyName || "Unknown Pharmacy"),
+            lowStockCount: 0,
+            nearExpiryCount: 0,
+          });
+        }
+
+        const agg = byName.get(normalizedName);
+        agg.lowStockCount += Number(entry?.lowStockCount || 0);
+        agg.nearExpiryCount += Number(entry?.nearExpiryCount || 0);
+      });
+
+      const rows = Array.from(byName.values())
+        .map((entry) => ({
+          ...entry,
+          issueCount: Number(entry.lowStockCount || 0) + Number(entry.nearExpiryCount || 0),
+        }))
+        .sort((a, b) => a.pharmacyName.localeCompare(b.pharmacyName));
+
+      setInventoryRiskHeatmap(rows);
+    } catch {
+      setInventoryRiskHeatmap([]);
+    } finally {
+      setHeatmapLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!user || page !== "dashboard") return;
+    void loadInventoryRiskHeatmap();
   }, [page, user]);
 
   useEffect(() => {
@@ -228,6 +376,13 @@ export default function App() {
   const potentialWaste = (Number(nearExpiryItems) || 0) * 150;
   const potentialSavings = (Number(shortageRequestsToday) || 0) * 200;
   const financialImpact = potentialWaste + potentialSavings;
+  const expiryRiskExposure = potentialWaste;
+  const deadStockExposure = Math.round((Number(activeUrgentActions) || 0) * 120);
+  const shortageRiskExposure = potentialSavings;
+  const totalFinancialExposure =
+    Number(expiryRiskExposure || 0) +
+    Number(deadStockExposure || 0) +
+    Number(shortageRiskExposure || 0);
 
   const riskLevel =
     operationalRiskScore <= 30 ? "Low" : operationalRiskScore <= 60 ? "Medium" : "High";
@@ -238,6 +393,73 @@ export default function App() {
       : riskLevel === "Medium"
         ? riskBadgeMedium
         : riskBadgeHigh;
+
+  const dashboardDataStatus = useMemo(() => {
+    const freshest = recentActivity.reduce((latest, item) => {
+      const raw = item?.created_at;
+      if (!raw) return latest;
+
+      const ts = new Date(raw).getTime();
+      if (!Number.isFinite(ts)) return latest;
+
+      return ts > latest ? ts : latest;
+    }, Number.NEGATIVE_INFINITY);
+
+    if (Number.isFinite(freshest)) {
+      return {
+        label: new Date(freshest).toLocaleString(),
+        source: "Source: FalconMed operational records",
+      };
+    }
+
+    return {
+      label: "Based on latest available records",
+      source: "Source: FalconMed operational records",
+    };
+  }, [recentActivity]);
+
+  const systemHealth = useMemo(() => {
+    if (!supabase) {
+      return {
+        status: "Critical",
+        subtitle: "Critical modules unavailable",
+      };
+    }
+
+    if (activityLoading) {
+      return {
+        status: "Warning",
+        subtitle: "Some data sources need attention",
+      };
+    }
+
+    if (
+      !dashboardLoading &&
+      inventoryRecords === 0 &&
+      activeSites === 0 &&
+      nearExpiryItems === 0 &&
+      shortageRequestsToday === 0 &&
+      recentActivity.length === 0
+    ) {
+      return {
+        status: "Warning",
+        subtitle: "Some data sources need attention",
+      };
+    }
+
+    return {
+      status: "Operational",
+      subtitle: "All core modules reporting normally",
+    };
+  }, [
+    activityLoading,
+    activeSites,
+    dashboardLoading,
+    inventoryRecords,
+    nearExpiryItems,
+    recentActivity,
+    shortageRequestsToday,
+  ]);
 
   useEffect(() => {
     if (!user || page !== "dashboard") {
@@ -287,6 +509,8 @@ export default function App() {
     [navigationSections]
   );
 
+  const isCommandCenterMode = page === "dashboard" && commandCenterMode;
+
   const handleNavigationRequest = useCallback((selection) => {
     if (!selection?.page) return;
 
@@ -308,6 +532,7 @@ export default function App() {
     await signOut();
     setAccessNotice("");
     setPaletteOpen(false);
+    setCommandCenterMode(false);
     setPage("dashboard");
     setPdssView("executive-dashboard");
   }, [signOut]);
@@ -459,7 +684,7 @@ export default function App() {
               </>
             ) : (
               <>
-                <div style={headerCard}>
+                <div style={{ ...headerCard, ...(isCommandCenterMode ? commandModeHeaderCard : null) }}>
                   <div style={headerRow}>
                     <div>
                       <h1 style={headerTitle}>FalconMed Dashboard</h1>
@@ -467,38 +692,75 @@ export default function App() {
                         Operational intelligence for pharmacy decision-making.
                       </p>
                     </div>
-                    <div style={liveStatusBadge}>
-                      <span style={liveStatusDot} />
-                      Live
+                    <div style={headerControlsRow}>
+                      <div style={liveStatusBadge}>
+                        <span style={liveStatusDot} />
+                        Live
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setCommandCenterMode((prev) => !prev)}
+                        style={{
+                          ...commandCenterButton,
+                          ...(isCommandCenterMode
+                            ? commandCenterButtonOn
+                            : commandCenterButtonOff),
+                        }}
+                      >
+                        {isCommandCenterMode ? "Command Center ON" : "Command Center OFF"}
+                      </button>
                     </div>
                   </div>
                 </div>
 
-                <div style={insightBox}>
+                <div style={{ ...dataStatusBar, ...(isCommandCenterMode ? commandModeBar : null) }}>
+                  <div style={dataStatusLabel}>Last data update</div>
+                  <div style={dataStatusValue}>{dashboardDataStatus.label}</div>
+                  <div style={dataStatusSource}>{dashboardDataStatus.source}</div>
+                </div>
+
+                <div style={{ ...systemHealthBar, ...(isCommandCenterMode ? commandModeBar : null) }}>
+                  <div style={systemHealthLabel}>System Health</div>
+                  <span
+                    style={{
+                      ...systemHealthPill,
+                      ...(systemHealth.status === "Operational"
+                        ? systemHealthOperational
+                        : systemHealth.status === "Warning"
+                          ? systemHealthWarning
+                          : systemHealthCritical),
+                    }}
+                  >
+                    {systemHealth.status}
+                  </span>
+                  <div style={systemHealthSubtitle}>{systemHealth.subtitle}</div>
+                </div>
+
+                <div style={{ ...insightBox, ...(isCommandCenterMode ? commandModeInsightBox : null) }}>
                   <span style={insightBullet}>◆</span>{" "}
                   FalconMed is currently tracking {inventoryRecords.toLocaleString()} inventory records across {activeSites.toLocaleString()} pharmacy sites.
                 </div>
 
-                <div style={cardsGrid}>
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #1f3c88" }}>
+                <div style={{ ...cardsGrid, ...(isCommandCenterMode ? commandModeCardsGrid : null) }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
                     <div style={statValue}>{animDrugs.toLocaleString()}</div>
                     <div style={kpiHint}>Active formulary records across FalconMed.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #2f4f9f" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #2f4f9f" }}>
                     <div style={statLabel}>NEAR EXPIRY ITEMS</div>
                     <div style={statValue}>{animNearExpiry}</div>
                     <div style={kpiHint}>Items requiring near-term stock planning.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #3557ab" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #3557ab" }}>
                     <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
                     <div style={statValue}>{animShortageToday}</div>
                     <div style={kpiHint}>Current shortage pressure logged today.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #4267bb" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #4267bb" }}>
                     <div style={statLabel}>ACTIVE SITES</div>
                     <div style={statValue}>{animActiveSites}</div>
                     <div style={kpiHint}>Sites currently contributing activity data.</div>
@@ -508,6 +770,7 @@ export default function App() {
                     className="ui-hover-lift"
                     style={{
                       ...statCard,
+                      ...(isCommandCenterMode ? commandModeStatCard : null),
                       borderTop:
                         riskLevel === "Low"
                           ? "4px solid #4267bb"
@@ -522,7 +785,7 @@ export default function App() {
                     <div style={riskHint}>Driven by shortage risk and urgent pharmacy actions.</div>
                   </div>
 
-                  <div className="ui-hover-lift" style={{ ...statCard, borderTop: "4px solid #1f3c88" }}>
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>INVENTORY FINANCIAL IMPACT</div>
                     <div style={{ ...statValue, fontSize: "26px" }}>
                       AED {animFinancialImpact.toLocaleString()}
@@ -531,27 +794,107 @@ export default function App() {
                       Waste Risk AED {potentialWaste.toLocaleString()} | Savings Opportunity AED {potentialSavings.toLocaleString()}
                     </div>
                   </div>
+
+                  <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #2f4f9f" }}>
+                    <div style={statLabel}>FINANCIAL EXPOSURE</div>
+                    <div style={{ ...statValue, fontSize: "26px" }}>
+                      AED {totalFinancialExposure.toLocaleString()}
+                    </div>
+                    <div style={financialExposureBreakdown}>
+                      Expiry Risk: AED {expiryRiskExposure.toLocaleString()}<br />
+                      Dead Stock: AED {deadStockExposure.toLocaleString()}<br />
+                      Shortage Risk: AED {shortageRiskExposure.toLocaleString()}
+                    </div>
+                  </div>
                 </div>
 
-                <div style={contentCard}>
+                <div style={{ ...contentCard, ...(isCommandCenterMode ? commandModeContentCard : null), ...(isCommandCenterMode ? commandModeHeatmapCard : null) }}>
+                  <h3 style={sectionTitle}>Inventory Risk Heatmap</h3>
+
+                  {heatmapLoading ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>Loading inventory risk...</div>
+                  ) : inventoryRiskHeatmap.length === 0 ? (
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>No inventory risk data available.</div>
+                  ) : (
+                    <div style={heatmapGrid}>
+                      {inventoryRiskHeatmap.map((row, idx) => {
+                        const severity =
+                          row.issueCount <= 0 ? "green" : row.issueCount <= 2 ? "yellow" : "red";
+                        const indicatorStyle =
+                          severity === "green"
+                            ? heatIndicatorGreen
+                            : severity === "yellow"
+                              ? heatIndicatorYellow
+                              : heatIndicatorRed;
+
+                        return (
+                          <div key={`${row.pharmacyName}-${idx}`} style={heatmapCard}>
+                            <div style={heatmapCardHeader}>
+                              <div style={heatmapPharmacyName}>{row.pharmacyName}</div>
+                              <span style={{ ...heatIndicatorBase, ...indicatorStyle }}>
+                                {severity === "green" ? "Green" : severity === "yellow" ? "Yellow" : "Red"}
+                              </span>
+                            </div>
+                            <div style={heatmapMetricsRow}>
+                              <div style={heatmapMetricBox}>
+                                <div style={heatmapMetricLabel}>Low Stock</div>
+                                <div style={heatmapMetricValue}>{Number(row.lowStockCount || 0)}</div>
+                              </div>
+                              <div style={heatmapMetricBox}>
+                                <div style={heatmapMetricLabel}>Near Expiry</div>
+                                <div style={heatmapMetricValue}>{Number(row.nearExpiryCount || 0)}</div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ ...liveActivityStrip, ...(isCommandCenterMode ? commandModeBar : null) }}>
+                  <div>
+                    <div style={liveActivityStripTitle}>Live Activity</div>
+                    <div style={liveActivityStripValue}>
+                      {Number(liveOperationsToday || 0).toLocaleString()} operations today
+                    </div>
+                  </div>
+                  <div style={liveActivityBadge}>
+                    <span style={liveActivityDot} />
+                    LIVE
+                  </div>
+                </div>
+
+                <div style={{ ...contentCard, ...(isCommandCenterMode ? commandModeContentCard : null) }}>
                   <h3 style={sectionTitle}>Recent Activity</h3>
 
                   {activityLoading ? (
-                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>Loading activity...</div>
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>Loading recent activity...</div>
                   ) : recentActivity.length === 0 ? (
-                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>No recent activity found.</div>
+                    <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>No recent activity available.</div>
                   ) : (
                     recentActivity.map((item, idx) => {
                       const isLast = idx === recentActivity.length - 1;
-                      const barColor =
-                        item.type === "SHORTAGE" ? "#2f4f9f" :
-                        item.type === "EXPIRY" ? "#4267bb" : "#1f3c88";
+                      const movementType = String(item.type || "").trim().toLowerCase();
+                      const isAdd = movementType === "add";
+                      const isUpdate = movementType === "update";
+                      const isDelete = movementType === "delete";
                       const tagBg =
-                        item.type === "SHORTAGE" ? "#e3ebff" :
-                        item.type === "EXPIRY" ? "#edf2ff" : "#eaf0ff";
+                        isAdd ? "#dcfce7" :
+                        isUpdate ? "#fef3c7" :
+                        isDelete ? "#fee2e2" : "#eaf0ff";
                       const tagColor =
-                        item.type === "SHORTAGE" ? "#2f4f9f" :
-                        item.type === "EXPIRY" ? "#4267bb" : "#1f3c88";
+                        isAdd ? "#166534" :
+                        isUpdate ? "#92400e" :
+                        isDelete ? "#991b1b" : "#1f3c88";
+                      const tagBorderColor =
+                        isAdd ? "#86efac" :
+                        isUpdate ? "#fde68a" :
+                        isDelete ? "#fecaca" : "#bfdbfe";
+                      const barColor =
+                        isAdd ? "#22c55e" :
+                        isUpdate ? "#f59e0b" :
+                        isDelete ? "#ef4444" : "#1f3c88";
                       return (
                         <div
                           key={`activity-${idx}`}
@@ -560,12 +903,13 @@ export default function App() {
                           <div style={{ ...activityBarBlue, background: barColor }} />
                           <div style={activityContent}>
                             <div style={activityTitleRow}>
-                              <span style={{ ...activityTagBase, background: tagBg, color: tagColor }}>
+                              <span style={{ ...activityTagBase, background: tagBg, color: tagColor, borderColor: tagBorderColor }}>
                                 {item.type}
                               </span>
                               <span style={activityTitle}>{item.title}</span>
                             </div>
                             <div style={activityText}>{item.subtitle}</div>
+                            <div style={activityTimestamp}>{item.timestampLabel}</div>
                             {item.created_by ? (
                               <div style={{ ...activityText, fontSize: "12px" }}>by {item.created_by}</div>
                             ) : null}
@@ -576,7 +920,7 @@ export default function App() {
                   )}
                 </div>
 
-                <div style={contentCard}>
+                <div style={{ ...contentCard, ...(isCommandCenterMode ? commandModeContentCard : null) }}>
                   <h3 style={sectionTitle}>Overview</h3>
                   <p style={sectionText}>
                     FalconMed is a pharmacy operations and clinical intelligence
@@ -596,7 +940,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div style={contentCard}>
+                <div style={{ ...contentCard, ...(isCommandCenterMode ? commandModeContentCard : null) }}>
                   <UrgentActionsWidget
                     onViewAll={() => {
                       setPdssView("action-center");
@@ -613,6 +957,7 @@ export default function App() {
 
   return (
     <div style={layout}>
+      {!isCommandCenterMode ? (
       <aside style={sidebar}>
         <div>
           <div style={brandBox}>
@@ -684,8 +1029,12 @@ export default function App() {
           <div>FalconMed v1.0</div>
         </div>
       </aside>
+      ) : null}
 
-      <main style={main}>
+      <main
+        className={isCommandCenterMode ? "dashboard-command-mode" : ""}
+        style={{ ...main, ...(isCommandCenterMode ? commandModeMain : null) }}
+      >
         {accessNotice ? (
           <div style={accessNoticeCard}>
             <div style={accessNoticeTitle}>Plan Access</div>
@@ -978,6 +1327,12 @@ const main = {
   maxWidth: "1400px",
 };
 
+const commandModeMain = {
+  maxWidth: "100%",
+  width: "100%",
+  padding: "34px",
+};
+
 const sessionShell = {
   minHeight: "100vh",
   display: "flex",
@@ -1043,6 +1398,38 @@ const headerRow = {
   gap: "16px",
 };
 
+const headerControlsRow = {
+  display: "flex",
+  alignItems: "center",
+  gap: "10px",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+};
+
+const commandCenterButton = {
+  borderRadius: "999px",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  padding: "7px 12px",
+  border: "1px solid transparent",
+  cursor: "pointer",
+  boxShadow: "none",
+};
+
+const commandCenterButtonOff = {
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  borderColor: "#bfdbfe",
+};
+
+const commandCenterButtonOn = {
+  background: "#1f3c88",
+  color: "#ffffff",
+  borderColor: "#1f3c88",
+};
+
 const headerTitle = {
   margin: 0,
   fontSize: "24px",
@@ -1097,6 +1484,12 @@ const insightBox = {
   lineHeight: 1.7,
 };
 
+const commandModeInsightBox = {
+  padding: "24px",
+  marginBottom: "26px",
+  fontSize: "15px",
+};
+
 const insightBullet = {
   color: "#1f3c88",
   fontWeight: 700,
@@ -1110,6 +1503,12 @@ const cardsGrid = {
   marginBottom: "22px",
 };
 
+const commandModeCardsGrid = {
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: "28px",
+  marginBottom: "28px",
+};
+
 const statCard = {
   background: "white",
   borderRadius: "14px",
@@ -1117,6 +1516,12 @@ const statCard = {
   boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
   textAlign: "center",
   border: "1px solid #e5eaf2",
+};
+
+const commandModeStatCard = {
+  padding: "22px",
+  transform: "scale(1.05)",
+  transformOrigin: "center",
 };
 
 const statLabel = {
@@ -1193,6 +1598,15 @@ const financialSubline = {
   letterSpacing: "0.02em",
 };
 
+const financialExposureBreakdown = {
+  marginTop: "8px",
+  fontSize: "11px",
+  color: "#94a3b8",
+  lineHeight: 1.55,
+  fontWeight: 600,
+  letterSpacing: "0.02em",
+};
+
 const contentCard = {
   background: "white",
   borderRadius: "14px",
@@ -1200,6 +1614,21 @@ const contentCard = {
   boxShadow: "0 12px 30px rgba(0,0,0,0.06)",
   marginBottom: "22px",
   border: "1px solid #e5eaf2",
+};
+
+const commandModeContentCard = {
+  padding: "24px",
+  marginBottom: "28px",
+};
+
+const commandModeHeaderCard = {
+  padding: "28px",
+  marginBottom: "28px",
+};
+
+const commandModeBar = {
+  padding: "12px 16px",
+  marginBottom: "20px",
 };
 
 const accessNoticeCard = {
@@ -1223,6 +1652,144 @@ const accessNoticeTitle = {
 const accessNoticeText = {
   fontSize: "14px",
   lineHeight: 1.6,
+};
+
+const dataStatusBar = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "10px",
+  background: "#f8fbff",
+  border: "1px solid #dbeafe",
+  borderRadius: "12px",
+  padding: "10px 14px",
+  marginBottom: "16px",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)",
+};
+
+const dataStatusLabel = {
+  fontSize: "11px",
+  fontWeight: 700,
+  color: "#1d4ed8",
+  letterSpacing: "0.07em",
+  textTransform: "uppercase",
+};
+
+const dataStatusValue = {
+  fontSize: "13px",
+  fontWeight: 700,
+  color: "#0f172a",
+};
+
+const dataStatusSource = {
+  marginLeft: "auto",
+  fontSize: "12px",
+  color: "#64748b",
+};
+
+const systemHealthBar = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: "10px",
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "9px 14px",
+  marginBottom: "16px",
+  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.04)",
+};
+
+const systemHealthLabel = {
+  fontSize: "11px",
+  fontWeight: 700,
+  color: "#0f172a",
+  letterSpacing: "0.07em",
+  textTransform: "uppercase",
+};
+
+const systemHealthPill = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "3px 10px",
+  borderRadius: "999px",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
+  border: "1px solid transparent",
+};
+
+const systemHealthOperational = {
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #bbf7d0",
+};
+
+const systemHealthWarning = {
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fde68a",
+};
+
+const systemHealthCritical = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+};
+
+const systemHealthSubtitle = {
+  fontSize: "12px",
+  color: "#64748b",
+  marginLeft: "auto",
+};
+
+const liveActivityStrip = {
+  background: "linear-gradient(180deg, #f8fbff 0%, #f1f6ff 100%)",
+  border: "1px solid #dbe8ff",
+  borderRadius: "14px",
+  padding: "10px 14px",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+};
+
+const liveActivityStripTitle = {
+  fontSize: "12px",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  color: "#1f3c88",
+};
+
+const liveActivityStripValue = {
+  marginTop: "2px",
+  fontSize: "14px",
+  fontWeight: 600,
+  color: "#1e293b",
+};
+
+const liveActivityBadge = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  border: "1px solid #bfdbfe",
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  fontSize: "10px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+};
+
+const liveActivityDot = {
+  width: "7px",
+  height: "7px",
+  borderRadius: "50%",
+  background: "#2563eb",
+  boxShadow: "0 0 0 4px rgba(37, 99, 235, 0.14)",
 };
 
 const sectionTitle = {
@@ -1327,6 +1894,103 @@ const activityText = {
   color: "#6b7280",
   fontSize: "13px",
   lineHeight: 1.6,
+};
+
+const activityTimestamp = {
+  color: "#94a3b8",
+  fontSize: "12px",
+  marginTop: "2px",
+};
+
+const heatmapGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "12px",
+};
+
+const heatmapCard = {
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  padding: "12px",
+  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.04)",
+};
+
+const commandModeHeatmapCard = {
+  borderWidth: "2px",
+  boxShadow: "0 14px 30px rgba(15, 23, 42, 0.08)",
+};
+
+const heatmapCardHeader = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "10px",
+  marginBottom: "10px",
+};
+
+const heatmapPharmacyName = {
+  fontSize: "13px",
+  fontWeight: 700,
+  color: "#1e293b",
+};
+
+const heatIndicatorBase = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: "999px",
+  fontSize: "10px",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  border: "1px solid transparent",
+};
+
+const heatIndicatorGreen = {
+  background: "#dcfce7",
+  color: "#166534",
+  borderColor: "#bbf7d0",
+};
+
+const heatIndicatorYellow = {
+  background: "#fef3c7",
+  color: "#92400e",
+  borderColor: "#fde68a",
+};
+
+const heatIndicatorRed = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  borderColor: "#fecaca",
+};
+
+const heatmapMetricsRow = {
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "8px",
+};
+
+const heatmapMetricBox = {
+  background: "#f8fafc",
+  border: "1px solid #e2e8f0",
+  borderRadius: "10px",
+  padding: "8px 10px",
+};
+
+const heatmapMetricLabel = {
+  color: "#64748b",
+  fontSize: "11px",
+  textTransform: "uppercase",
+  letterSpacing: "0.03em",
+  fontWeight: 600,
+};
+
+const heatmapMetricValue = {
+  marginTop: "4px",
+  color: "#0f172a",
+  fontSize: "18px",
+  fontWeight: 700,
 };
 
 const featurePillsRow = {

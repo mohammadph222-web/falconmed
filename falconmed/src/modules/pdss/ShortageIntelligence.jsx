@@ -1,29 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabaseClient";
 import { buildPdssSummary, calculateShortagePredictions } from "../../utils/pdss";
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
 import StatCard from "../../components/StatCard";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(2000);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
 
 export default function ShortageIntelligence() {
   const [rows, setRows] = useState([]);
@@ -38,13 +17,15 @@ export default function ShortageIntelligence() {
       const [shortageRes, refillRes, expiryRes] = await Promise.all([
         safeFetch(
           "shortage_requests",
-          "drug_name,quantity_requested,status,request_date,created_at"
+          "drug_name,quantity_requested,status,request_date,created_at",
+          2000
         ),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          2000
         ),
-        safeFetch("expiry_records", "drug_name,quantity,created_at"),
+        safeFetch("expiry_records", "drug_name,quantity,created_at", 2000),
       ]);
 
       const shortageData = [

@@ -5,29 +5,9 @@ import {
   buildExpiryNarrative,
   calculateExpiryIntelligence,
 } from "../../utils/pdss";
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
 import StatCard from "../../components/StatCard";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(4000);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
 
 export default function ExpiryIntelligence() {
   const [rows, setRows] = useState([]);
@@ -42,11 +22,13 @@ export default function ExpiryIntelligence() {
       const [expiryRes, refillRes] = await Promise.all([
         safeFetch(
           "expiry_records",
-          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at"
+          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at",
+          4000
         ),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          4000
         ),
       ]);
 

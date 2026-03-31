@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabaseClient";
 import {
   buildPdssActionItems,
   calculateExpiryIntelligence,
@@ -7,27 +6,7 @@ import {
   calculateSmartTransferRecommendations,
   topUrgentActions,
 } from "../../utils/pdss";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(2500);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 
 const priorityStyles = {
   high: { background: "#fee2e2", color: "#991b1b" },
@@ -46,15 +25,18 @@ export default function UrgentActionsWidget({ onViewAll }) {
       const [shortageRes, refillRes, expiryRes] = await Promise.all([
         safeFetch(
           "shortage_requests",
-          "drug_name,quantity_requested,status,request_date,created_at"
+          "drug_name,quantity_requested,status,request_date,created_at",
+          2500
         ),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          2500
         ),
         safeFetch(
           "expiry_records",
-          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at"
+          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at",
+          2500
         ),
       ]);
 

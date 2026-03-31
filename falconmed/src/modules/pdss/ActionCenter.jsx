@@ -8,29 +8,9 @@ import {
   calculateSmartTransferRecommendations,
   filterActionItems,
 } from "../../utils/pdss";
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { priorityBadgeStyles } from "../../utils/badgeStyles";
 import StatCard from "../../components/StatCard";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(4000);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
 
 const priorityOrder = { high: 0, medium: 1, low: 2 };
 
@@ -80,15 +60,18 @@ export default function ActionCenter() {
       const [shortageRes, refillRes, expiryRes] = await Promise.all([
         safeFetch(
           "shortage_requests",
-          "drug_name,quantity_requested,status,request_date,created_at"
+          "drug_name,quantity_requested,status,request_date,created_at",
+          4000
         ),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          4000
         ),
         safeFetch(
           "expiry_records",
-          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at"
+          "id,drug_name,batch_no,expiry_date,quantity,notes,created_at",
+          4000
         ),
       ]);
 

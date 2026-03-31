@@ -1,29 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../../lib/supabaseClient";
 import { calculateSmartTransferRecommendations } from "../../utils/pdss";
+import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
 import StatCard from "../../components/StatCard";
-
-async function safeFetch(table, columns) {
-  if (!supabase) return { data: [], error: null };
-
-  try {
-    const { data, error } = await supabase.from(table).select(columns).limit(3000);
-    if (error) return { data: [], error };
-    return { data: data || [], error: null };
-  } catch (error) {
-    return { data: [], error };
-  }
-}
-
-function loadLocalArray(key) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(key) || "[]");
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (error) {
-    return [];
-  }
-}
 
 export default function SmartTransfers() {
   const [rows, setRows] = useState([]);
@@ -36,14 +15,16 @@ export default function SmartTransfers() {
       setMessage("");
 
       const [expiryRes, refillRes, shortageRes] = await Promise.all([
-        safeFetch("expiry_records", "drug_name,quantity,location,created_at"),
+        safeFetch("expiry_records", "drug_name,quantity,location,created_at", 3000),
         safeFetch(
           "refill_requests",
-          "drug_name,daily_usage,dispensed,quantity,request_date,created_at"
+          "drug_name,daily_usage,dispensed,quantity,request_date,created_at",
+          3000
         ),
         safeFetch(
           "shortage_requests",
-          "drug_name,quantity_requested,status,request_date,created_at"
+          "drug_name,quantity_requested,status,request_date,created_at",
+          3000
         ),
       ]);
 
