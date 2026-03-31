@@ -78,6 +78,10 @@ function formatStatusLabel(status) {
 function getAccessModeNotice(status) {
   const normalized = String(status || "").trim().toLowerCase();
 
+  if (normalized === "preview") {
+    return "Enterprise preview active — presentation-safe visibility";
+  }
+
   if (normalized === "unavailable") {
     return "Subscription unavailable — limited access mode";
   }
@@ -90,8 +94,8 @@ function getAccessModeNotice(status) {
 }
 
 export default function App() {
-  const { user, loading: authLoading, signOut } = useAuthContext();
-  const { plan, status: subscriptionStatus, loading: subscriptionLoading } = useSubscription(user);
+  const { user, loading: authLoading, signOut, isDemoMode } = useAuthContext();
+  const { plan, status: subscriptionStatus, loading: subscriptionLoading } = useSubscription(user, { isDemoMode });
   const [page, setPage] = useState("dashboard");
   const [pdssView, setPdssView] = useState("executive-dashboard");
   const [commandCenterMode, setCommandCenterMode] = useState(false);
@@ -510,6 +514,12 @@ export default function App() {
   );
 
   const isCommandCenterMode = page === "dashboard" && commandCenterMode;
+  const sessionHeadline = isDemoMode ? "Enterprise Preview" : user?.email || "Signed in";
+  const sessionPlanLabel = isDemoMode ? "Enterprise Preview" : PLAN_LABELS[plan];
+  const sessionStatusLabel = isDemoMode ? "Preview" : formatStatusLabel(subscriptionStatus);
+  const sessionHint = isDemoMode
+    ? "Presentation-safe access with expanded enterprise module visibility."
+    : getAccessModeNotice(subscriptionStatus);
 
   const handleNavigationRequest = useCallback((selection) => {
     if (!selection?.page) return;
@@ -578,7 +588,7 @@ export default function App() {
         return renderGuardedPage(
           "subscription-center",
           "Subscription Center",
-          <SubscriptionCenter plan={plan} status={subscriptionStatus} />
+          <SubscriptionCenter plan={plan} status={subscriptionStatus} isDemoMode={isDemoMode} />
         );
       case "drugsearch":
         return renderGuardedPage("drugsearch", "Drug Intelligence", <DrugSearch />);
@@ -975,14 +985,14 @@ export default function App() {
             <div style={userCardRow}>
               <div style={avatarCircle}>FM</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={userLabel}>Active Session</div>
-                <div style={userEmail}>{user?.email || "Signed in"}</div>
+                <div style={userLabel}>{isDemoMode ? "Demo Session" : "Active Session"}</div>
+                <div style={userEmail}>{sessionHeadline}</div>
                 <div style={planRow}>
-                  <span style={planBadge}>{PLAN_LABELS[plan]}</span>
-                  <span style={planStatusBadge}>{formatStatusLabel(subscriptionStatus)}</span>
+                  <span style={{ ...planBadge, ...(isDemoMode ? demoPlanBadge : null) }}>{sessionPlanLabel}</span>
+                  <span style={{ ...planStatusBadge, ...(isDemoMode ? demoStatusBadge : null) }}>{sessionStatusLabel}</span>
                 </div>
-                {getAccessModeNotice(subscriptionStatus) ? (
-                  <div style={planHint}>{getAccessModeNotice(subscriptionStatus)}</div>
+                {sessionHint ? (
+                  <div style={planHint}>{sessionHint}</div>
                 ) : null}
               </div>
             </div>
@@ -1039,6 +1049,15 @@ export default function App() {
           <div style={accessNoticeCard}>
             <div style={accessNoticeTitle}>Plan Access</div>
             <div style={accessNoticeText}>{accessNotice}</div>
+          </div>
+        ) : null}
+        {isDemoMode ? (
+          <div style={demoPreviewBanner}>
+            <div>
+              <div style={demoPreviewTitle}>Demo Session</div>
+              <div style={demoPreviewText}>Enterprise Preview unlocked for executive presentation mode.</div>
+            </div>
+            <div style={demoPreviewPill}>Read-only where available</div>
           </div>
         ) : null}
         {renderPage()}
@@ -1216,6 +1235,18 @@ const planStatusBadge = {
   fontWeight: 600,
 };
 
+const demoPlanBadge = {
+  background: "linear-gradient(135deg, rgba(250,204,21,0.2), rgba(59,130,246,0.2))",
+  color: "#fef3c7",
+  border: "1px solid rgba(250,204,21,0.34)",
+};
+
+const demoStatusBadge = {
+  background: "rgba(14,165,233,0.16)",
+  color: "#dbeafe",
+  border: "1px solid rgba(125,211,252,0.3)",
+};
+
 const planHint = {
   marginTop: "8px",
   color: "#9fb2de",
@@ -1234,6 +1265,48 @@ const signOutButton = {
   cursor: "pointer",
   fontSize: "12px",
   fontWeight: 700,
+};
+
+const demoPreviewBanner = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "16px",
+  padding: "16px 18px",
+  marginBottom: "18px",
+  borderRadius: "18px",
+  border: "1px solid #bfdbfe",
+  background: "linear-gradient(135deg, #eff6ff 0%, #dbeafe 55%, #f8fafc 100%)",
+  boxShadow: "0 18px 40px rgba(37,99,235,0.12)",
+};
+
+const demoPreviewTitle = {
+  fontSize: "12px",
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#1d4ed8",
+  marginBottom: "4px",
+};
+
+const demoPreviewText = {
+  color: "#1e3a8a",
+  fontSize: "14px",
+  fontWeight: 600,
+};
+
+const demoPreviewPill = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: "8px 12px",
+  borderRadius: "999px",
+  background: "rgba(255,255,255,0.74)",
+  color: "#1e40af",
+  border: "1px solid rgba(59,130,246,0.2)",
+  fontSize: "12px",
+  fontWeight: 700,
+  whiteSpace: "nowrap",
 };
 
 const navSectionLabel = {

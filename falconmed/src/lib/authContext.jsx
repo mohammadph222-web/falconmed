@@ -8,6 +8,9 @@ export const AuthContext = createContext({
   error: "",
   signIn: async () => ({ error: null }),
   signOut: async () => ({ error: null }),
+  isDemoMode: false,
+  enterDemoMode: async () => ({ error: null }),
+  exitDemoMode: async () => ({ error: null }),
 });
 
 export function AuthProvider({ children }) {
@@ -15,6 +18,7 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(supabaseError || "");
+  const [isDemoMode, setIsDemoMode] = useState(false);
 
   useEffect(() => {
     if (!supabase) {
@@ -64,11 +68,38 @@ export function AuthProvider({ children }) {
   };
 
   const signOut = async () => {
+    if (isDemoMode) {
+      setIsDemoMode(false);
+      setUser(null);
+      setSession(null);
+      return { error: null };
+    }
+
     if (!supabase) {
       return { error: new Error(supabaseError || "Supabase client is not configured.") };
     }
 
     return supabase.auth.signOut();
+  };
+
+  const enterDemoMode = async () => {
+    setIsDemoMode(true);
+    setUser({
+      id: "demo-user-id",
+      email: "demo@falconmed.local",
+      user_metadata: { plan: "enterprise" },
+      app_metadata: { plan: "enterprise" },
+    });
+    setSession({});
+    setError("");
+    return { error: null };
+  };
+
+  const exitDemoMode = async () => {
+    setIsDemoMode(false);
+    setUser(null);
+    setSession(null);
+    return { error: null };
   };
 
   const value = useMemo(
@@ -79,8 +110,11 @@ export function AuthProvider({ children }) {
       error,
       signIn,
       signOut,
+      isDemoMode,
+      enterDemoMode,
+      exitDemoMode,
     }),
-    [error, loading, session, user]
+    [error, isDemoMode, loading, session, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -10,6 +10,9 @@ const PLAN_KEYS = ["starter", "professional", "enterprise"];
 
 function getAccessMode(status) {
   const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "preview") {
+    return "Executive Preview";
+  }
   if (normalized === "active" || normalized === "trial" || normalized === "trialing") {
     return "Standard";
   }
@@ -18,6 +21,9 @@ function getAccessMode(status) {
 
 function getEntitlementNote(status) {
   const normalized = String(status || "").trim().toLowerCase();
+  if (normalized === "preview") {
+    return "Enterprise preview is active. Module visibility is expanded for presentation mode while subscription controls remain view-only.";
+  }
   if (normalized === "active") {
     return "Your subscription is active and access is granted by your current plan.";
   }
@@ -40,9 +46,14 @@ function getStatusLabel(status) {
     .join(" ");
 }
 
-export default function SubscriptionCenter({ plan, status }) {
+export default function SubscriptionCenter({ plan, status, isDemoMode = false }) {
   const effectivePlan = normalizePlan(plan);
   const [selectedPlan, setSelectedPlan] = useState("");
+
+  const handlePlanAction = (planKey) => {
+    if (isDemoMode) return;
+    setSelectedPlan(planKey);
+  };
 
   const moduleRows = useMemo(
     () =>
@@ -80,6 +91,7 @@ export default function SubscriptionCenter({ plan, status }) {
         <p style={subtitle}>
           Manage current entitlement visibility and prepare upgrade workflows.
         </p>
+        {isDemoMode ? <div style={previewNote}>Executive preview mode. Subscription actions are view-only in this session.</div> : null}
       </div>
 
       <div style={gridTwoCols}>
@@ -146,10 +158,15 @@ export default function SubscriptionCenter({ plan, status }) {
                   ))}
                 </div>
                 <button
-                  style={{ ...upgradeButton, ...(isCurrent ? currentButton : null) }}
-                  onClick={() => setSelectedPlan(planKey)}
+                  style={{
+                    ...upgradeButton,
+                    ...(isCurrent ? currentButton : null),
+                    ...(isDemoMode ? previewOnlyButton : null),
+                  }}
+                  onClick={() => handlePlanAction(planKey)}
+                  disabled={isDemoMode}
                 >
-                  {isCurrent ? "Manage Plan" : "Request Upgrade"}
+                  {isDemoMode ? "Preview Only" : isCurrent ? "Manage Plan" : "Request Upgrade"}
                 </button>
               </div>
             );
@@ -236,6 +253,17 @@ const subtitle = {
   color: "#64748b",
   fontSize: "14px",
   lineHeight: 1.7,
+};
+
+const previewNote = {
+  marginTop: "14px",
+  padding: "10px 12px",
+  borderRadius: "12px",
+  background: "linear-gradient(135deg, #eff6ff, #dbeafe)",
+  border: "1px solid #bfdbfe",
+  color: "#1e3a8a",
+  fontSize: "13px",
+  fontWeight: 600,
 };
 
 const gridTwoCols = {
@@ -421,6 +449,13 @@ const upgradeButton = {
 
 const currentButton = {
   background: "#0f172a",
+};
+
+const previewOnlyButton = {
+  background: "#e2e8f0",
+  color: "#475569",
+  borderColor: "#cbd5e1",
+  cursor: "not-allowed",
 };
 
 const tableWrap = {

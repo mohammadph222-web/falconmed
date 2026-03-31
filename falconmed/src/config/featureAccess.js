@@ -8,6 +8,7 @@ export const PLAN_LABELS = {
 
 export const PAGE_ACCESS = {
   dashboard: { minimumPlan: "starter", label: "Dashboard" },
+  "subscription-center": { minimumPlan: "starter", label: "Subscription Center" },
   drugsearch: { minimumPlan: "starter", label: "Drug Intelligence" },
   expiry: { minimumPlan: "starter", label: "Expiry Tracker" },
   shortage: { minimumPlan: "starter", label: "Shortage Tracker" },

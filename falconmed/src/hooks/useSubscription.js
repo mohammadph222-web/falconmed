@@ -8,7 +8,8 @@ function normalizeStatus(status) {
   return String(status || "inactive").trim().toLowerCase() || "inactive";
 }
 
-export default function useSubscription(user) {
+export default function useSubscription(user, options = {}) {
+  const { isDemoMode = false } = options;
   const [subscription, setSubscription] = useState(null);
   const [plan, setPlan] = useState("starter");
   const [status, setStatus] = useState("inactive");
@@ -21,6 +22,22 @@ export default function useSubscription(user) {
       setSubscription(null);
       setPlan("starter");
       setStatus("inactive");
+      setIsFallback(false);
+      setError("");
+      setLoading(false);
+      return;
+    }
+
+    if (isDemoMode) {
+      setSubscription({
+        id: "demo-preview-subscription",
+        user_id: user.id,
+        plan: "enterprise",
+        status: "preview",
+        created_at: null,
+      });
+      setPlan("enterprise");
+      setStatus("preview");
       setIsFallback(false);
       setError("");
       setLoading(false);
@@ -80,7 +97,7 @@ export default function useSubscription(user) {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [isDemoMode, user]);
 
   useEffect(() => {
     void loadSubscription();
