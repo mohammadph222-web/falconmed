@@ -6,7 +6,8 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const { error: authError, signIn } = useAuthContext();
+  const [demoLoading, setDemoLoading] = useState(false);
+  const { error: authError, signIn, enterDemoMode } = useAuthContext();
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -35,6 +36,23 @@ export default function Login() {
     }
 
     setLoading(false);
+  };
+
+  const handleDemoMode = async (e) => {
+    e.preventDefault();
+    setDemoLoading(true);
+    setMessage("");
+
+    try {
+      const { error } = await enterDemoMode();
+      if (error) {
+        setMessage(error.message);
+      }
+    } catch (err) {
+      setMessage("Error entering demo mode: " + (err?.message || "Unknown error"));
+    }
+
+    setDemoLoading(false);
   };
 
   return (
@@ -84,6 +102,16 @@ export default function Login() {
               {loading ? "Signing in..." : "Login"}
             </button>
           </form>
+
+          <button
+            type="button"
+            disabled={demoLoading}
+            onClick={handleDemoMode}
+            style={demoButton}
+          >
+            {demoLoading ? "Entering Demo..." : "Enter Demo Mode"}
+          </button>
+          <p style={demoHelperText}>Preview FalconMed without signing in</p>
 
           {message && (
             <div style={messageBox}>
@@ -204,6 +232,27 @@ const button = {
   color: "white",
   cursor: "pointer",
   fontWeight: "bold",
+};
+
+const demoButton = {
+  width: "100%",
+  marginTop: "10px",
+  padding: "12px 16px",
+  fontSize: "16px",
+  borderRadius: "12px",
+  border: "1px solid #dbeafe",
+  background: "#f0f9ff",
+  color: "#1d4ed8",
+  cursor: "pointer",
+  fontWeight: "600",
+};
+
+const demoHelperText = {
+  marginTop: "8px",
+  marginBottom: "0",
+  fontSize: "12px",
+  color: "#94a3b8",
+  textAlign: "center",
 };
 
 const messageBox = {
