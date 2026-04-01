@@ -249,6 +249,92 @@ export default function InventoryManagementPage() {
     return "";
   };
 
+  const insertImportedInventoryRow = async ({
+    pharmacyId,
+    drugCode,
+    drugName,
+    brandName,
+    genericName,
+    barcodeValue,
+    quantityValue,
+    unitCostValue,
+    expiryDateValue,
+    batchNoValue,
+  }) => {
+    if (!supabase) {
+      return { error: new Error("Database is not configured."), usedVariant: null };
+    }
+
+    const baseCommon = {
+      pharmacy_id: pharmacyId,
+      drug_code: drugCode,
+      drug_name: drugName,
+      brand_name: brandName || null,
+      generic_name: genericName || null,
+      barcode: barcodeValue || null,
+      unit_cost: unitCostValue,
+      expiry_date: expiryDateValue,
+      created_at: new Date().toISOString(),
+    };
+
+    const variants = [
+      {
+        name: "quantity+batch_no",
+        payload: {
+          ...baseCommon,
+          quantity: quantityValue,
+          batch_no: batchNoValue,
+        },
+      },
+      {
+        name: "current_stock_qty+batch_no",
+        payload: {
+          ...baseCommon,
+          current_stock_qty: quantityValue,
+          batch_no: batchNoValue,
+        },
+      },
+      {
+        name: "quantity+batch",
+        payload: {
+          ...baseCommon,
+          quantity: quantityValue,
+          batch: batchNoValue,
+        },
+      },
+      {
+        name: "current_stock_qty+batch",
+        payload: {
+          ...baseCommon,
+          current_stock_qty: quantityValue,
+          batch: batchNoValue,
+        },
+      },
+    ];
+
+    let lastError = null;
+
+    for (const variant of variants) {
+      const mutation = await supabase.from("pharmacy_inventory").insert([variant.payload]);
+      if (!mutation.error) {
+        return { error: null, usedVariant: variant.name };
+      }
+
+      lastError = mutation.error;
+      const message = String(mutation.error.message || "").toLowerCase();
+      const isSchemaMismatch =
+        message.includes("column") ||
+        message.includes("schema cache") ||
+        message.includes("could not find");
+
+      if (!isSchemaMismatch) {
+        return { error: mutation.error, usedVariant: variant.name };
+      }
+    }
+
+    return { error: lastError, usedVariant: null };
+  };
+
   function resetForm() {
     setDrugCode("");
     setDrug("");
@@ -299,13 +385,20 @@ export default function InventoryManagementPage() {
       let importedRows = 0;
       let skippedRows = 0;
       const missingDrugCodes = new Set();
+      const insertErrors = [];
+
+      const selectedPharmacy = String(selectedPharmacyId || "").trim();
+      if (!selectedPharmacy) {
+        setError("Please select a pharmacy before CSV import.");
+        setImportBusy(false);
+        return;
+      }
 
       for (const row of rows) {
         const code = getCsvValue(row, ["drug_code", "code"]);
         const quantityRaw = getCsvValue(row, ["current_stock_qty", "quantity", "qty"]);
         const batchNo = getCsvValue(row, ["batch_no", "batch"]);
         const expiryDate = getCsvValue(row, ["expiry_date", "expiry"]);
-        const pharmacyName = getCsvValue(row, ["pharmacy_name", "pharmacy", "site"]);
         const overrideCostRaw = getCsvValue(row, ["unit_cost", "cost"]);
 
         const quantity = Number(quantityRaw);
@@ -323,49 +416,34 @@ export default function InventoryManagementPage() {
 
         const autofill = getMasterAutofill(matchedDrug, code);
 
-        const resolvedPharmacyId = pharmacyName
-          ? pharmacyNameMap.get(pharmacyName.toLowerCase())
-          : String(selectedPharmacyId || "");
-
-        if (!resolvedPharmacyId) {
-          skippedRows += 1;
-          continue;
-        }
-
         const overrideCost = parseUnitCost(overrideCostRaw);
         const autoCost = parseUnitCost(autofill.unit_cost);
         const finalUnitCost = overrideCost ?? autoCost ?? 0;
 
-        const payload = {
-          pharmacy_id: resolvedPharmacyId,
-          drug_code: autofill.drug_code,
-          drug_name: autofill.drug_name || autofill.brand_name || autofill.generic_name || code,
-          brand_name: autofill.brand_name || null,
-          generic_name: autofill.generic_name || null,
-          barcode: autofill.barcode || null,
-          quantity,
-          unit_cost: finalUnitCost,
-          expiry_date: expiryDate,
-          batch_no: batchNo,
-        };
+        const resolvedDrugName =
+          autofill.drug_name || autofill.brand_name || autofill.generic_name || code;
 
-        const legacyPayload = {
-          pharmacy_id: resolvedPharmacyId,
-          drug: payload.drug_name,
-          barcode: payload.barcode,
-          quantity,
-          unit_cost: finalUnitCost,
-          expiry_date: expiryDate,
-          batch: batchNo,
-        };
-
-        const mutation = await runInventoryMutation({
-          editingRowId: null,
-          payload,
-          legacyPayload,
+        const insertResult = await insertImportedInventoryRow({
+          pharmacyId: selectedPharmacy,
+          drugCode: autofill.drug_code,
+          drugName: resolvedDrugName,
+          brandName: autofill.brand_name,
+          genericName: autofill.generic_name,
+          barcodeValue: autofill.barcode,
+          quantityValue: quantity,
+          unitCostValue: finalUnitCost,
+          expiryDateValue: expiryDate,
+          batchNoValue: batchNo,
         });
 
-        if (mutation.error) {
+        if (insertResult.error) {
+          console.error("CSV import row insert failed", {
+            code,
+            row,
+            error: insertResult.error,
+            variantTried: insertResult.usedVariant,
+          });
+          insertErrors.push(`${code}: ${insertResult.error.message || "Insert failed"}`);
           skippedRows += 1;
           continue;
         }
@@ -382,9 +460,13 @@ export default function InventoryManagementPage() {
 
       if (importedRows > 0) {
         setSuccess(`Import complete. ${importedRows} row(s) imported, ${skippedRows} row(s) skipped.`);
-        fetchInventory(selectedPharmacyId);
+        await fetchInventory(selectedPharmacyId);
       } else {
         setError("No rows were imported. Please check drug_code and required fields.");
+      }
+
+      if (insertErrors.length > 0) {
+        console.error("CSV import insert errors:", insertErrors);
       }
     } catch (importError) {
       console.error("CSV import failed:", importError);
@@ -452,12 +534,12 @@ export default function InventoryManagementPage() {
 
     const legacyPayload = {
       pharmacy_id: selectedPharmacyId,
-      drug: resolvedDrugName,
+      drug_name: resolvedDrugName,
       barcode: autofill.barcode || null,
       quantity: Number(qty) || 0,
       unit_cost: resolvedUnitCost,
       expiry_date: expiry || null,
-      batch: batch.trim() || null,
+      batch_no: batch.trim() || null,
     };
 
     const mutation = await runInventoryMutation({
@@ -1178,6 +1260,37 @@ export default function InventoryManagementPage() {
     letterSpacing: "0.03em",
   };
 
+  const guideText = {
+    fontSize: "13px",
+    color: "#5a6a86",
+    lineHeight: 1.6,
+    marginBottom: "10px",
+  };
+
+  const smallNote = {
+    marginTop: "8px",
+    fontSize: "12px",
+    color: "#64748b",
+  };
+
+  const templateSample = [
+    "drug_code,current_stock_qty,batch_no,expiry_date",
+    "H03-4489-00178-02,25,BATCH001,2027-12-31",
+    "N05-5258-05575-01,337,BATCH001,2027-12-31",
+  ].join("\n");
+
+  const handleDownloadCsvTemplate = () => {
+    const blob = new Blob([templateSample], { type: "text/csv;charset=utf-8;" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", "falconmed_inventory_template.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
   const bannerError = {
     background: "#fff1f2",
     color: "#991b1b",
@@ -1330,14 +1443,17 @@ export default function InventoryManagementPage() {
         <form onSubmit={handleSubmit}>
           <div style={gridStyle}>
             <div>
-              <label style={labelStyle}>Drug Code</label>
+              <label style={labelStyle}>Search Drug (code or name)</label>
               <div style={{ position: "relative" }}>
                 <input
                   value={drugCode}
-                  onChange={(e) => setDrugCode(e.target.value)}
+                  onChange={(e) => {
+                    setDrugCode(e.target.value);
+                    setShowDrugDropdown(true);
+                  }}
                   onFocus={() => setShowDrugDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDrugDropdown(false), 160)}
-                  placeholder="e.g. H03-4489-00178-02"
+                  placeholder="Search by code, brand, or generic"
                   style={inputStyle}
                 />
                 <div style={fieldHint}>Enter drug code to auto-fill drug details</div>
@@ -1419,7 +1535,7 @@ export default function InventoryManagementPage() {
             </div>
 
             <div>
-              <label style={labelStyle}>Current Stock Qty</label>
+              <label style={labelStyle}>Quantity Added</label>
               <input
                 type="number"
                 value={qty}
@@ -1462,41 +1578,32 @@ export default function InventoryManagementPage() {
       </div>
 
       <div style={cardStyle}>
-        <div style={sectionTitle}>CSV Import (Smart Data Entry)</div>
-        <div style={{ fontSize: "13px", color: "#5a6a86", marginBottom: "10px" }}>
-          Required columns: drug_code, current_stock_qty, batch_no, expiry_date. Optional: pharmacy_name, unit_cost.
+        <div style={sectionTitle}>Bulk Upload (Admin Setup)</div>
+        <div style={guideText}>
+          For large inventory uploads, use the prepared CSV template and import directly through Supabase Table Editor. Use Smart Entry for daily operations.
         </div>
-
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => setImportFile(e.target.files?.[0] || null)}
-            style={inputStyle}
-          />
-          <button
-            type="button"
-            style={buttonStyle}
-            onClick={handleBulkImport}
-            disabled={importBusy}
-          >
-            {importBusy ? "Importing..." : "Import CSV"}
+          <button type="button" style={buttonStyle} onClick={handleDownloadCsvTemplate}>
+            Download CSV Template
           </button>
+          <a
+            href="https://supabase.com/docs/guides/database/tables#importing-data"
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              ...secondaryButtonStyle,
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            How to Import in Supabase
+          </a>
         </div>
-
-        <div style={{ marginTop: "10px", fontSize: "12px", color: "#64748b" }}>
-          Example: drug_code,current_stock_qty,batch_no,expiry_date
+        <div style={smallNote}>
+          Recommended for first-time onboarding and large data uploads.
         </div>
-
-        {importSummary ? (
-          <div style={importSummaryCard}>
-            <div style={importSummaryRow}>Imported rows: {importSummary.importedRows}</div>
-            <div style={importSummaryRow}>Skipped rows: {importSummary.skippedRows}</div>
-            <div style={importSummaryRow}>
-              Missing drug codes: {importSummary.missingDrugCodes.length > 0 ? importSummary.missingDrugCodes.join(", ") : "None"}
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <div style={cardStyle}>
