@@ -5,6 +5,8 @@ const DRUG_MASTER_COLUMNS = [
   "drug_code",
   "brand_name",
   "generic_name",
+  "barcode",
+  "unit_cost",
   "strength",
   "dosage_form",
   "package_size",
@@ -95,6 +97,8 @@ export function normalizeDrugMasterRecord(rawRow) {
     generic_name: cleanText(
       getValue(row, ["generic_name", "genericname", "Generic_Name", "generic", "scientificname"])
     ),
+    barcode: cleanText(getValue(row, ["barcode", "barcode_no", "bar_code", "ean", "gtin"])),
+    unit_cost: cleanText(getValue(row, ["unit_cost", "unitcost", "cost_price", "cost"])),
     strength: cleanText(getValue(row, ["strength"])),
     dosage_form: cleanText(getValue(row, ["dosage_form", "dosageform", "dosage", "form"])),
     package_size: cleanText(getValue(row, ["package_size", "packagesize"])),
@@ -202,9 +206,14 @@ export function searchDrugMaster(drugs, query, limit = 25) {
 
   return (drugs || [])
     .filter((drug) => {
+      const code = cleanText(drug.drug_code).toLowerCase();
       const brand = cleanText(drug.brand_name).toLowerCase();
       const generic = cleanText(drug.generic_name).toLowerCase();
-      return brand.includes(normalizedQuery) || generic.includes(normalizedQuery);
+      return (
+        code.includes(normalizedQuery) ||
+        brand.includes(normalizedQuery) ||
+        generic.includes(normalizedQuery)
+      );
     })
     .slice(0, limit);
 }

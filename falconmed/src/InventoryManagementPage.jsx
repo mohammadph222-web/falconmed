@@ -6,10 +6,15 @@ import { supabase } from "./lib/supabaseClient";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
 import {
   getDrugDisplayName,
-  getDrugUnitPrice,
   loadDrugMaster,
   searchDrugMaster,
 } from "./utils/drugMaster";
+import {
+  buildDrugCodeMap,
+  findDrugByCode,
+  getMasterAutofill,
+  parseCsvText,
+} from "./utils/drugMasterLookup";
 import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
 
 function formatCurrency(value) {
@@ -24,12 +29,20 @@ export default function InventoryManagementPage() {
   const [allDrugs, setAllDrugs] = useState([]);
   const [showDrugDropdown, setShowDrugDropdown] = useState(false);
 
+  const [drugCode, setDrugCode] = useState("");
   const [drug, setDrug] = useState("");
+  const [brandName, setBrandName] = useState("");
+  const [genericName, setGenericName] = useState("");
   const [barcode, setBarcode] = useState("");
   const [qty, setQty] = useState("");
   const [cost, setCost] = useState("");
   const [expiry, setExpiry] = useState("");
   const [batch, setBatch] = useState("");
+  const [masterLookupStatus, setMasterLookupStatus] = useState("");
+  const [masterLookupTone, setMasterLookupTone] = useState("neutral");
+  const [importFile, setImportFile] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importSummary, setImportSummary] = useState(null);
 
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -136,16 +149,249 @@ export default function InventoryManagementPage() {
     setRecentTransactions(data || []);
   }
 
+  const drugCodeMap = useMemo(() => buildDrugCodeMap(allDrugs), [allDrugs]);
+
+  const pharmacyNameMap = useMemo(() => {
+    const map = new Map();
+    pharmacies.forEach((pharmacy) => {
+      const normalized = String(pharmacy?.name || "").trim().toLowerCase();
+      if (!normalized) return;
+      map.set(normalized, String(pharmacy.id));
+    });
+    return map;
+  }, [pharmacies]);
+
+  useEffect(() => {
+    const code = String(drugCode || "").trim();
+
+    if (!code) {
+      setDrug("");
+      setBrandName("");
+      setGenericName("");
+      setBarcode("");
+      setCost("");
+      setMasterLookupStatus("");
+      setMasterLookupTone("neutral");
+      return;
+    }
+
+    const matchedDrug = findDrugByCode(code, drugCodeMap);
+    if (!matchedDrug) {
+      setDrug("");
+      setBrandName("");
+      setGenericName("");
+      setBarcode("");
+      setCost("");
+      setMasterLookupStatus("Drug code not found");
+      setMasterLookupTone("error");
+      return;
+    }
+
+    const autofill = getMasterAutofill(matchedDrug, code);
+    setDrug(autofill.drug_name);
+    setBrandName(autofill.brand_name);
+    setGenericName(autofill.generic_name);
+    setBarcode(autofill.barcode);
+    setCost(autofill.unit_cost);
+    setMasterLookupStatus("Drug found in master database");
+    setMasterLookupTone("success");
+  }, [drugCode, drugCodeMap]);
+
+  const runInventoryMutation = async ({ editingRowId, payload, legacyPayload }) => {
+    if (!supabase) {
+      return { error: new Error("Database is not configured.") };
+    }
+
+    const executeMutation = async (body) => {
+      if (editingRowId) {
+        return supabase.from("pharmacy_inventory").update(body).eq("id", editingRowId);
+      }
+
+      const insertBody = {
+        ...body,
+        created_at: new Date().toISOString(),
+      };
+
+      return supabase.from("pharmacy_inventory").insert([insertBody]);
+    };
+
+    let mutation = await executeMutation(payload);
+
+    if (mutation.error) {
+      const message = String(mutation.error.message || "").toLowerCase();
+      const shouldFallback =
+        message.includes("column") ||
+        message.includes("schema cache") ||
+        message.includes("drug_code") ||
+        message.includes("brand_name") ||
+        message.includes("generic_name");
+
+      if (shouldFallback) {
+        mutation = await executeMutation(legacyPayload);
+      }
+    }
+
+    return mutation;
+  };
+
+  const parseUnitCost = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+  };
+
+  const getCsvValue = (row, keys) => {
+    for (const key of keys) {
+      const value = row?.[key];
+      if (value !== undefined && value !== null && String(value).trim() !== "") {
+        return String(value).trim();
+      }
+    }
+    return "";
+  };
+
   function resetForm() {
+    setDrugCode("");
     setDrug("");
+    setBrandName("");
+    setGenericName("");
     setBarcode("");
     setQty("");
     setCost("");
     setExpiry("");
     setBatch("");
     setEditingId(null);
+    setMasterLookupStatus("");
+    setMasterLookupTone("neutral");
     setError("");
     setSuccess("");
+  }
+
+  async function handleBulkImport() {
+    if (!importFile) {
+      setError("Please choose a CSV file to import.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setImportSummary(null);
+    setImportBusy(true);
+
+    try {
+      const csvText = await importFile.text();
+      const { rows, headers } = parseCsvText(csvText);
+
+      const requiredHeaders = ["drug_code", "current_stock_qty", "batch_no", "expiry_date"];
+      const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
+
+      if (missingHeaders.length > 0) {
+        setError(`Missing required CSV column(s): ${missingHeaders.join(", ")}`);
+        setImportBusy(false);
+        return;
+      }
+
+      if (rows.length === 0) {
+        setError("CSV file has no data rows.");
+        setImportBusy(false);
+        return;
+      }
+
+      let importedRows = 0;
+      let skippedRows = 0;
+      const missingDrugCodes = new Set();
+
+      for (const row of rows) {
+        const code = getCsvValue(row, ["drug_code", "code"]);
+        const quantityRaw = getCsvValue(row, ["current_stock_qty", "quantity", "qty"]);
+        const batchNo = getCsvValue(row, ["batch_no", "batch"]);
+        const expiryDate = getCsvValue(row, ["expiry_date", "expiry"]);
+        const pharmacyName = getCsvValue(row, ["pharmacy_name", "pharmacy", "site"]);
+        const overrideCostRaw = getCsvValue(row, ["unit_cost", "cost"]);
+
+        const quantity = Number(quantityRaw);
+        if (!code || !batchNo || !expiryDate || !Number.isFinite(quantity) || quantity < 0) {
+          skippedRows += 1;
+          continue;
+        }
+
+        const matchedDrug = findDrugByCode(code, drugCodeMap);
+        if (!matchedDrug) {
+          missingDrugCodes.add(code);
+          skippedRows += 1;
+          continue;
+        }
+
+        const autofill = getMasterAutofill(matchedDrug, code);
+
+        const resolvedPharmacyId = pharmacyName
+          ? pharmacyNameMap.get(pharmacyName.toLowerCase())
+          : String(selectedPharmacyId || "");
+
+        if (!resolvedPharmacyId) {
+          skippedRows += 1;
+          continue;
+        }
+
+        const overrideCost = parseUnitCost(overrideCostRaw);
+        const autoCost = parseUnitCost(autofill.unit_cost);
+        const finalUnitCost = overrideCost ?? autoCost ?? 0;
+
+        const payload = {
+          pharmacy_id: resolvedPharmacyId,
+          drug_code: autofill.drug_code,
+          drug_name: autofill.drug_name || autofill.brand_name || autofill.generic_name || code,
+          brand_name: autofill.brand_name || null,
+          generic_name: autofill.generic_name || null,
+          barcode: autofill.barcode || null,
+          quantity,
+          unit_cost: finalUnitCost,
+          expiry_date: expiryDate,
+          batch_no: batchNo,
+        };
+
+        const legacyPayload = {
+          pharmacy_id: resolvedPharmacyId,
+          drug: payload.drug_name,
+          barcode: payload.barcode,
+          quantity,
+          unit_cost: finalUnitCost,
+          expiry_date: expiryDate,
+          batch: batchNo,
+        };
+
+        const mutation = await runInventoryMutation({
+          editingRowId: null,
+          payload,
+          legacyPayload,
+        });
+
+        if (mutation.error) {
+          skippedRows += 1;
+          continue;
+        }
+
+        importedRows += 1;
+      }
+
+      const missingCodesList = Array.from(missingDrugCodes);
+      setImportSummary({
+        importedRows,
+        skippedRows,
+        missingDrugCodes: missingCodesList,
+      });
+
+      if (importedRows > 0) {
+        setSuccess(`Import complete. ${importedRows} row(s) imported, ${skippedRows} row(s) skipped.`);
+        fetchInventory(selectedPharmacyId);
+      } else {
+        setError("No rows were imported. Please check drug_code and required fields.");
+      }
+    } catch (importError) {
+      console.error("CSV import failed:", importError);
+      setError("Failed to import CSV file.");
+    }
+
+    setImportBusy(false);
   }
 
   async function handleSubmit(e) {
@@ -159,8 +405,15 @@ export default function InventoryManagementPage() {
       return;
     }
 
-    if (!drug.trim()) {
-      setError("Please enter drug name.");
+    const normalizedDrugCode = String(drugCode || "").trim();
+    if (!normalizedDrugCode) {
+      setError("Drug code is required.");
+      return;
+    }
+
+    const matchedDrug = findDrugByCode(normalizedDrugCode, drugCodeMap);
+    if (!matchedDrug) {
+      setError("Invalid drug code. Please select a valid code from master data.");
       return;
     }
 
@@ -179,50 +432,39 @@ export default function InventoryManagementPage() {
       return;
     }
 
+    const autofill = getMasterAutofill(matchedDrug, normalizedDrugCode);
+    const resolvedDrugName =
+      autofill.drug_name || autofill.brand_name || autofill.generic_name || normalizedDrugCode;
+    const resolvedUnitCost = parseUnitCost(autofill.unit_cost) ?? 0;
+
     const payload = {
       pharmacy_id: selectedPharmacyId,
-      drug_name: drug.trim(),
-      barcode: barcode.trim() || null,
+      drug_code: autofill.drug_code,
+      drug_name: resolvedDrugName,
+      brand_name: autofill.brand_name || null,
+      generic_name: autofill.generic_name || null,
+      barcode: autofill.barcode || null,
       quantity: Number(qty) || 0,
-      unit_cost: Number(cost) || 0,
+      unit_cost: resolvedUnitCost,
       expiry_date: expiry || null,
       batch_no: batch.trim() || null,
     };
 
     const legacyPayload = {
       pharmacy_id: selectedPharmacyId,
-      drug: drug.trim(),
-      barcode: barcode.trim() || null,
+      drug: resolvedDrugName,
+      barcode: autofill.barcode || null,
       quantity: Number(qty) || 0,
-      unit_cost: Number(cost) || 0,
+      unit_cost: resolvedUnitCost,
       expiry_date: expiry || null,
       batch: batch.trim() || null,
     };
 
-    const executeMutation = async (body) => {
-      if (editingId) {
-        return supabase.from("pharmacy_inventory").update(body).eq("id", editingId);
-      }
-
-      const insertBody = {
-        ...body,
-        created_at: new Date().toISOString(),
-      };
-
-      return supabase.from("pharmacy_inventory").insert([insertBody]);
-    };
-
-    let mutation = await executeMutation(payload);
-
-    if (mutation.error) {
-      const message = String(mutation.error.message || "").toLowerCase();
-      const missingCanonicalColumns =
-        message.includes("drug_name") || message.includes("batch_no");
-
-      if (missingCanonicalColumns) {
-        mutation = await executeMutation(legacyPayload);
-      }
-    }
+    const mutation = await runInventoryMutation({
+      editingRowId: editingId,
+      payload,
+      legacyPayload,
+    });
 
     if (mutation.error) {
       console.error("Inventory insert/update error:", mutation.error);
@@ -240,22 +482,20 @@ export default function InventoryManagementPage() {
     const actionVerb = editingId ? "Updated" : "Added";
     const movementType = editingId ? "UPDATE" : "ADD";
     const quantityNumber = Number(qty) || 0;
-    const barcodeValue = barcode.trim() || "-";
     const batchValue = batch.trim() || "-";
     const expiryValue = expiry || "-";
-    const unitCostValue = Number(cost) || 0;
     const nowIso = new Date().toISOString();
-    const referenceValue = `Inventory ${movementType} - ${drug.trim()}`;
+    const referenceValue = `Inventory ${movementType} - ${resolvedDrugName}`;
 
     const txSummary =
       `${movementType} inventory transaction | ` +
-      `Drug: ${drug.trim()} | ` +
+      `Drug: ${resolvedDrugName} | ` +
       `Qty: ${quantityNumber} | ` +
-      `Barcode: ${barcodeValue} | ` +
+      `Barcode: ${autofill.barcode || "-"} | ` +
       `Pharmacy: ${pharmacyName} | ` +
       `Batch: ${batchValue} | ` +
       `Expiry: ${expiryValue} | ` +
-      `Unit cost: ${unitCostValue}`;
+      `Unit cost: ${resolvedUnitCost}`;
 
     try {
       const { error: activityError } = await supabase.from("activity_log").insert([
@@ -276,8 +516,8 @@ export default function InventoryManagementPage() {
 
     try {
       const baseMovement = {
-        drug_name: drug.trim(),
-        barcode: barcode.trim() || null,
+        drug_name: resolvedDrugName,
+        barcode: autofill.barcode || null,
         quantity: quantityNumber,
         movement_type: movementType,
         notes: txSummary,
@@ -342,7 +582,10 @@ export default function InventoryManagementPage() {
 
   function handleEdit(item) {
     setEditingId(item.id);
+    setDrugCode(item.drug_code || "");
     setDrug(item.drug_name || item.drug || "");
+    setBrandName(item.brand_name || "");
+    setGenericName(item.generic_name || "");
     setBarcode(item.barcode || "");
     setQty(item.quantity ?? "");
     setCost(item.unit_cost ?? "");
@@ -483,7 +726,10 @@ export default function InventoryManagementPage() {
     );
   }, [inventory]);
 
-  const filteredDrugs = useMemo(() => searchDrugMaster(allDrugs, drug, 20), [allDrugs, drug]);
+  const filteredDrugs = useMemo(
+    () => searchDrugMaster(allDrugs, drugCode, 20),
+    [allDrugs, drugCode]
+  );
 
   const animTotalItems = useAnimatedCounter(totalItems);
   const animTotalValue = useAnimatedCounter(totalValue);
@@ -663,13 +909,7 @@ export default function InventoryManagementPage() {
   }, [inventory, loading]);
 
   const handleDrugSelect = (selectedDrug) => {
-    const displayName = getDrugDisplayName(selectedDrug);
-    const unitPrice = getDrugUnitPrice(selectedDrug, "pharmacy");
-
-    setDrug(displayName);
-    if (unitPrice !== null && !cost) {
-      setCost(String(unitPrice));
-    }
+    setDrugCode(selectedDrug?.drug_code || "");
     setShowDrugDropdown(false);
   };
 
@@ -749,6 +989,57 @@ export default function InventoryManagementPage() {
     color: "#0b1530",
     fontFamily: "'Segoe UI', 'Inter', Arial, sans-serif",
     boxShadow: "inset 0 1px 2px rgba(15,23,42,0.04)",
+  };
+
+  const readonlyInputStyle = {
+    background: "#f8fafc",
+    color: "#334155",
+    cursor: "not-allowed",
+  };
+
+  const fieldHint = {
+    marginTop: "6px",
+    fontSize: "11px",
+    color: "#64748b",
+  };
+
+  const lookupStatus = {
+    marginTop: "8px",
+    display: "inline-flex",
+    alignItems: "center",
+    borderRadius: "999px",
+    fontSize: "11px",
+    fontWeight: 600,
+    padding: "3px 8px",
+    border: "1px solid #cbd5e1",
+    background: "#f8fafc",
+    color: "#334155",
+  };
+
+  const lookupSuccess = {
+    background: "#ecfdf3",
+    color: "#166534",
+    border: "1px solid #bbf7d0",
+  };
+
+  const lookupError = {
+    background: "#fff1f2",
+    color: "#991b1b",
+    border: "1px solid #fecdd3",
+  };
+
+  const importSummaryCard = {
+    marginTop: "12px",
+    border: "1px solid #dbe7f5",
+    borderRadius: "12px",
+    padding: "12px",
+    background: "#f8fbff",
+  };
+
+  const importSummaryRow = {
+    fontSize: "13px",
+    color: "#334155",
+    lineHeight: 1.6,
   };
 
   const buttonStyle = {
@@ -1033,22 +1324,33 @@ export default function InventoryManagementPage() {
 
       <div style={cardStyle}>
         <div style={sectionTitle}>
-          {editingId ? "Edit Drug Record" : "Add Drug to Inventory"}
+          {editingId ? "Edit Inventory Record" : "Add Inventory Entry"}
         </div>
 
         <form onSubmit={handleSubmit}>
           <div style={gridStyle}>
             <div>
-              <label style={labelStyle}>Drug Name</label>
+              <label style={labelStyle}>Drug Code</label>
               <div style={{ position: "relative" }}>
                 <input
-                  value={drug}
-                  onChange={(e) => setDrug(e.target.value)}
+                  value={drugCode}
+                  onChange={(e) => setDrugCode(e.target.value)}
                   onFocus={() => setShowDrugDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDrugDropdown(false), 160)}
-                  placeholder="Search by brand or generic"
+                  placeholder="e.g. H03-4489-00178-02"
                   style={inputStyle}
                 />
+                <div style={fieldHint}>Enter drug code to auto-fill drug details</div>
+                {masterLookupStatus ? (
+                  <div
+                    style={{
+                      ...lookupStatus,
+                      ...(masterLookupTone === "success" ? lookupSuccess : masterLookupTone === "error" ? lookupError : null),
+                    }}
+                  >
+                    {masterLookupStatus}
+                  </div>
+                ) : null}
 
                 {showDrugDropdown && filteredDrugs.length > 0 ? (
                   <div style={dropdownStyle}>
@@ -1062,7 +1364,7 @@ export default function InventoryManagementPage() {
                         }}
                       >
                         <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "14px" }}>
-                          {getDrugDisplayName(result)}
+                          {result.drug_code || "No code"} - {getDrugDisplayName(result)}
                         </div>
                         <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
                           {result.generic_name || "Generic name unavailable"}
@@ -1075,23 +1377,32 @@ export default function InventoryManagementPage() {
             </div>
 
             <div>
-              <label style={labelStyle}>Barcode</label>
+              <label style={labelStyle}>Brand Name</label>
               <input
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-                placeholder="Barcode (optional)"
-                style={inputStyle}
+                value={brandName}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
               />
             </div>
 
             <div>
-              <label style={labelStyle}>Quantity</label>
+              <label style={labelStyle}>Generic Name</label>
               <input
-                type="number"
-                value={qty}
-                onChange={(e) => setQty(e.target.value)}
-                placeholder="e.g. 100"
-                style={inputStyle}
+                value={genericName}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Barcode</label>
+              <input
+                value={barcode}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
               />
             </div>
 
@@ -1101,8 +1412,19 @@ export default function InventoryManagementPage() {
                 type="number"
                 step="0.01"
                 value={cost}
-                onChange={(e) => setCost(e.target.value)}
-                placeholder="e.g. 12.50"
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Current Stock Qty</label>
+              <input
+                type="number"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
+                placeholder="e.g. 100"
                 style={inputStyle}
               />
             </div>
@@ -1130,13 +1452,51 @@ export default function InventoryManagementPage() {
 
           <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
             <button type="submit" style={buttonStyle}>
-              {editingId ? "Update Record" : "Add Drug"}
+              {editingId ? "Update Record" : "Save Entry"}
             </button>
             <button type="button" style={secondaryButtonStyle} onClick={resetForm}>
               Clear
             </button>
           </div>
         </form>
+      </div>
+
+      <div style={cardStyle}>
+        <div style={sectionTitle}>CSV Import (Smart Data Entry)</div>
+        <div style={{ fontSize: "13px", color: "#5a6a86", marginBottom: "10px" }}>
+          Required columns: drug_code, current_stock_qty, batch_no, expiry_date. Optional: pharmacy_name, unit_cost.
+        </div>
+
+        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => setImportFile(e.target.files?.[0] || null)}
+            style={inputStyle}
+          />
+          <button
+            type="button"
+            style={buttonStyle}
+            onClick={handleBulkImport}
+            disabled={importBusy}
+          >
+            {importBusy ? "Importing..." : "Import CSV"}
+          </button>
+        </div>
+
+        <div style={{ marginTop: "10px", fontSize: "12px", color: "#64748b" }}>
+          Example: drug_code,current_stock_qty,batch_no,expiry_date
+        </div>
+
+        {importSummary ? (
+          <div style={importSummaryCard}>
+            <div style={importSummaryRow}>Imported rows: {importSummary.importedRows}</div>
+            <div style={importSummaryRow}>Skipped rows: {importSummary.skippedRows}</div>
+            <div style={importSummaryRow}>
+              Missing drug codes: {importSummary.missingDrugCodes.length > 0 ? importSummary.missingDrugCodes.join(", ") : "None"}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div style={cardStyle}>
