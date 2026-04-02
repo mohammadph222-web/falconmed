@@ -53,6 +53,24 @@ const initialForm = {
   notes: "",
 };
 
+function buildUniquePharmacyOptions(rows = []) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!id || map.has(id)) continue;
+    map.set(id, {
+      id,
+      name: String(row?.name || "").trim(),
+      location: String(row?.location || "").trim(),
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
+}
+
 function formatDate(value) {
   if (!value) return "-";
   const d = new Date(value);
@@ -69,7 +87,25 @@ export default function StockMovementSystem() {
   const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
   const [drugOptions, setDrugOptions] = useState([]);
   const [pharmacyOptions, setPharmacyOptions] = useState([]);
-  const [pharmacyIdMap, setPharmacyIdMap] = useState(new Map());
+
+  const pharmacyMap = useMemo(() => {
+    const map = new Map();
+    pharmacyOptions.forEach((row) => {
+      const id = String(row?.id || "").trim();
+      if (!id || map.has(id)) return;
+      map.set(id, {
+        id,
+        name: String(row?.name || "").trim(),
+        location: String(row?.location || "").trim(),
+      });
+    });
+    return map;
+  }, [pharmacyOptions]);
+
+  const getPharmacyNameById = (pharmacyId) => {
+    const id = String(pharmacyId || "").trim();
+    return pharmacyMap.get(id)?.name || "Unknown Pharmacy";
+  };
 
   const isTransferType =
     formData.movement_type === "Transfer Out" || formData.movement_type === "Transfer In";
@@ -205,26 +241,16 @@ export default function StockMovementSystem() {
     try {
       const { data, error } = await supabase
         .from("pharmacies")
-        .select("id, name")
+        .select("id, name, location")
         .limit(2000);
 
       if (!error && Array.isArray(data)) {
-        const distinct = [...new Set(data.map((r) => String(r?.name || "").trim()).filter(Boolean))]
-          .sort((a, b) => a.localeCompare(b));
-        setPharmacyOptions(distinct);
-        const idMap = new Map();
-        data.forEach((r) => {
-          const name = String(r?.name || "").trim();
-          if (name && r?.id != null) idMap.set(name, r.id);
-        });
-        setPharmacyIdMap(idMap);
+        setPharmacyOptions(buildUniquePharmacyOptions(data));
       } else {
         setPharmacyOptions([]);
-        setPharmacyIdMap(new Map());
       }
     } catch {
       setPharmacyOptions([]);
-      setPharmacyIdMap(new Map());
     }
   };
 
@@ -239,10 +265,9 @@ export default function StockMovementSystem() {
     return drugOptions.filter((name) => name.toLowerCase().includes(query));
   }, [drugOptions, formData.drug_name]);
 
-  const applyInventoryUpdate = async (pharmacyName, drugName, qty, op, batchNo, expiryDate) => {
-    const pharmacyId = pharmacyIdMap.get(pharmacyName);
-    if (pharmacyId == null) {
-      throw new Error(`Pharmacy "${pharmacyName}" was not found. Inventory sync cannot continue.`);
+  const applyInventoryUpdate = async (pharmacyId, pharmacyName, drugName, qty, op, batchNo, expiryDate) => {
+    if (!pharmacyId) {
+      throw new Error(`Pharmacy "${pharmacyName || "Unknown Pharmacy"}" was not found. Inventory sync cannot continue.`);
     }
 
     const { data: invRows, error: fetchError } = await supabase
@@ -259,13 +284,13 @@ export default function StockMovementSystem() {
     if (op === "subtract") {
       if (!existing) {
         throw new Error(
-          `No inventory record found for "${drugName}" at "${pharmacyName}". Cannot reduce stock that does not exist.`
+          `No inventory record found for "${drugName}" at "${pharmacyName || "Unknown Pharmacy"}". Cannot reduce stock that does not exist.`
         );
       }
       const currentQty = Number(existing.quantity ?? 0);
       if (currentQty - qty < 0) {
         throw new Error(
-          `Insufficient stock: "${drugName}" at "${pharmacyName}" has ${currentQty} unit(s). Cannot subtract ${qty}.`
+          `Insufficient stock: "${drugName}" at "${pharmacyName || "Unknown Pharmacy"}" has ${currentQty} unit(s). Cannot subtract ${qty}.`
         );
       }
       const { error: updateError } = await supabase
@@ -368,8 +393,10 @@ export default function StockMovementSystem() {
 
     try {
       const drug = formData.drug_name.trim();
-      const from = formData.from_pharmacy.trim() || null;
-      const to = formData.to_pharmacy.trim() || null;
+      const from = String(formData.from_pharmacy || "").trim() || null;
+      const to = String(formData.to_pharmacy || "").trim() || null;
+      const fromName = from ? getPharmacyNameById(from) : null;
+      const toName = to ? getPharmacyNameById(to) : null;
       const batchNo = formData.batch_no.trim() || null;
       const expiryDate = formData.expiry_date || null;
       const movType = formData.movement_type;
@@ -383,11 +410,11 @@ export default function StockMovementSystem() {
       }
 
       if (preCheckPharmacy) {
-        const pharmacyId = pharmacyIdMap.get(preCheckPharmacy);
-        if (pharmacyId == null) {
+        const pharmacyId = preCheckPharmacy;
+        if (!pharmacyMap.has(pharmacyId)) {
           setFeedback({
             type: "error",
-            text: `Pharmacy "${preCheckPharmacy}" was not found. Please select a valid pharmacy before submitting.`,
+            text: "Selected pharmacy was not found. Please select a valid pharmacy before submitting.",
           });
           setSubmitting(false);
           return;
@@ -410,10 +437,11 @@ export default function StockMovementSystem() {
         }
 
         const currentQty = Number(invRows?.[0]?.quantity ?? 0);
+        const pharmacyNameForCheck = getPharmacyNameById(pharmacyId);
         if (!invRows?.[0]) {
           setFeedback({
             type: "error",
-            text: `No inventory record found for "${drug}" at "${preCheckPharmacy}". Movement not recorded.`,
+            text: `No inventory record found for "${drug}" at "${pharmacyNameForCheck}". Movement not recorded.`,
           });
           setSubmitting(false);
           return;
@@ -421,7 +449,7 @@ export default function StockMovementSystem() {
         if (currentQty - qty < 0) {
           setFeedback({
             type: "error",
-            text: `Insufficient stock: "${drug}" at "${preCheckPharmacy}" has ${currentQty} unit(s). Cannot subtract ${qty}. Movement not recorded.`,
+            text: `Insufficient stock: "${drug}" at "${pharmacyNameForCheck}" has ${currentQty} unit(s). Cannot subtract ${qty}. Movement not recorded.`,
           });
           setSubmitting(false);
           return;
@@ -432,8 +460,8 @@ export default function StockMovementSystem() {
         movement_type: movType,
         drug_name: drug,
         quantity: qty,
-        from_pharmacy: from,
-        to_pharmacy: to,
+        from_pharmacy: fromName,
+        to_pharmacy: toName,
         batch_no: batchNo,
         expiry_date: expiryDate,
         reference_no: formData.reference_no.trim() || null,
@@ -469,30 +497,33 @@ export default function StockMovementSystem() {
       try {
         switch (movType) {
           case "Issue":
-            if (from) await applyInventoryUpdate(from, drug, qty, "subtract", batchNo, expiryDate);
+            if (from) await applyInventoryUpdate(from, fromName, drug, qty, "subtract", batchNo, expiryDate);
             break;
           case "Receive":
-            if (to) await applyInventoryUpdate(to, drug, qty, "add", batchNo, expiryDate);
+            if (to) await applyInventoryUpdate(to, toName, drug, qty, "add", batchNo, expiryDate);
             break;
           case "Transfer Out":
-            if (from) await applyInventoryUpdate(from, drug, qty, "subtract", batchNo, expiryDate);
+            if (from) await applyInventoryUpdate(from, fromName, drug, qty, "subtract", batchNo, expiryDate);
             break;
           case "Transfer In":
-            if (to) await applyInventoryUpdate(to, drug, qty, "add", batchNo, expiryDate);
+            if (to) await applyInventoryUpdate(to, toName, drug, qty, "add", batchNo, expiryDate);
             break;
           case "Adjustment+": {
             const p = to || from;
-            if (p) await applyInventoryUpdate(p, drug, qty, "add", batchNo, expiryDate);
+            const pName = p ? getPharmacyNameById(p) : null;
+            if (p) await applyInventoryUpdate(p, pName, drug, qty, "add", batchNo, expiryDate);
             break;
           }
           case "Adjustment-": {
             const p = from || to;
-            if (p) await applyInventoryUpdate(p, drug, qty, "subtract", batchNo, expiryDate);
+            const pName = p ? getPharmacyNameById(p) : null;
+            if (p) await applyInventoryUpdate(p, pName, drug, qty, "subtract", batchNo, expiryDate);
             break;
           }
           case "Return": {
             const p = to || from;
-            if (p) await applyInventoryUpdate(p, drug, qty, "add", batchNo, expiryDate);
+            const pName = p ? getPharmacyNameById(p) : null;
+            if (p) await applyInventoryUpdate(p, pName, drug, qty, "add", batchNo, expiryDate);
             break;
           }
           default:
@@ -513,7 +544,7 @@ export default function StockMovementSystem() {
       setFormData(initialForm);
       clearStockMovementDraft();
       setFeedback({ type: "success", text: "Stock movement added and inventory updated successfully." });
-      emitInventoryUpdated(formData.to_pharmacy || formData.from_pharmacy || "");
+      emitInventoryUpdated(to || from || "");
     } catch (err) {
       setFeedback({
         type: "error",
@@ -648,10 +679,10 @@ export default function StockMovementSystem() {
               >
                 <option value="">Select from pharmacy{isTransferType ? "" : " (optional)"}</option>
                 {pharmacyOptions
-                  .filter((name) => !(isTransferType && formData.to_pharmacy && name === formData.to_pharmacy))
-                  .map((name) => (
-                    <option key={name} value={name}>
-                      {name}
+                  .filter((option) => !(isTransferType && formData.to_pharmacy && option.id === formData.to_pharmacy))
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name || "Unknown Pharmacy"}
                     </option>
                   ))}
               </select>
@@ -667,10 +698,10 @@ export default function StockMovementSystem() {
               >
                 <option value="">Select to pharmacy{isTransferType ? "" : " (optional)"}</option>
                 {pharmacyOptions
-                  .filter((name) => !(isTransferType && formData.from_pharmacy && name === formData.from_pharmacy))
-                  .map((name) => (
-                    <option key={name} value={name}>
-                      {name}
+                  .filter((option) => !(isTransferType && formData.from_pharmacy && option.id === formData.from_pharmacy))
+                  .map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.name || "Unknown Pharmacy"}
                     </option>
                   ))}
               </select>

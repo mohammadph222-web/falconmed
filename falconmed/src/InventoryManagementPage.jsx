@@ -148,6 +148,24 @@ function resolveMarginValue(item) {
   return roundMoney(resolveSalesValue(item) - resolveCostValue(item));
 }
 
+function buildUniquePharmacies(rows = []) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!id || map.has(id)) continue;
+    map.set(id, {
+      id,
+      name: String(row?.name || "").trim(),
+      location: String(row?.location || "").trim(),
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
+}
+
 export default function InventoryManagementPage() {
   const [pharmacies, setPharmacies] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -387,22 +405,23 @@ export default function InventoryManagementPage() {
       setError("Live pharmacies unavailable. Demo pharmacies restored.");
     }
 
-    setPharmacies(data || []);
+    const uniquePharmacies = buildUniquePharmacies(data || []);
+    setPharmacies(uniquePharmacies);
 
-    if (data && data.length > 0) {
-      const hasCurrentSelection = data.some(
+    if (uniquePharmacies.length > 0) {
+      const hasCurrentSelection = uniquePharmacies.some(
         (row) => String(row?.id) === String(selectedPharmacyId || "")
       );
 
       if (!hasCurrentSelection) {
         const persisted = readStorageJson(INVENTORY_DRAFT_STORAGE_KEY);
         const persistedPharmacyId = String(persisted?.selectedPharmacyId || "");
-        const hasPersistedPharmacy = data.some((row) => String(row?.id) === persistedPharmacyId);
+        const hasPersistedPharmacy = uniquePharmacies.some((row) => String(row?.id) === persistedPharmacyId);
 
         if (hasPersistedPharmacy) {
           setSelectedPharmacyId(persistedPharmacyId);
         } else {
-          setSelectedPharmacyId(String(data[0].id));
+          setSelectedPharmacyId(String(uniquePharmacies[0].id));
         }
       }
     } else {
@@ -625,7 +644,8 @@ export default function InventoryManagementPage() {
       payload: {
         pharmacy_id: pharmacyId,
         drug_name: resolvedDrugName,
-        barcode: autofill.barcode || autofill.drug_code || null,
+        // Keep barcode as a true barcode only; do not reuse drug_code as a global key.
+        barcode: autofill.barcode || null,
         quantity,
         unit_cost: resolvedUnitCost,
         sales_price: resolvedSalesPrice,
@@ -779,7 +799,7 @@ export default function InventoryManagementPage() {
     const selectedPharmacy =
       pharmacies.find((p) => String(p.id) === String(selectedPharmacyId)) || null;
 
-    const pharmacyName = selectedPharmacy?.name || `Pharmacy ${selectedPharmacyId}`;
+    const pharmacyName = selectedPharmacy?.name || "Unknown Pharmacy";
     const actionVerb = editingId ? "Updated" : "Added";
     const movementType = editingId ? "UPDATE" : "ADD";
     const batchValue = batch.trim() || "-";
@@ -947,7 +967,7 @@ export default function InventoryManagementPage() {
     const selectedPharmacy =
       pharmacies.find((p) => String(p.id) === rowPharmacyId) || null;
 
-    const pharmacyName = selectedPharmacy?.name || `Pharmacy ${rowPharmacyId || "-"}`;
+    const pharmacyName = selectedPharmacy?.name || "Unknown Pharmacy";
 
     if (item) {
       const nowIso = new Date().toISOString();
@@ -1679,7 +1699,7 @@ export default function InventoryManagementPage() {
       }
 
       const selectedPharmacy = pharmacies.find((p) => String(p.id) === targetPharmacyId);
-      const pharmacyName = selectedPharmacy?.name || `Pharmacy ${targetPharmacyId}`;
+      const pharmacyName = selectedPharmacy?.name || "Unknown Pharmacy";
       const totalQty = validPayloads.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
       const estimatedValue = validPayloads.reduce(
         (sum, p) => sum + Number(p.quantity || 0) * Number(p.unit_cost || 0),
@@ -1841,9 +1861,9 @@ export default function InventoryManagementPage() {
       }
 
       if (bulkFileInputRef.current) bulkFileInputRef.current.value = "";
-      fetchInventory(selectedPharmacyId);
+      fetchInventory(previewPharmacyId);
       focusDrugField();
-      emitInventoryUpdated(selectedPharmacyId);
+      emitInventoryUpdated(previewPharmacyId);
     } catch (ex) {
       console.error("Import confirm exception:", ex);
       setError("Unexpected error during import. No rows were inserted.");
@@ -1861,6 +1881,14 @@ export default function InventoryManagementPage() {
   const handleUndoLastImport = async () => {
     if (!lastImportBatch) return;
 
+    const selectedId = String(selectedPharmacyId || "").trim();
+    const batchPharmacyId = String(lastImportBatch.pharmacyId || "").trim();
+
+    if (!selectedId || selectedId !== batchPharmacyId) {
+      setError("Undo is only allowed for the selected pharmacy's last import batch.");
+      return;
+    }
+
     const { batchId, pharmacyName, rowCount } = lastImportBatch;
     const confirmed = window.confirm(
       `Undo last import?\nThis will permanently remove ${rowCount} row(s) imported for ${pharmacyName}.\n\nBatch ID: ${batchId}`
@@ -1876,7 +1904,7 @@ export default function InventoryManagementPage() {
         .from("pharmacy_inventory")
         .delete()
         .eq("import_batch_id", batchId)
-        .eq("pharmacy_id", lastImportBatch.pharmacyId);
+        .eq("pharmacy_id", batchPharmacyId);
 
       if (deleteError) {
         console.error("Undo import delete failed:", deleteError);
@@ -1916,8 +1944,8 @@ export default function InventoryManagementPage() {
         console.error("Undo import log insert failed:", undoLogErr);
       }
 
-      fetchInventory(selectedPharmacyId);
-      emitInventoryUpdated(selectedPharmacyId);
+      fetchInventory(batchPharmacyId);
+      emitInventoryUpdated(batchPharmacyId);
     } catch (ex) {
       console.error("Undo import exception:", ex);
       setError("Unexpected error during undo.");

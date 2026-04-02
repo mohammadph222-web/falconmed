@@ -1,4 +1,7 @@
+import { supabase } from "../lib/supabaseClient";
+
 const NEAR_EXPIRY_DAYS = 180;
+const DEFAULT_PAGE_SIZE = 1000;
 
 function toNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -62,7 +65,7 @@ export function computeInventoryAggregates(inventoryRows = [], days = NEAR_EXPIR
     }
 
     const qty = Math.max(0, toNumber(row?.quantity, 0));
-    const unitCost = Math.max(0, toNumber(row?.unit_cost ?? row?.cost_price, 0));
+    const unitCost = Math.max(0, toNumber(row?.unit_cost, 0));
     const lineValue = qty * unitCost;
 
     totalQty += qty;
@@ -97,6 +100,104 @@ export function computeInventoryAggregates(inventoryRows = [], days = NEAR_EXPIR
     expiredStockValue,
     byPharmacyId,
   };
+}
+
+export async function fetchAllRows(
+  table,
+  columns = "*",
+  { orderBy, ascending = true, pageSize = DEFAULT_PAGE_SIZE, includeCount = true } = {}
+) {
+  if (!supabase) {
+    return { data: [], error: null };
+  }
+
+  const rows = [];
+  let from = 0;
+  let expectedTotal = null;
+  let previousPageSignature = "";
+  let repeatedPageCount = 0;
+
+  if (includeCount) {
+    try {
+      const { count, error: countError } = await supabase
+        .from(table)
+        .select("*", { count: "exact", head: true });
+
+      if (!countError && Number.isFinite(count)) {
+        expectedTotal = count;
+        if (count === 0) {
+          return { data: [], error: null };
+        }
+      }
+    } catch {
+      // Count is an optimization/safety guard only.
+    }
+  }
+
+  let pageGuard = 0;
+
+  while (true) {
+    pageGuard += 1;
+    if (pageGuard > 500) {
+      return {
+        data: rows,
+        error: new Error(`Paged fetch aborted for ${table}: exceeded safe page limit.`),
+      };
+    }
+
+    let query = supabase
+      .from(table)
+      .select(columns)
+      .range(from, from + pageSize - 1);
+
+    if (orderBy) {
+      query = query.order(orderBy, { ascending });
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      return { data: rows, error };
+    }
+
+    const page = data || [];
+    if (page.length === 0) {
+      break;
+    }
+
+    // Guard: if a backend row-limit policy ignores range, the same page can repeat forever.
+    const firstRow = page[0] || {};
+    const lastRow = page[page.length - 1] || {};
+    const pageSignature = `${page.length}::${String(firstRow.id || "")}::${String(lastRow.id || "")}`;
+
+    if (pageSignature === previousPageSignature) {
+      repeatedPageCount += 1;
+      if (repeatedPageCount >= 2) {
+        return {
+          data: rows,
+          error: new Error(
+            `Paged fetch aborted for ${table}: repeated page detected (range likely not advancing).`
+          ),
+        };
+      }
+    } else {
+      repeatedPageCount = 0;
+      previousPageSignature = pageSignature;
+    }
+
+    rows.push(...page);
+
+    if (expectedTotal != null && rows.length >= expectedTotal) {
+      break;
+    }
+
+    if (page.length < pageSize) {
+      break;
+    }
+
+    from += page.length;
+  }
+
+  return { data: rows, error: null };
 }
 
 const qtyFormatter = new Intl.NumberFormat("en-US", {

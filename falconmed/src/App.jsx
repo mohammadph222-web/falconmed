@@ -33,6 +33,7 @@ import {
 import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
 import {
   computeInventoryAggregates,
+  fetchAllRows,
   formatAed,
   formatQty,
   isNearExpiry,
@@ -263,8 +264,11 @@ export default function App() {
 
     try {
       const [{ data: pharmacies, error: pharmaciesError }, { data: inventory, error: inventoryError }] = await Promise.all([
-        supabase.from("pharmacies").select("id,name").limit(2000),
-        supabase.from("pharmacy_inventory").select("pharmacy_id,quantity,expiry_date").limit(10000),
+        fetchAllRows("pharmacies", "id,name", { orderBy: "name", ascending: true }),
+        fetchAllRows("pharmacy_inventory", "pharmacy_id,quantity,expiry_date", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
       ]);
 
       if (pharmaciesError || inventoryError) {
@@ -363,12 +367,11 @@ export default function App() {
       shortageCount,
       purchaseCount,
       refillCount,
-      pharmaciesCount,
     ] = await Promise.all([
-      supabase
-        .from("pharmacy_inventory")
-        .select("pharmacy_id,quantity,unit_cost,expiry_date")
-        .limit(30000),
+      fetchAllRows("pharmacy_inventory", "pharmacy_id,quantity,unit_cost,expiry_date", {
+        orderBy: "created_at",
+        ascending: false,
+      }),
       safeCount("shortage_requests"),
       safeCount("purchase_requests"),
       safeCount("refill_requests"),
@@ -419,7 +422,6 @@ export default function App() {
   const expiryRiskExposure = Number(nearExpiryStockValue || 0);
   const deadStockExposure = Number(expiredStockValue || 0);
   const shortageRiskExposure = 0;
-  const potentialSavings = 0;
   const totalFinancialExposure =
     Number(expiryRiskExposure || 0) +
     Number(deadStockExposure || 0) +
@@ -854,19 +856,19 @@ export default function App() {
                     <div style={liveOpsGrid}>
                       <div style={liveOpsRow}>
                         <span style={liveOpsLabel}>Stock Movements Today</span>
-                        <strong style={liveOpsValue}>{Number(liveOperationsToday || 0).toLocaleString()}</strong>
+                        <strong style={liveOpsValue}>{formatQty(liveOperationsToday || 0)}</strong>
                       </div>
                       <div style={liveOpsRow}>
                         <span style={liveOpsLabel}>Transfers Today</span>
-                        <strong style={liveOpsValue}>{Number(transfersToday || 0).toLocaleString()}</strong>
+                        <strong style={liveOpsValue}>{formatQty(transfersToday || 0)}</strong>
                       </div>
                       <div style={liveOpsRow}>
                         <span style={liveOpsLabel}>Purchase Requests</span>
-                        <strong style={liveOpsValue}>{Number(purchaseRequests || 0).toLocaleString()}</strong>
+                        <strong style={liveOpsValue}>{formatQty(purchaseRequests || 0)}</strong>
                       </div>
                       <div style={liveOpsRow}>
                         <span style={liveOpsLabel}>Recent Actions</span>
-                        <strong style={liveOpsValue}>{Number(recentActionsCount || 0).toLocaleString()}</strong>
+                        <strong style={liveOpsValue}>{formatQty(recentActionsCount || 0)}</strong>
                       </div>
                     </div>
                   </div>
@@ -903,7 +905,7 @@ export default function App() {
                     <div style={{ color: "#94a3b8", fontSize: "13px", padding: "10px 0" }}>No inventory risk data available.</div>
                   ) : (
                     <div style={heatmapGrid}>
-                      {inventoryRiskHeatmap.map((row, idx) => {
+                      {inventoryRiskHeatmap.map((row) => {
                         const severity =
                           row.issueCount <= 0 ? "green" : row.issueCount <= 2 ? "yellow" : "red";
                         const indicatorStyle =
@@ -914,7 +916,7 @@ export default function App() {
                               : heatIndicatorRed;
 
                         return (
-                          <div key={`${row.pharmacyId}-${idx}`} style={heatmapCard}>
+                          <div key={row.pharmacyId} style={heatmapCard}>
                             <div style={heatmapCardHeader}>
                               <div style={heatmapPharmacyName}>{row.pharmacyName}</div>
                               <span style={{ ...heatIndicatorBase, ...indicatorStyle }}>
@@ -924,11 +926,11 @@ export default function App() {
                             <div style={heatmapMetricsRow}>
                               <div style={heatmapMetricBox}>
                                 <div style={heatmapMetricLabel}>Low Stock</div>
-                                <div style={heatmapMetricValue}>{Number(row.lowStockCount || 0)}</div>
+                                <div style={heatmapMetricValue}>{formatQty(row.lowStockCount || 0)}</div>
                               </div>
                               <div style={heatmapMetricBox}>
                                 <div style={heatmapMetricLabel}>Near Expiry</div>
-                                <div style={heatmapMetricValue}>{Number(row.nearExpiryCount || 0)}</div>
+                                <div style={heatmapMetricValue}>{formatQty(row.nearExpiryCount || 0)}</div>
                               </div>
                             </div>
                           </div>
@@ -942,7 +944,7 @@ export default function App() {
                   <div>
                     <div style={liveActivityStripTitle}>Live Activity</div>
                     <div style={liveActivityStripValue}>
-                      {Number(liveOperationsToday || 0).toLocaleString()} operations today
+                      {formatQty(liveOperationsToday || 0)} operations today
                     </div>
                   </div>
                   <div style={liveActivityBadge}>

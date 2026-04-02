@@ -18,7 +18,25 @@ const mapDbToUi = (row) => ({
   unitCost: Number(row.unit_cost || 0),
 });
 
-export default function ShortageTracker({ user, profile }) {
+function buildUniquePharmacies(rows = []) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!id || map.has(id)) continue;
+    map.set(id, {
+      id,
+      name: String(row?.name || "").trim(),
+      location: String(row?.location || "").trim(),
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
+}
+
+export default function ShortageTracker() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -44,10 +62,10 @@ export default function ShortageTracker({ user, profile }) {
 
   useEffect(() => {
     loadPharmaciesWithFallback().then(({ data }) => {
-      const list = data || [];
+      const list = buildUniquePharmacies(data || []);
       setPharmacies(list);
       const nameMap = new Map();
-      list.forEach((p) => nameMap.set(String(p.id), p.name || String(p.id)));
+      list.forEach((p) => nameMap.set(String(p.id), p.name || "Unknown Pharmacy"));
       setPharmacyNameMap(nameMap);
     });
   }, []);
@@ -61,8 +79,7 @@ export default function ShortageTracker({ user, profile }) {
           setAllDrugs(rows || []);
         }
       })
-      .catch((error) => {
-        console.error("Error loading drugs for shortage tracker:", error);
+      .catch(() => {
         if (isMounted) {
           setAllDrugs([]);
         }
@@ -101,7 +118,6 @@ export default function ShortageTracker({ user, profile }) {
         if (error) {
           setItems([]);
           setMessage("Failed to load shortage records.");
-          console.error("Failed to load shortage records:", error.message);
           return;
         }
 
@@ -110,7 +126,6 @@ export default function ShortageTracker({ user, profile }) {
       } catch (err) {
         setItems([]);
         setMessage("Failed to load shortage records.");
-        console.error("Shortage load error:", err?.message || "Unknown error");
       } finally {
         setLoading(false);
       }
@@ -162,7 +177,6 @@ export default function ShortageTracker({ user, profile }) {
       const { error } = insertResult;
       if (error) {
         setMessage("Failed to record shortage item.");
-        console.error("Failed to record shortage item:", error.message);
         return;
       }
 
@@ -176,7 +190,6 @@ export default function ShortageTracker({ user, profile }) {
       setMessage("Shortage item recorded successfully.");
     } catch (err) {
       setMessage("Failed to record shortage item.");
-      console.error("Shortage save error:", err?.message || "Unknown error");
       return;
     }
 
@@ -196,7 +209,6 @@ export default function ShortageTracker({ user, profile }) {
       .eq("id", id);
 
     if (error) {
-      console.error("Restock failed:", error.message);
       setMessage("Failed to update stock quantity.");
       return;
     }
@@ -440,7 +452,7 @@ export default function ShortageTracker({ user, profile }) {
                 >
                   <td style={{ ...td, fontWeight: 700 }}>{item.drugName}</td>
                   <td style={{ ...td, color: "#64748b" }}>
-                    {pharmacyNameMap.get(item.pharmacyId) || item.pharmacyId || "-"}
+                    {pharmacyNameMap.get(item.pharmacyId) || "Unknown Pharmacy"}
                   </td>
                   <td style={td}>{item.quantity}</td>
                   <td style={{ ...td, color: "#64748b" }}>{item.batchNo || "-"}</td>
@@ -583,7 +595,7 @@ const messageBox = {
   borderRadius: "10px",
   background: "#eff6ff",
   border: "1px solid #bfdbfe",
-  borderLeft: "4px solid #3b82f6",
+  boxShadow: "inset 4px 0 0 #3b82f6",
   color: "#1e3a5f",
   fontSize: "13px",
   fontWeight: 600,
@@ -593,7 +605,7 @@ const messageBoxSuccess = {
   ...messageBox,
   background: "#dcfce7",
   border: "1px solid #bbf7d0",
-  borderLeft: "4px solid #22c55e",
+  boxShadow: "inset 4px 0 0 #22c55e",
   color: "#166534",
 };
 
@@ -601,7 +613,7 @@ const messageBoxError = {
   ...messageBox,
   background: "#fee2e2",
   border: "1px solid #fecaca",
-  borderLeft: "4px solid #ef4444",
+  boxShadow: "inset 4px 0 0 #ef4444",
   color: "#991b1b",
 };
 

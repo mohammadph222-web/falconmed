@@ -2,30 +2,72 @@ import React, { useEffect, useMemo, useState } from "react";
 import InsightCard from "./components/InsightCard";
 import SkeletonCard from "./components/SkeletonCard";
 import { supabase } from "./lib/supabaseClient";
-import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
+import { normalizeInventoryRow } from "./utils/pharmacyData";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
 import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
+import {
+  fetchAllRows,
+  formatAed,
+  formatQty,
+} from "./utils/inventoryAnalytics";
 
-function formatCurrency(value) {
-  const n = Number(value || 0);
-  if (!Number.isFinite(n)) return "AED 0.00";
-  return `AED ${n.toFixed(2)}`;
+const NETWORK_FETCH_TIMEOUT_MS = 60000;
+
+function normalizePharmacyId(value) {
+  return String(value || "").trim();
 }
 
-function toSafeNumber(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : 0;
+function buildUniquePharmacies(rows) {
+  const byId = new Map();
+
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const id = normalizePharmacyId(row?.id);
+    if (!id) continue;
+
+    const incomingName = String(row?.name || "").trim();
+    const incomingLocation = String(row?.location || "").trim();
+    const existing = byId.get(id);
+
+    if (!existing) {
+      byId.set(id, {
+        id,
+        name: incomingName,
+        location: incomingLocation,
+      });
+      continue;
+    }
+
+    const shouldReplaceName = !existing.name && !!incomingName;
+
+    byId.set(id, {
+      id,
+      name: shouldReplaceName ? incomingName : existing.name,
+      location: existing.location || incomingLocation,
+    });
+  }
+
+  return Array.from(byId.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
 }
 
-function normalizeText(value) {
-  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+function resolveStockUnit(row) {
+  return row?.stock_unit || row?.unit || "unit";
 }
 
-function parseCreatedAt(createdAt) {
-  const raw = String(createdAt || "").trim();
-  if (!raw) return Number.POSITIVE_INFINITY;
-  const ts = Date.parse(raw);
-  return Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY;
+function withTimeout(promise, timeoutMs, label) {
+  let timerId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timerId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timerId) {
+      window.clearTimeout(timerId);
+    }
+  });
 }
 
 export default function PharmacyNetwork() {
@@ -33,6 +75,7 @@ export default function PharmacyNetwork() {
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
 
   useEffect(() => {
     loadData();
@@ -51,190 +94,167 @@ export default function PharmacyNetwork() {
     setError("");
 
     try {
-      const { data: pharmacyData, error: pharmacyError } = await loadPharmaciesWithFallback();
-
-      if (pharmacyError) {
-        setError("Live pharmacies unavailable. Showing restored demo pharmacies.");
-      }
-
       if (!supabase) {
-        setPharmacies(pharmacyData || []);
+        setPharmacies([]);
         setInventory([]);
         return;
       }
 
-      const { data: inventoryData, error: inventoryError } = await supabase
-        .from("pharmacy_inventory")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const [
+        { data: pharmaciesData, error: pharmaciesError },
+        { data: inventoryData, error: inventoryError },
+      ] = await withTimeout(
+        Promise.all([
+          supabase.from("pharmacies").select("id, name, location"),
+          fetchAllRows(
+            "pharmacy_inventory",
+            "*",
+            {
+              includeCount: false,
+              pageSize: 2000,
+            }
+          ),
+        ]),
+        NETWORK_FETCH_TIMEOUT_MS,
+        "Pharmacy network fetch"
+      );
+
+      if (pharmaciesError) {
+        setError(pharmaciesError.message || "Failed to load pharmacies.");
+        return;
+      }
 
       if (inventoryError) {
         setError(inventoryError.message || "Failed to load pharmacy inventory.");
         return;
       }
 
-      setPharmacies(pharmacyData || []);
-      setInventory((inventoryData || []).map(normalizeInventoryRow));
+      const normalizedInventory = [];
+      let skippedRows = 0;
+
+      for (const row of inventoryData || []) {
+        try {
+          const normalizedRow = normalizeInventoryRow(row);
+          normalizedInventory.push({
+            ...normalizedRow,
+            _pharmacyId: normalizePharmacyId(normalizedRow?.pharmacy_id || row?.pharmacy_id),
+            _stockUnit: resolveStockUnit({ ...row, ...normalizedRow }),
+          });
+        } catch (normalizeError) {
+          skippedRows += 1;
+        }
+      }
+
+      if (skippedRows > 0) {
+        setError(`Some inventory rows could not be read (${skippedRows} skipped).`);
+      }
+
+      const uniquePharmacies = buildUniquePharmacies(pharmaciesData || []);
+      setPharmacies(uniquePharmacies);
+      setInventory(normalizedInventory);
     } catch (loadError) {
-      console.error("Pharmacy network load error:", loadError);
       setError("Unexpected error while loading pharmacy network data.");
     } finally {
       setLoading(false);
     }
   }
 
-  const uniquePharmacies = useMemo(() => {
+  const pharmacyMap = useMemo(() => {
     const map = new Map();
     for (const pharmacy of pharmacies) {
-      const key = String(pharmacy?.id || "");
-      if (!key || map.has(key)) continue;
-      map.set(key, {
-        ...pharmacy,
-        id: key,
+      const id = normalizePharmacyId(pharmacy?.id);
+      if (!id || map.has(id)) continue;
+      map.set(id, {
+        id,
+        name: String(pharmacy?.name || "").trim(),
+        location: String(pharmacy?.location || "").trim(),
       });
-    }
-    return Array.from(map.values());
-  }, [pharmacies]);
-
-  const pharmacyMap = useMemo(() => {
-    const map = {};
-    for (const p of uniquePharmacies) {
-      map[String(p.id)] = p;
     }
     return map;
-  }, [uniquePharmacies]);
+  }, [pharmacies]);
 
-  const aggregateByPharmacyId = useMemo(() => {
-    const aggregates = {};
+  const pharmacyOptions = useMemo(
+    () => Array.from(pharmacyMap.values()),
+    [pharmacyMap]
+  );
 
-    for (const item of inventory) {
-      const key = String(item?.pharmacy_id || "");
-      if (!key) continue;
+  const filteredInventory = useMemo(() => {
+    if (!selectedPharmacyId) return inventory;
+    return inventory.filter((row) => normalizePharmacyId(row?._pharmacyId || row?.pharmacy_id) === selectedPharmacyId);
+  }, [inventory, selectedPharmacyId]);
 
-      if (!aggregates[key]) {
-        aggregates[key] = {
-          items: 0,
-          totalQty: 0,
-          totalValue: 0,
-        };
+  const pharmacyCards = useMemo(() => {
+    try {
+      const byPharmacyId = new Map();
+
+      for (const row of Array.isArray(filteredInventory) ? filteredInventory : []) {
+        const pharmacyId = normalizePharmacyId(row?._pharmacyId || row?.pharmacy_id);
+        if (!pharmacyId) continue;
+        const pharmacyMeta = pharmacyMap.get(pharmacyId);
+        const displayName = String(pharmacyMeta?.name || "").trim() || "Unknown Pharmacy";
+        const displayLocation = String(pharmacyMeta?.location || "").trim();
+
+        if (!byPharmacyId.has(pharmacyId)) {
+          byPharmacyId.set(pharmacyId, {
+            pharmacy_id: pharmacyId,
+            name: displayName,
+            location: displayLocation,
+            item_count: 0,
+            total_qty: 0,
+            stock_value: 0,
+          });
+        }
+
+        const entry = byPharmacyId.get(pharmacyId);
+        entry.name = displayName;
+        entry.location = entry.location || displayLocation;
+        const qty = Math.max(0, Number(row?.quantity || 0));
+        const unitCost = Math.max(0, Number(row?.unit_cost || 0));
+
+        entry.item_count += 1;
+        entry.total_qty += qty;
+        entry.stock_value += qty * unitCost;
       }
 
-      aggregates[key].items += 1;
-      aggregates[key].totalQty += toSafeNumber(item.quantity);
-      aggregates[key].totalValue +=
-        toSafeNumber(item.quantity) * toSafeNumber(item.unit_cost);
+      return Array.from(byPharmacyId.values()).sort((a, b) =>
+        String(a?.name || "").localeCompare(String(b?.name || ""))
+      );
+    } catch (groupError) {
+      return [];
     }
-
-    return aggregates;
-  }, [inventory]);
-
-  const canonicalVisiblePharmacies = useMemo(() => {
-    const groupedCandidates = new Map();
-
-    uniquePharmacies.forEach((pharmacy, index) => {
-      const id = String(pharmacy?.id || "");
-      const normalizedName = normalizeText(pharmacy?.name);
-      const normalizedLocation = normalizeText(pharmacy?.location);
-      const logicalKey =
-        normalizedName || normalizedLocation
-          ? `${normalizedName}::${normalizedLocation}`
-          : `__id__:${id}`;
-
-      if (!groupedCandidates.has(logicalKey)) {
-        groupedCandidates.set(logicalKey, []);
-      }
-
-      groupedCandidates.get(logicalKey).push({
-        pharmacy,
-        index,
-        hasInventory: Boolean(aggregateByPharmacyId[id]?.items),
-        createdAtTs: parseCreatedAt(pharmacy?.created_at),
-      });
-    });
-
-    const selected = [];
-
-    groupedCandidates.forEach((candidates) => {
-      const sortedCandidates = [...candidates].sort((a, b) => {
-        if (a.hasInventory !== b.hasInventory) {
-          return a.hasInventory ? -1 : 1;
-        }
-
-        if (a.createdAtTs !== b.createdAtTs) {
-          return a.createdAtTs - b.createdAtTs;
-        }
-
-        return a.index - b.index;
-      });
-
-      selected.push(sortedCandidates[0].pharmacy);
-    });
-
-    return selected.sort((a, b) =>
-      String(a?.name || "").localeCompare(String(b?.name || ""))
-    );
-  }, [aggregateByPharmacyId, uniquePharmacies]);
-
-  const totalPharmacies = useMemo(() => {
-    const ids = new Set(canonicalVisiblePharmacies.map((p) => String(p?.id || "")).filter(Boolean));
-    return ids.size;
-  }, [canonicalVisiblePharmacies]);
+  }, [filteredInventory, pharmacyMap]);
 
   const totalInventoryQty = useMemo(
-    () => inventory.reduce((sum, item) => sum + toSafeNumber(item.quantity), 0),
-    [inventory]
+    () => pharmacyCards.reduce((sum, card) => sum + Number(card.total_qty || 0), 0),
+    [pharmacyCards]
   );
 
   const totalInventoryValue = useMemo(
-    () =>
-      inventory.reduce(
-        (sum, item) => sum + toSafeNumber(item.quantity) * toSafeNumber(item.unit_cost),
-        0
-      ),
-    [inventory]
+    () => pharmacyCards.reduce((sum, card) => sum + Number(card.stock_value || 0), 0),
+    [pharmacyCards]
   );
 
-  const groupedByPharmacy = useMemo(() => {
-    return canonicalVisiblePharmacies
-      .map((pharmacy) => {
-        const key = String(pharmacy.id);
-        const aggregate = aggregateByPharmacyId[key] || {
-          items: 0,
-          totalQty: 0,
-          totalValue: 0,
-        };
-
-        return {
-          pharmacy,
-          itemCount: aggregate.items,
-          totalQty: aggregate.totalQty,
-          totalValue: aggregate.totalValue,
-        };
-      })
-      .sort((a, b) =>
-        String(a?.pharmacy?.name || "").localeCompare(String(b?.pharmacy?.name || ""))
-      );
-  }, [aggregateByPharmacyId, canonicalVisiblePharmacies]);
+  const totalPharmacies = pharmacyCards.length;
 
   const inventoryRows = useMemo(
     () =>
-      inventory.map((item, index) => ({
+      (Array.isArray(filteredInventory) ? filteredInventory : []).map((item, index) => ({
         ...item,
         _isEven: index % 2 === 0,
       })),
-    [inventory]
+    [filteredInventory]
   );
 
   const imbalanceInsight = useMemo(() => {
-    if (loading || groupedByPharmacy.length < 2) return null;
+    if (loading || pharmacyCards.length < 2) return null;
 
-    const activeGroups = groupedByPharmacy.filter((group) => group.itemCount > 0);
+    const activeGroups = pharmacyCards.filter((group) => group.item_count > 0);
     if (activeGroups.length < 2) return null;
 
-    const sorted = [...activeGroups].sort((a, b) => b.totalQty - a.totalQty);
+    const sorted = [...activeGroups].sort((a, b) => b.total_qty - a.total_qty);
     const highest = sorted[0];
     const lowest = sorted[sorted.length - 1];
-    const qtyDiff = Number(highest.totalQty || 0) - Number(lowest.totalQty || 0);
+    const qtyDiff = Number(highest.total_qty || 0) - Number(lowest.total_qty || 0);
 
     if (qtyDiff < 40) return null;
 
@@ -242,11 +262,11 @@ export default function PharmacyNetwork() {
       icon: "⇅",
       tone: "info",
       title: "Smart Insight: Stock Imbalance",
-      message: `${highest.pharmacy?.name || "Top site"} carries ${Number(highest.totalQty || 0).toLocaleString()} units vs ${Number(
-        lowest.totalQty || 0
-      ).toLocaleString()} at ${lowest.pharmacy?.name || "lowest site"}. Consider balancing transfer opportunities.`,
+      message: `${highest.name || "Top site"} carries ${formatQty(highest.total_qty || 0)} units vs ${formatQty(
+        lowest.total_qty || 0
+      )} at ${lowest.name || "lowest site"}. Consider balancing transfer opportunities.`,
     };
-  }, [groupedByPharmacy, loading]);
+  }, [pharmacyCards, loading]);
 
   return (
     <div style={page}>
@@ -279,9 +299,9 @@ export default function PharmacyNetwork() {
         ) : (
           <>
             <MetricCard label="TOTAL PHARMACIES" value={totalPharmacies} accent="#3b82f6" hint="registered" />
-            <MetricCard label="INVENTORY RECORDS" value={inventory.length} accent="#8b5cf6" hint="line items" />
-            <MetricCard label="TOTAL STOCK QTY" value={totalInventoryQty} accent="#10b981" hint="units on hand" />
-            <MetricCard label="TOTAL STOCK VALUE" value={totalInventoryValue} valueFn={formatCurrency} accent="#f59e0b" hint="estimated value" />
+            <MetricCard label="INVENTORY RECORDS" value={inventoryRows.length} accent="#8b5cf6" hint="line items" />
+            <MetricCard label="TOTAL STOCK QTY" value={totalInventoryQty} valueFn={formatQty} accent="#10b981" hint="units on hand" />
+            <MetricCard label="TOTAL STOCK VALUE" value={totalInventoryValue} valueFn={formatAed} accent="#f59e0b" hint="estimated value" />
           </>
         )}
       </div>
@@ -300,6 +320,22 @@ export default function PharmacyNetwork() {
       <div style={contentGrid}>
         {/* Pharmacy list */}
         <div style={contentCard}>
+          <div style={filterWrap}>
+            <label style={filterLabel} htmlFor="pharmacy-network-filter">Filter pharmacy</label>
+            <select
+              id="pharmacy-network-filter"
+              value={selectedPharmacyId}
+              onChange={(event) => setSelectedPharmacyId(event.target.value)}
+              style={filterSelect}
+            >
+              <option value="">All pharmacies</option>
+              {pharmacyOptions.map((pharmacy) => (
+                <option key={pharmacy.id} value={pharmacy.id}>
+                  {pharmacy.name || "Unnamed Pharmacy"}
+                </option>
+              ))}
+            </select>
+          </div>
           <h2 style={sectionTitle}>Pharmacies</h2>
           {loading ? (
             <div style={pharmacyList}>
@@ -316,32 +352,32 @@ export default function PharmacyNetwork() {
                 />
               ))}
             </div>
-          ) : canonicalVisiblePharmacies.length === 0 ? (
+          ) : pharmacyCards.length === 0 ? (
             <div style={emptyStateBox}>
               <p style={{ margin: 0, fontWeight: 600, color: "#475569" }}>No pharmacies found</p>
               <p style={{ margin: "6px 0 0 0", color: "#94a3b8", fontSize: 13 }}>Add pharmacies to see them here</p>
             </div>
           ) : (
             <div style={pharmacyList}>
-              {groupedByPharmacy.map((group) => (
-                <div className="ui-hover-lift" key={group.pharmacy.id} style={pharmacyCard}>
+              {pharmacyCards.map((group) => (
+                <div className="ui-hover-lift" key={group.pharmacy_id} style={pharmacyCard}>
                   <div style={pharmacyNameRow}>
-                    <span style={pharmacyNameText}>{group.pharmacy.name}</span>
-                    <span style={pharmacyItemsBadge}>{group.itemCount} items</span>
+                    <span style={pharmacyNameText}>{group.name}</span>
+                    <span style={pharmacyItemsBadge}>{formatQty(group.item_count)} items</span>
                   </div>
-                  {group.pharmacy.location && (
+                  {group.location && (
                     <div style={pharmacyMetaRow}>
                       <span style={pharmacyMetaLabel}>Location</span>
-                      <span style={pharmacyMetaValue}>{group.pharmacy.location}</span>
+                      <span style={pharmacyMetaValue}>{group.location}</span>
                     </div>
                   )}
                   <div style={pharmacyMetaRow}>
                     <span style={pharmacyMetaLabel}>Total Qty</span>
-                    <span style={pharmacyMetaValue}>{group.totalQty}</span>
+                    <span style={pharmacyMetaValue}>{formatQty(group.total_qty)}</span>
                   </div>
                   <div style={{ ...pharmacyMetaRow, marginBottom: 0 }}>
                     <span style={pharmacyMetaLabel}>Stock Value</span>
-                    <span style={{ ...pharmacyMetaValue, fontWeight: 700, color: "#0f172a" }}>{formatCurrency(group.totalValue)}</span>
+                    <span style={{ ...pharmacyMetaValue, fontWeight: 700, color: "#0f172a" }}>{formatAed(group.stock_value)}</span>
                   </div>
                 </div>
               ))}
@@ -367,7 +403,7 @@ export default function PharmacyNetwork() {
                 />
               </div>
             </div>
-          ) : inventory.length === 0 ? (
+          ) : inventoryRows.length === 0 ? (
             <div style={emptyStateBox}>
               <p style={{ margin: 0, fontWeight: 600, color: "#475569" }}>No inventory records</p>
               <p style={{ margin: "6px 0 0 0", color: "#94a3b8", fontSize: 13 }}>Inventory will appear here once synced</p>
@@ -389,11 +425,11 @@ export default function PharmacyNetwork() {
                 <tbody>
                   {inventoryRows.map((item) => (
                     <tr key={item.id} style={{ background: item._isEven ? "white" : "#f9fafb" }}>
-                      <td style={tdStyle}>{pharmacyMap[item.pharmacy_id]?.name || "-"}</td>
+                      <td style={tdStyle}>{pharmacyMap.get(normalizePharmacyId(item._pharmacyId || item.pharmacy_id))?.name || "Unknown Pharmacy"}</td>
                       <td style={{ ...tdStyle, fontWeight: 700, color: "#0f172a" }}>{item.drug_name || "-"}</td>
                       <td style={{ ...tdStyle, color: "#64748b", fontFamily: "monospace", fontSize: 12 }}>{item.barcode || "-"}</td>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{item.quantity}</td>
-                      <td style={tdStyle}>{formatCurrency(item.unit_cost)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{formatQty(item.quantity)} {item._stockUnit}</td>
+                      <td style={tdStyle}>{formatAed(item.unit_cost)}</td>
                       <td style={tdStyle}>{item.expiry_date || "-"}</td>
                       <td style={{ ...tdStyle, color: "#64748b" }}>{item.batch_no || "-"}</td>
                     </tr>
@@ -417,7 +453,7 @@ function MetricCard({ label, value, accent, hint, valueFn }) {
     typeof valueFn === "function"
       ? valueFn(animated)
       : typeof value === "number"
-      ? animated.toLocaleString()
+      ? formatQty(animated)
       : value;
 
   return (
@@ -527,6 +563,31 @@ const contentCard = {
   boxShadow: "0 2px 14px rgba(15,23,42,0.06)",
 };
 
+const filterWrap = {
+  display: "grid",
+  gap: 6,
+  marginBottom: 14,
+};
+
+const filterLabel = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+  textTransform: "uppercase",
+  color: "#64748b",
+};
+
+const filterSelect = {
+  width: "100%",
+  border: "1px solid #d1d9e6",
+  borderRadius: 10,
+  background: "#fff",
+  color: "#0f172a",
+  fontSize: 13,
+  padding: "9px 11px",
+  outline: "none",
+};
+
 const sectionTitle = {
   margin: "0 0 16px 0",
   fontSize: 16,
@@ -543,21 +604,6 @@ const emptyStateBox = {
   borderRadius: 14,
   padding: "28px 20px",
   textAlign: "center",
-};
-
-const loadingWrap = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  padding: "16px 0",
-};
-
-const loadingDot = {
-  width: 8,
-  height: 8,
-  borderRadius: "50%",
-  background: "#3b82f6",
-  display: "inline-block",
 };
 
 const pharmacyList = {

@@ -24,7 +24,25 @@ const mapDbToUi = (row) => ({
   value: 0,          // computed at render time
 });
 
-export default function ExpiryTracker({ user, profile }) {
+function buildUniquePharmacies(rows = []) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    if (!id || map.has(id)) continue;
+    map.set(id, {
+      id,
+      name: String(row?.name || "").trim(),
+      location: String(row?.location || "").trim(),
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
+}
+
+export default function ExpiryTracker() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -33,6 +51,20 @@ export default function ExpiryTracker({ user, profile }) {
   // Pharmacy selector (needed for inserts into pharmacy_inventory)
   const [pharmacies, setPharmacies] = useState([]);
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
+
+  const pharmacyMap = useMemo(() => {
+    const map = new Map();
+    (pharmacies || []).forEach((row) => {
+      const id = String(row?.id || "").trim();
+      if (!id || map.has(id)) return;
+      map.set(id, {
+        id,
+        name: String(row?.name || "").trim(),
+        location: String(row?.location || "").trim(),
+      });
+    });
+    return map;
+  }, [pharmacies]);
 
   // Drug search and dropdown state
   const [allDrugs, setAllDrugs] = useState([]);
@@ -82,9 +114,10 @@ export default function ExpiryTracker({ user, profile }) {
   // Load pharmacies for the Add-Item pharmacy selector
   useEffect(() => {
     loadPharmaciesWithFallback().then(({ data }) => {
-      setPharmacies(data || []);
-      if (data && data.length > 0 && !selectedPharmacyId) {
-        setSelectedPharmacyId(String(data[0].id));
+      const uniquePharmacies = buildUniquePharmacies(data || []);
+      setPharmacies(uniquePharmacies);
+      if (uniquePharmacies.length > 0 && !selectedPharmacyId) {
+        setSelectedPharmacyId(String(uniquePharmacies[0].id));
       }
     });
   }, []);
@@ -99,8 +132,7 @@ export default function ExpiryTracker({ user, profile }) {
           setAllDrugs(rows || []);
         }
       })
-      .catch((error) => {
-        console.error("Error loading drugs for expiry tracker:", error);
+      .catch(() => {
         if (isMounted) {
           setAllDrugs([]);
         }
@@ -124,16 +156,8 @@ export default function ExpiryTracker({ user, profile }) {
   const handleDrugSelect = (drug) => {
     const displayName = getDrugDisplayName(drug);
 
-    if (!displayName || displayName === "Unknown") {
-      console.error("Failed mapping selected drug to form name:", drug);
-    }
-
     const normalizedPrice = getDrugUnitPrice(drug, "public");
     const safePrice = normalizedPrice !== null ? String(normalizedPrice) : "";
-
-    if (drug.public_price && !safePrice) {
-      console.error("Failed mapping selected drug price to form unitPrice:", drug);
-    }
 
     setSelectedDrug(drug);
     setForm((prev) => ({
@@ -228,7 +252,6 @@ export default function ExpiryTracker({ user, profile }) {
       const { error } = insertResult;
 
       if (error) {
-        console.error("Failed to generate test inventory:", error.message);
         setMessage("Failed to generate test inventory.");
         return;
       }
@@ -239,9 +262,7 @@ export default function ExpiryTracker({ user, profile }) {
         .not("expiry_date", "is", null)
         .order("expiry_date", { ascending: true });
 
-      if (refreshError) {
-        console.error("Failed to refresh after test inventory generation:", refreshError.message);
-      } else {
+      if (!refreshError) {
         const mapped = (refreshed || []).map(mapDbToUi);
         setItems(mapped);
         localStorage.setItem(
@@ -263,7 +284,6 @@ export default function ExpiryTracker({ user, profile }) {
 
       setMessage("Test inventory generated successfully.");
     } catch (error) {
-      console.error("Test inventory generation error:", error?.message || "Unknown error");
       setMessage("Failed to generate test inventory.");
     } finally {
       setGeneratingTestData(false);
@@ -285,7 +305,6 @@ export default function ExpiryTracker({ user, profile }) {
         if (error) {
           setItems([]);
           setMessage("Failed to load expiry records.");
-          console.error("Failed to load expiry records:", error.message);
           localStorage.setItem("falconmed_expiries", JSON.stringify([]));
           return;
         }
@@ -311,7 +330,6 @@ export default function ExpiryTracker({ user, profile }) {
       } catch (err) {
         setItems([]);
         setMessage("Failed to load expiry records.");
-        console.error("Expiry load error:", err?.message || "Unknown error");
       } finally {
         setLoading(false);
       }
@@ -371,7 +389,6 @@ export default function ExpiryTracker({ user, profile }) {
 
       if (error) {
         setMessage("Failed to save expiry item.");
-        console.error("Failed to save expiry item:", error.message);
         return;
       }
 
@@ -385,7 +402,6 @@ export default function ExpiryTracker({ user, profile }) {
             .order("expiry_date", { ascending: true });
 
           if (refreshError) {
-            console.error("Failed to refresh expiry records after insert:", refreshError.message);
             setItems((prev) => [newItem, ...prev]);
             return;
           }
@@ -408,10 +424,6 @@ export default function ExpiryTracker({ user, profile }) {
             )
           );
         } catch (refreshCatchErr) {
-          console.error(
-            "Failed to refresh expiry records after insert:",
-            refreshCatchErr?.message || "Unknown error"
-          );
           setItems((prev) => [newItem, ...prev]);
         }
       };
@@ -424,18 +436,13 @@ export default function ExpiryTracker({ user, profile }) {
           action: "Added",
           description: `Expiry item added: ${form.drugName}`,
         });
-
-        if (activityError) {
-          console.error("Failed to log expiry activity:", activityError.message);
-        }
       } catch (activityErr) {
-        console.error("Expiry activity log error:", activityErr?.message || "Unknown error");
+        // Ignore activity logging failures.
       }
 
       setMessage("Item added successfully.");
     } catch (err) {
       setMessage("Failed to save expiry item.");
-      console.error("Expiry save error:", err?.message || "Unknown error");
       return;
     }
 
@@ -693,7 +700,7 @@ export default function ExpiryTracker({ user, profile }) {
                 <th style={th}>Unit Cost</th>
                 <th style={th}>Value</th>
                 <th style={th}>Expiry Date</th>
-                <th style={th}>Pharmacy ID</th>
+                <th style={th}>Pharmacy</th>
                 <th style={th}>Status</th>
               </tr>
             </thead>
@@ -721,7 +728,9 @@ export default function ExpiryTracker({ user, profile }) {
                     <td style={td}>{item.unitPrice} AED</td>
                     <td style={{ ...td, fontWeight: 600 }}>{value.toLocaleString()} AED</td>
                     <td style={{ ...td, color: "#64748b" }}>{item.expiryDate}</td>
-                    <td style={{ ...td, color: "#64748b" }}>{item.pharmacyId || "-"}</td>
+                    <td style={{ ...td, color: "#64748b" }}>
+                      {pharmacyMap.get(String(item.pharmacyId || "").trim())?.name || "Unknown Pharmacy"}
+                    </td>
                     <td style={td}>
                       <span style={getStatusStyle(status)}>{status}</span>
                     </td>
@@ -857,7 +866,7 @@ const messageBox = {
   borderRadius: "10px",
   background: "#eff6ff",
   border: "1px solid #bfdbfe",
-  borderLeft: "4px solid #3b82f6",
+  boxShadow: "inset 4px 0 0 #3b82f6",
   color: "#1e3a5f",
   fontSize: "13px",
   fontWeight: 600,
@@ -867,7 +876,7 @@ const messageBoxSuccess = {
   ...messageBox,
   background: "#dcfce7",
   border: "1px solid #bbf7d0",
-  borderLeft: "4px solid #22c55e",
+  boxShadow: "inset 4px 0 0 #22c55e",
   color: "#166534",
 };
 
@@ -875,7 +884,7 @@ const messageBoxError = {
   ...messageBox,
   background: "#fee2e2",
   border: "1px solid #fecaca",
-  borderLeft: "4px solid #ef4444",
+  boxShadow: "inset 4px 0 0 #ef4444",
   color: "#991b1b",
 };
 
@@ -933,20 +942,6 @@ const drugDropdownEmpty = {
   border: "1.5px solid #e2e8f0",
   borderRadius: "12px",
   marginTop: "4px",
-};
-
-const textarea = {
-  width: "100%",
-  padding: "10px 12px",
-  fontSize: "14px",
-  borderRadius: "10px",
-  border: "1.5px solid #e2e8f0",
-  boxSizing: "border-box",
-  fontFamily: "'Segoe UI', Arial, sans-serif",
-  resize: "vertical",
-  minHeight: "72px",
-  color: "#0f172a",
-  background: "#fff",
 };
 
 const primaryBtn = {

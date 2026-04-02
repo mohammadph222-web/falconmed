@@ -12,9 +12,15 @@ import {
 } from "../../utils/pdss";
 import { buildDrugPriceMap } from "../../utils/drugPricing";
 import { generateAiRecommendations } from "../../utils/recommendationEngine";
-import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
+import { safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
 import { subscribeInventoryUpdated } from "../../utils/inventoryEvents";
+import {
+  computeInventoryAggregates,
+  fetchAllRows,
+  formatAed,
+  formatQty,
+} from "../../utils/inventoryAnalytics";
 
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
@@ -41,53 +47,6 @@ export default function ExecutiveDashboard() {
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
-  const computeInventorySnapshot = (inventoryRows = []) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const nearExpiryLimit = new Date(today);
-    nearExpiryLimit.setDate(nearExpiryLimit.getDate() + 180);
-
-    let totalInventoryValue = 0;
-    let nearExpiryRiskValue = 0;
-    let deadStockValue = 0;
-    let nearExpiryItems = 0;
-    const activeSites = new Set();
-
-    (inventoryRows || []).forEach((row) => {
-      const pharmacyId = String(row?.pharmacy_id || "").trim();
-      if (pharmacyId) {
-        activeSites.add(pharmacyId);
-      }
-
-      const qty = Number(row?.quantity || 0);
-      const unitCost = Number(row?.unit_cost || 0);
-      const lineValue = Math.max(0, qty) * Math.max(0, unitCost);
-      totalInventoryValue += lineValue;
-
-      const expiryRaw = row?.expiry_date;
-      if (!expiryRaw) return;
-      const expiryDate = new Date(expiryRaw);
-      if (Number.isNaN(expiryDate.getTime())) return;
-
-      if (expiryDate >= today && expiryDate <= nearExpiryLimit) {
-        nearExpiryItems += 1;
-        nearExpiryRiskValue += lineValue;
-      }
-
-      if (expiryDate < today) {
-        deadStockValue += lineValue;
-      }
-    });
-
-    return {
-      activeSites: activeSites.size,
-      nearExpiryItems,
-      totalInventoryValue,
-      nearExpiryRiskValue,
-      deadStockValue,
-    };
-  };
-
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -97,7 +56,6 @@ export default function ExecutiveDashboard() {
         shortageRes,
         refillRes,
         expiryRes,
-        pharmacyRes,
         inventoryRes,
         purchaseRes,
       ] = await Promise.all([
@@ -116,24 +74,19 @@ export default function ExecutiveDashboard() {
           "drug_name,quantity,location,batch_no,expiry_date,created_at",
           3000
         ),
-        safeFetch("pharmacies", "id,name", 3000),
-        safeFetch(
-          "pharmacy_inventory",
-          "pharmacy_id,quantity,unit_cost,expiry_date",
-          30000
-        ),
+        fetchAllRows("pharmacy_inventory", "pharmacy_id,quantity,unit_cost,expiry_date", {
+          orderBy: "created_at",
+          ascending: false,
+        }),
         safeFetch("purchase_requests", "id,status,drug_name,created_at", 3000),
       ]);
 
-      const localShortages = loadLocalArray("falconmed_shortages");
-      const localRefills = loadLocalArray("falconmed_refills");
-
-      const shortages = [...(shortageRes.data || []), ...localShortages];
-      const refills = [...(refillRes.data || []), ...localRefills];
+      const shortages = shortageRes.data || [];
+      const refills = refillRes.data || [];
       const expiryRecords = expiryRes.data || [];
       const inventoryRecords = inventoryRes.data || [];
       const purchaseRequests = purchaseRes.data || [];
-      const inventorySnapshot = computeInventorySnapshot(inventoryRecords);
+      const inventorySnapshot = computeInventoryAggregates(inventoryRecords);
 
       const computedShortageRows = calculateShortagePredictions({
         shortages,
@@ -167,14 +120,14 @@ export default function ExecutiveDashboard() {
       );
 
       setInventoryFinancials({
-        totalInventoryValue: inventorySnapshot.totalInventoryValue,
-        nearExpiryRiskValue: inventorySnapshot.nearExpiryRiskValue,
-        deadStockValue: inventorySnapshot.deadStockValue,
+        totalInventoryValue: inventorySnapshot.stockValue,
+        nearExpiryRiskValue: inventorySnapshot.nearExpiryStockValue,
+        deadStockValue: inventorySnapshot.expiredStockValue,
       });
 
       setSnapshotCounts({
         activeSites: inventorySnapshot.activeSites,
-        inventoryRecords: inventoryRecords.length,
+        inventoryRecords: inventorySnapshot.inventoryRecords,
         nearExpiryItems: inventorySnapshot.nearExpiryItems,
         shortageRequests: shortages.length,
         purchaseRequests: purchaseRequests.length,
@@ -371,57 +324,57 @@ export default function ExecutiveDashboard() {
               {renderStatusCard({ label: "Tracked Drugs", value: animTrackedDrugs, status: "stable" })}
               {renderStatusCard({
                 label: "High Risk Shortages",
-                value: animHighRisk,
+                value: formatQty(animHighRisk),
                 status: "critical",
                 valueStyle: { ...statValue, color: "#b91c1c" },
               })}
               {renderStatusCard({
                 label: "Medium Risk Shortages",
-                value: animMedRisk,
+                value: formatQty(animMedRisk),
                 status: "warning",
                 valueStyle: { ...statValue, color: "#b45309" },
               })}
               {renderStatusCard({
                 label: "Low Risk Shortages",
-                value: animLowRisk,
+                value: formatQty(animLowRisk),
                 status: "stable",
                 valueStyle: { ...statValue, color: "#166534" },
               })}
-              {renderStatusCard({ label: "Transfer Opportunities", value: animTransferOpp, status: "warning" })}
-              {renderStatusCard({ label: "Suggested Transfer Qty", value: animTransferQty, status: "warning" })}
+              {renderStatusCard({ label: "Transfer Opportunities", value: formatQty(animTransferOpp), status: "warning" })}
+              {renderStatusCard({ label: "Suggested Transfer Qty", value: formatQty(animTransferQty), status: "warning" })}
               {renderStatusCard({
                 label: "Expiry Loss (Est.)",
-                value: `AED ${animExpiryLoss.toLocaleString()}`,
+                value: formatAed(animExpiryLoss),
                 status: "critical",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
               })}
               {renderStatusCard({
                 label: "At-Risk Inventory",
-                value: `AED ${animAtRisk.toLocaleString()}`,
+                value: formatAed(animAtRisk),
                 status: "warning",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
               })}
               {renderStatusCard({
                 label: "Shortage Exposure (High)",
-                value: `AED ${animShortageExposure.toLocaleString()}`,
+                value: formatAed(animShortageExposure),
                 status: "critical",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#b91c1c" },
               })}
               {renderStatusCard({
                 label: "Total Inventory Value",
-                value: `AED ${animTotalInvValue.toLocaleString()}`,
+                value: formatAed(animTotalInvValue),
                 status: "stable",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#075985" },
               })}
               {renderStatusCard({
                 label: "Near-Expiry Risk Value",
-                value: `AED ${animNearExpiryRisk.toLocaleString()}`,
+                value: formatAed(animNearExpiryRisk),
                 status: "warning",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#b45309" },
               })}
               {renderStatusCard({
                 label: "Dead Stock Value",
-                value: `AED ${animDeadStock.toLocaleString()}`,
+                value: formatAed(animDeadStock),
                 status: "critical",
                 valueStyle: { ...statValue, fontSize: "22px", color: "#991b1b" },
               })}
@@ -490,7 +443,7 @@ export default function ExecutiveDashboard() {
                     <div style={recommendationAction}>{item.action}</div>
                     <div style={recommendationReason}>Reason: {item.reason}</div>
                     <div style={recommendationSaving}>
-                      Estimated saving: AED {Number(item.estimatedFinancialImpact || 0).toLocaleString()}
+                      Estimated saving: {formatAed(item.estimatedFinancialImpact || 0)}
                     </div>
                   </div>
                 ))}
