@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import drugsMasterCsv from "./data/drugs_master.csv?raw";
+import drugsMasterCsv from "../public/dru_gmaster.csv?raw";
 
 function parseCSVLine(line) {
   const result = [];

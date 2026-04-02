@@ -4,6 +4,10 @@ function normalizeDrugCode(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+function normalizeLookupValue(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
 function parseCsvLine(line) {
   const cells = [];
   let current = "";
@@ -56,17 +60,64 @@ export function buildDrugCodeMap(drugs = []) {
 
   (drugs || []).forEach((drug) => {
     const code = normalizeDrugCode(drug?.drug_code);
-    if (!code) return;
-    if (!map.has(code)) map.set(code, drug);
+    const barcode = normalizeLookupValue(resolveBarcode(drug));
+
+    if (code && !map.has(code)) {
+      map.set(code, drug);
+    }
+
+    if (barcode && !map.has(barcode)) {
+      map.set(barcode, drug);
+    }
   });
 
   return map;
 }
 
 export function findDrugByCode(drugCode, codeMap) {
-  const code = normalizeDrugCode(drugCode);
+  const code = normalizeLookupValue(drugCode);
   if (!code) return null;
   return codeMap?.get(code) || null;
+}
+
+export function findDrugByDrugCode(drugCode, drugs = []) {
+  const normalizedCode = normalizeDrugCode(drugCode);
+  if (!normalizedCode) {
+    return null;
+  }
+
+  return (
+    (drugs || []).find(
+      (drug) => normalizeDrugCode(drug?.drug_code) === normalizedCode
+    ) || null
+  );
+}
+
+export function findDrugByIdentifier(identifier, codeMap, drugs = []) {
+  const exactMatch = findDrugByCode(identifier, codeMap);
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const normalizedIdentifier = String(identifier || "").trim().toLowerCase();
+  if (!normalizedIdentifier) {
+    return null;
+  }
+
+  return (
+    (drugs || []).find((drug) => {
+      const candidates = [
+        drug?.drug_name,
+        drug?.brand_name,
+        drug?.generic_name,
+        getDrugDisplayName(drug),
+      ];
+
+      return candidates.some(
+        (value) => String(value || "").trim().toLowerCase() === normalizedIdentifier
+      );
+    }) || null
+  );
 }
 
 export function getMasterAutofill(drug, fallbackCode = "") {
@@ -77,21 +128,26 @@ export function getMasterAutofill(drug, fallbackCode = "") {
       brand_name: "",
       generic_name: "",
       barcode: "",
+      unit: "",
       unit_cost: "",
+      sales_price: "",
     };
   }
 
   const unitCost = getDrugUnitPrice(drug, "pharmacy");
+  const salesPrice = getDrugUnitPrice(drug, "public");
   const brand = String(drug.brand_name || "").trim();
   const generic = String(drug.generic_name || "").trim();
 
   return {
     drug_code: normalizeDrugCode(drug.drug_code || fallbackCode),
-    drug_name: getDrugDisplayName(drug),
+    drug_name: String(drug.drug_name || "").trim() || getDrugDisplayName(drug),
     brand_name: brand,
     generic_name: generic,
     barcode: resolveBarcode(drug),
+    unit: String(drug.unit || drug.pricing_unit || drug.base_unit || "").trim(),
     unit_cost: unitCost != null ? String(unitCost) : "",
+    sales_price: salesPrice != null ? String(salesPrice) : "",
   };
 }
 

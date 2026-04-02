@@ -119,7 +119,7 @@ The application uses static file serving and browser-based localStorage, ensurin
 ```
 falconmed/
 ├── public/
-│   └── drugs.csv                 # Medicine database
+│   └── dru_gmaster.csv           # Medicine database
 ├── src/
 │   ├── components/
 │   │   ├── App.jsx              # Main application component
@@ -138,7 +138,7 @@ falconmed/
 ## Data Architecture
 
 ### Medicine Database
-- **Location**: `public/drugs.csv`
+- **Location**: `public/dru_gmaster.csv`
 - **Format**: CSV with standardized columns (ID, Brand Name, Generic Name, Strength, Dosage Form)
 - **Loading**: Automatic on application initialization
 

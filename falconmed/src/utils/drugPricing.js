@@ -1,10 +1,10 @@
 /**
  * drugPricing.js
- * Parses the same drugs_master.csv used by DrugSearch and provides a
+ * Parses the same /dru_gmaster.csv used by DrugSearch and provides a
  * normalized drug-name → unit price lookup for Financial Intelligence.
  * No second CSV is added — this imports the identical source file.
  */
-import drugsMasterCsv from "../data/drugs_master.csv?raw";
+import drugsMasterCsv from "../../public/dru_gmaster.csv?raw";
 
 // ─── lightweight CSV parser (mirrors DrugSearch.jsx logic) ───────────────────
 

@@ -106,12 +106,12 @@ def main():
     parser = argparse.ArgumentParser(description="Clean drugs master CSV for Supabase import")
     parser.add_argument(
         "--input",
-        default="src/data/drugs_master.csv",
+        default="public/dru_gmaster.csv",
         help="Input CSV path",
     )
     parser.add_argument(
         "--output",
-        default="drug_master_clean.csv",
+        default="public/dru_gmaster.csv",
         help="Output cleaned CSV path",
     )
     args = parser.parse_args()

@@ -67,6 +67,17 @@ export async function loadPharmaciesWithFallback() {
 }
 
 export function normalizeInventoryRow(row) {
+  const rawUnitCost = row?.cost_price ?? row?.unit_cost;
+  const rawSalesPrice = row?.sales_price ?? row?.price_to_public;
+  const rawCostValue = row?.cost_value ?? row?.line_value;
+  const rawSalesValue = row?.sales_value;
+  const rawMarginValue = row?.margin_value;
+  const parsedUnitCost = Number(rawUnitCost);
+  const parsedSalesPrice = Number(rawSalesPrice);
+  const parsedCostValue = Number(rawCostValue);
+  const parsedSalesValue = Number(rawSalesValue);
+  const parsedMarginValue = Number(rawMarginValue);
+
   return {
     ...row,
     pharmacy_id: row?.pharmacy_id != null ? String(row.pharmacy_id) : "",
@@ -75,6 +86,30 @@ export function normalizeInventoryRow(row) {
     barcode: row?.barcode || "",
     expiry_date: row?.expiry_date || "",
     quantity: Number(row?.quantity || 0),
-    unit_cost: Number(row?.unit_cost || 0),
+    stock_unit: row?.stock_unit || row?.unit || "",
+    cost_price:
+      rawUnitCost == null || String(rawUnitCost).trim() === "" || !Number.isFinite(parsedUnitCost)
+        ? null
+        : parsedUnitCost,
+    unit_cost:
+      rawUnitCost == null || String(rawUnitCost).trim() === "" || !Number.isFinite(parsedUnitCost)
+        ? null
+        : parsedUnitCost,
+    sales_price:
+      rawSalesPrice == null || String(rawSalesPrice).trim() === "" || !Number.isFinite(parsedSalesPrice)
+        ? null
+        : parsedSalesPrice,
+    cost_value:
+      rawCostValue == null || String(rawCostValue).trim() === "" || !Number.isFinite(parsedCostValue)
+        ? null
+        : parsedCostValue,
+    sales_value:
+      rawSalesValue == null || String(rawSalesValue).trim() === "" || !Number.isFinite(parsedSalesValue)
+        ? null
+        : parsedSalesValue,
+    margin_value:
+      rawMarginValue == null || String(rawMarginValue).trim() === "" || !Number.isFinite(parsedMarginValue)
+        ? null
+        : parsedMarginValue,
   };
 }

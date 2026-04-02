@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import InsightCard from "./components/InsightCard";
 import SkeletonCard from "./components/SkeletonCard";
 import StatCard from "./components/StatCard";
@@ -12,14 +12,100 @@ import {
 import {
   buildDrugCodeMap,
   findDrugByCode,
+  findDrugByDrugCode,
+  findDrugByIdentifier,
   getMasterAutofill,
   parseCsvText,
 } from "./utils/drugMasterLookup";
 import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
 
+function normalizeLookupValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getDrugLookupLabel(drug) {
+  const barcode = String(drug?.barcode || "").trim();
+  if (barcode) {
+    return barcode;
+  }
+
+  const drugCode = String(drug?.drug_code || "").trim();
+  if (drugCode) {
+    return drugCode;
+  }
+
+  return getDrugDisplayName(drug);
+}
+
+function isQueryMatchedToDrug(query, drug) {
+  const normalizedQuery = normalizeLookupValue(query);
+  if (!normalizedQuery || !drug) {
+    return false;
+  }
+
+  const candidates = [
+    drug?.barcode,
+    drug?.drug_code,
+    drug?.drug_name,
+    drug?.brand_name,
+    drug?.generic_name,
+    getDrugDisplayName(drug),
+  ];
+
+  return candidates.some(
+    (value) => normalizeLookupValue(value) === normalizedQuery
+  );
+}
+
 function formatCurrency(value) {
   const n = Number(value || 0);
   return `AED ${n.toFixed(2)}`;
+}
+
+function roundMoney(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? Math.round((n + Number.EPSILON) * 100) / 100 : 0;
+}
+
+function calculateLineValue(quantity, unitCost) {
+  return roundMoney(Number(quantity || 0) * Number(unitCost || 0));
+}
+
+function resolveSalesPrice(item) {
+  return Number(item?.sales_price ?? item?.price_to_public ?? 0);
+}
+
+function resolveCostPrice(item) {
+  return Number(item?.cost_price ?? item?.unit_cost ?? 0);
+}
+
+function resolveCostValue(item) {
+  const rawCostValue = Number(item?.cost_value ?? item?.line_value);
+  if (Number.isFinite(rawCostValue)) {
+    return roundMoney(rawCostValue);
+  }
+  return calculateLineValue(item?.quantity, resolveCostPrice(item));
+}
+
+function parseSafePrice(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function resolveSalesValue(item) {
+  const rawSalesValue = Number(item?.sales_value);
+  if (Number.isFinite(rawSalesValue)) {
+    return roundMoney(rawSalesValue);
+  }
+  return calculateLineValue(item?.quantity, resolveSalesPrice(item));
+}
+
+function resolveMarginValue(item) {
+  const rawMarginValue = Number(item?.margin_value);
+  if (Number.isFinite(rawMarginValue)) {
+    return roundMoney(rawMarginValue);
+  }
+  return roundMoney(resolveSalesValue(item) - resolveCostValue(item));
 }
 
 export default function InventoryManagementPage() {
@@ -28,6 +114,7 @@ export default function InventoryManagementPage() {
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
   const [allDrugs, setAllDrugs] = useState([]);
   const [showDrugDropdown, setShowDrugDropdown] = useState(false);
+  const [selectedDrugMaster, setSelectedDrugMaster] = useState(null);
 
   const [drugCode, setDrugCode] = useState("");
   const [drug, setDrug] = useState("");
@@ -35,20 +122,25 @@ export default function InventoryManagementPage() {
   const [genericName, setGenericName] = useState("");
   const [barcode, setBarcode] = useState("");
   const [qty, setQty] = useState("");
+  const [stockUnit, setStockUnit] = useState("");
   const [cost, setCost] = useState("");
+  const [salesPrice, setSalesPrice] = useState("");
   const [expiry, setExpiry] = useState("");
   const [batch, setBatch] = useState("");
   const [masterLookupStatus, setMasterLookupStatus] = useState("");
   const [masterLookupTone, setMasterLookupTone] = useState("neutral");
-  const [importFile, setImportFile] = useState(null);
-  const [importBusy, setImportBusy] = useState(false);
-  const [importSummary, setImportSummary] = useState(null);
 
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [recentTransactions, setRecentTransactions] = useState([]);
+  const [bulkUploadSummary, setBulkUploadSummary] = useState(null);
+  const [bulkUploadProcessing, setBulkUploadProcessing] = useState(false);
+
+  const drugInputRef = useRef(null);
+  const quantityInputRef = useRef(null);
+  const bulkFileInputRef = useRef(null);
 
   useEffect(() => {
     fetchPharmacies();
@@ -151,330 +243,208 @@ export default function InventoryManagementPage() {
 
   const drugCodeMap = useMemo(() => buildDrugCodeMap(allDrugs), [allDrugs]);
 
-  const pharmacyNameMap = useMemo(() => {
-    const map = new Map();
-    pharmacies.forEach((pharmacy) => {
-      const normalized = String(pharmacy?.name || "").trim().toLowerCase();
-      if (!normalized) return;
-      map.set(normalized, String(pharmacy.id));
+  const clearSelectedDrug = () => {
+    setSelectedDrugMaster(null);
+    setDrug("");
+    setBrandName("");
+    setGenericName("");
+    setBarcode("");
+    setStockUnit("");
+    setCost("");
+    setSalesPrice("");
+  };
+
+  const focusQuantityField = () => {
+    window.requestAnimationFrame(() => {
+      quantityInputRef.current?.focus();
+      quantityInputRef.current?.select?.();
     });
-    return map;
-  }, [pharmacies]);
+  };
+
+  const focusDrugField = () => {
+    window.requestAnimationFrame(() => {
+      drugInputRef.current?.focus();
+      drugInputRef.current?.select?.();
+    });
+  };
+
+  const applyDrugSelection = (matchedDrug, lookupValue = "") => {
+    if (!matchedDrug) {
+      clearSelectedDrug();
+      return;
+    }
+
+    const autofill = getMasterAutofill(matchedDrug, lookupValue);
+
+    setSelectedDrugMaster(matchedDrug);
+    setDrug(autofill.drug_name);
+    setBrandName(autofill.brand_name);
+    setGenericName(autofill.generic_name);
+    setBarcode(autofill.barcode);
+    setStockUnit(autofill.unit);
+    setCost(autofill.unit_cost);
+    setSalesPrice(autofill.sales_price);
+    setMasterLookupStatus("Drug found in master database");
+    setMasterLookupTone("success");
+    focusQuantityField();
+  };
 
   useEffect(() => {
     const code = String(drugCode || "").trim();
 
     if (!code) {
-      setDrug("");
-      setBrandName("");
-      setGenericName("");
-      setBarcode("");
-      setCost("");
+      clearSelectedDrug();
       setMasterLookupStatus("");
       setMasterLookupTone("neutral");
       return;
     }
 
-    const matchedDrug = findDrugByCode(code, drugCodeMap);
-    if (!matchedDrug) {
-      setDrug("");
-      setBrandName("");
-      setGenericName("");
-      setBarcode("");
-      setCost("");
-      setMasterLookupStatus("Drug code not found");
-      setMasterLookupTone("error");
+    if (selectedDrugMaster && isQueryMatchedToDrug(code, selectedDrugMaster)) {
       return;
     }
 
-    const autofill = getMasterAutofill(matchedDrug, code);
-    setDrug(autofill.drug_name);
-    setBrandName(autofill.brand_name);
-    setGenericName(autofill.generic_name);
-    setBarcode(autofill.barcode);
-    setCost(autofill.unit_cost);
-    setMasterLookupStatus("Drug found in master database");
-    setMasterLookupTone("success");
-  }, [drugCode, drugCodeMap]);
+    const matchedDrug = findDrugByIdentifier(code, drugCodeMap, allDrugs);
+    if (matchedDrug) {
+      applyDrugSelection(matchedDrug, code);
+      setShowDrugDropdown(false);
+      return;
+    }
 
-  const runInventoryMutation = async ({ editingRowId, payload, legacyPayload }) => {
+    clearSelectedDrug();
+    if (code.length >= 2) {
+      setMasterLookupStatus("Select a drug from the search results");
+      setMasterLookupTone("neutral");
+    } else {
+      setMasterLookupStatus("");
+      setMasterLookupTone("neutral");
+    }
+  }, [allDrugs, drugCode, drugCodeMap, selectedDrugMaster]);
+
+  const runInventoryMutation = async ({ editingRowId, payloadAttempts = [] }) => {
     if (!supabase) {
       return { error: new Error("Database is not configured.") };
     }
 
-    const executeMutation = async (body) => {
-      if (editingRowId) {
-        return supabase.from("pharmacy_inventory").update(body).eq("id", editingRowId);
+    const executeMutation = async (body, attemptName) => {
+      try {
+        if (editingRowId) {
+          const result = await supabase.from("pharmacy_inventory").update(body).eq("id", editingRowId);
+          if (result.error) {
+            console.error("Inventory update attempt failed:", {
+              attempt: attemptName,
+              payload: body,
+              error: result.error,
+            });
+          }
+          return result;
+        }
+
+        const insertBody = {
+          ...body,
+        };
+
+        const result = await supabase.from("pharmacy_inventory").insert([insertBody]);
+        if (result.error) {
+          console.error("Inventory insert attempt failed:", {
+            attempt: attemptName,
+            payload: insertBody,
+            error: result.error,
+          });
+        }
+        return result;
+      } catch (mutationException) {
+        console.error("Inventory mutation threw exception:", {
+          attempt: attemptName,
+          payload: body,
+          error: mutationException,
+        });
+        return { error: mutationException };
       }
-
-      const insertBody = {
-        ...body,
-        created_at: new Date().toISOString(),
-      };
-
-      return supabase.from("pharmacy_inventory").insert([insertBody]);
     };
 
-    let mutation = await executeMutation(payload);
-
-    if (mutation.error) {
-      const message = String(mutation.error.message || "").toLowerCase();
-      const shouldFallback =
-        message.includes("column") ||
-        message.includes("schema cache") ||
-        message.includes("drug_code") ||
-        message.includes("brand_name") ||
-        message.includes("generic_name");
-
-      if (shouldFallback) {
-        mutation = await executeMutation(legacyPayload);
-      }
-    }
-
-    return mutation;
-  };
-
-  const parseUnitCost = (value) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
-  };
-
-  const getCsvValue = (row, keys) => {
-    for (const key of keys) {
-      const value = row?.[key];
-      if (value !== undefined && value !== null && String(value).trim() !== "") {
-        return String(value).trim();
-      }
-    }
-    return "";
-  };
-
-  const insertImportedInventoryRow = async ({
-    pharmacyId,
-    drugCode,
-    drugName,
-    brandName,
-    genericName,
-    barcodeValue,
-    quantityValue,
-    unitCostValue,
-    expiryDateValue,
-    batchNoValue,
-  }) => {
-    if (!supabase) {
-      return { error: new Error("Database is not configured."), usedVariant: null };
-    }
-
-    const baseCommon = {
-      pharmacy_id: pharmacyId,
-      drug_code: drugCode,
-      drug_name: drugName,
-      brand_name: brandName || null,
-      generic_name: genericName || null,
-      barcode: barcodeValue || null,
-      unit_cost: unitCostValue,
-      expiry_date: expiryDateValue,
-      created_at: new Date().toISOString(),
-    };
-
-    const variants = [
-      {
-        name: "quantity+batch_no",
-        payload: {
-          ...baseCommon,
-          quantity: quantityValue,
-          batch_no: batchNoValue,
-        },
-      },
-      {
-        name: "current_stock_qty+batch_no",
-        payload: {
-          ...baseCommon,
-          current_stock_qty: quantityValue,
-          batch_no: batchNoValue,
-        },
-      },
-      {
-        name: "quantity+batch",
-        payload: {
-          ...baseCommon,
-          quantity: quantityValue,
-          batch: batchNoValue,
-        },
-      },
-      {
-        name: "current_stock_qty+batch",
-        payload: {
-          ...baseCommon,
-          current_stock_qty: quantityValue,
-          batch: batchNoValue,
-        },
-      },
-    ];
-
-    let lastError = null;
-
-    for (const variant of variants) {
-      const mutation = await supabase.from("pharmacy_inventory").insert([variant.payload]);
+    for (const attempt of payloadAttempts) {
+      const mutation = await executeMutation(attempt.payload, attempt.name);
       if (!mutation.error) {
-        return { error: null, usedVariant: variant.name };
+        return mutation;
       }
 
-      lastError = mutation.error;
       const message = String(mutation.error.message || "").toLowerCase();
-      const isSchemaMismatch =
+      const schemaMismatch =
         message.includes("column") ||
         message.includes("schema cache") ||
         message.includes("could not find");
 
-      if (!isSchemaMismatch) {
-        return { error: mutation.error, usedVariant: variant.name };
+      if (!schemaMismatch) {
+        return mutation;
       }
     }
 
-    return { error: lastError, usedVariant: null };
+    return { error: new Error("Inventory save failed after all schema-safe attempts.") };
   };
 
-  function resetForm() {
+  const parseUnitCost = (value) => parseSafePrice(value);
+
+  const normalizeExpiryDate = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return null;
+    const parsed = new Date(text);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toISOString().slice(0, 10);
+  };
+
+  const buildInventoryPayload = ({ pharmacyId, matchedDrug, quantity, expiryDate, batchNo, lookupValue = "" }) => {
+    const autofill = getMasterAutofill(matchedDrug, lookupValue);
+    const resolvedDrugName =
+      autofill.drug_name || autofill.brand_name || autofill.generic_name || String(lookupValue || "").trim();
+    const resolvedUnitCost = parseUnitCost(autofill.unit_cost);
+    const resolvedSalesPrice = parseUnitCost(autofill.sales_price);
+    const resolvedUnit = String(autofill.unit || "").trim();
+
+    return {
+      payload: {
+        pharmacy_id: pharmacyId,
+        drug_name: resolvedDrugName,
+        barcode: autofill.barcode || autofill.drug_code || null,
+        quantity,
+        unit_cost: resolvedUnitCost,
+        sales_price: resolvedSalesPrice,
+        unit: resolvedUnit || null,
+        expiry_date: expiryDate,
+        batch_no: batchNo,
+        brand_name: autofill.brand_name || null,
+        generic_name: autofill.generic_name || null,
+      },
+      autofill,
+      resolvedDrugName,
+      resolvedUnitCost,
+      resolvedSalesPrice,
+      resolvedUnit,
+    };
+  };
+
+  function resetForm(options = {}) {
+    const { keepMessages = false, focusDrug = false } = options;
+
     setDrugCode("");
-    setDrug("");
-    setBrandName("");
-    setGenericName("");
-    setBarcode("");
+    clearSelectedDrug();
     setQty("");
-    setCost("");
     setExpiry("");
     setBatch("");
     setEditingId(null);
     setMasterLookupStatus("");
     setMasterLookupTone("neutral");
-    setError("");
-    setSuccess("");
-  }
+    setBulkUploadSummary(null);
 
-  async function handleBulkImport() {
-    if (!importFile) {
-      setError("Please choose a CSV file to import.");
-      return;
+    if (!keepMessages) {
+      setError("");
+      setSuccess("");
     }
 
-    setError("");
-    setSuccess("");
-    setImportSummary(null);
-    setImportBusy(true);
-
-    try {
-      const csvText = await importFile.text();
-      const { rows, headers } = parseCsvText(csvText);
-
-      const requiredHeaders = ["drug_code", "current_stock_qty", "batch_no", "expiry_date"];
-      const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
-
-      if (missingHeaders.length > 0) {
-        setError(`Missing required CSV column(s): ${missingHeaders.join(", ")}`);
-        setImportBusy(false);
-        return;
-      }
-
-      if (rows.length === 0) {
-        setError("CSV file has no data rows.");
-        setImportBusy(false);
-        return;
-      }
-
-      let importedRows = 0;
-      let skippedRows = 0;
-      const missingDrugCodes = new Set();
-      const insertErrors = [];
-
-      const selectedPharmacy = String(selectedPharmacyId || "").trim();
-      if (!selectedPharmacy) {
-        setError("Please select a pharmacy before CSV import.");
-        setImportBusy(false);
-        return;
-      }
-
-      for (const row of rows) {
-        const code = getCsvValue(row, ["drug_code", "code"]);
-        const quantityRaw = getCsvValue(row, ["current_stock_qty", "quantity", "qty"]);
-        const batchNo = getCsvValue(row, ["batch_no", "batch"]);
-        const expiryDate = getCsvValue(row, ["expiry_date", "expiry"]);
-        const overrideCostRaw = getCsvValue(row, ["unit_cost", "cost"]);
-
-        const quantity = Number(quantityRaw);
-        if (!code || !batchNo || !expiryDate || !Number.isFinite(quantity) || quantity < 0) {
-          skippedRows += 1;
-          continue;
-        }
-
-        const matchedDrug = findDrugByCode(code, drugCodeMap);
-        if (!matchedDrug) {
-          missingDrugCodes.add(code);
-          skippedRows += 1;
-          continue;
-        }
-
-        const autofill = getMasterAutofill(matchedDrug, code);
-
-        const overrideCost = parseUnitCost(overrideCostRaw);
-        const autoCost = parseUnitCost(autofill.unit_cost);
-        const finalUnitCost = overrideCost ?? autoCost ?? 0;
-
-        const resolvedDrugName =
-          autofill.drug_name || autofill.brand_name || autofill.generic_name || code;
-
-        const insertResult = await insertImportedInventoryRow({
-          pharmacyId: selectedPharmacy,
-          drugCode: autofill.drug_code,
-          drugName: resolvedDrugName,
-          brandName: autofill.brand_name,
-          genericName: autofill.generic_name,
-          barcodeValue: autofill.barcode,
-          quantityValue: quantity,
-          unitCostValue: finalUnitCost,
-          expiryDateValue: expiryDate,
-          batchNoValue: batchNo,
-        });
-
-        if (insertResult.error) {
-          console.error("CSV import row insert failed", {
-            code,
-            row,
-            error: insertResult.error,
-            variantTried: insertResult.usedVariant,
-          });
-          insertErrors.push(`${code}: ${insertResult.error.message || "Insert failed"}`);
-          skippedRows += 1;
-          continue;
-        }
-
-        importedRows += 1;
-      }
-
-      const missingCodesList = Array.from(missingDrugCodes);
-      setImportSummary({
-        importedRows,
-        skippedRows,
-        missingDrugCodes: missingCodesList,
-      });
-
-      if (importedRows > 0) {
-        setSuccess(`Import complete. ${importedRows} row(s) imported, ${skippedRows} row(s) skipped.`);
-        await fetchInventory(selectedPharmacyId);
-      } else {
-        setError("No rows were imported. Please check drug_code and required fields.");
-      }
-
-      if (insertErrors.length > 0) {
-        console.error("CSV import insert errors:", insertErrors);
-      }
-    } catch (importError) {
-      console.error("CSV import failed:", importError);
-      setError("Failed to import CSV file.");
+    if (focusDrug) {
+      focusDrugField();
     }
-
-    setImportBusy(false);
   }
+
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -489,18 +459,19 @@ export default function InventoryManagementPage() {
 
     const normalizedDrugCode = String(drugCode || "").trim();
     if (!normalizedDrugCode) {
-      setError("Drug code is required.");
+      setError("Drug is required.");
       return;
     }
 
-    const matchedDrug = findDrugByCode(normalizedDrugCode, drugCodeMap);
+    const matchedDrug =
+      selectedDrugMaster || findDrugByIdentifier(normalizedDrugCode, drugCodeMap, allDrugs);
     if (!matchedDrug) {
-      setError("Invalid drug code. Please select a valid code from master data.");
+      setError("Please select a valid drug from the master list.");
       return;
     }
 
-    if (!qty || Number(qty) < 0) {
-      setError("Please enter valid quantity.");
+    if (!qty || Number(qty) <= 0) {
+      setError("Please enter a valid quantity greater than 0.");
       return;
     }
 
@@ -514,46 +485,69 @@ export default function InventoryManagementPage() {
       return;
     }
 
-    const autofill = getMasterAutofill(matchedDrug, normalizedDrugCode);
-    const resolvedDrugName =
-      autofill.drug_name || autofill.brand_name || autofill.generic_name || normalizedDrugCode;
-    const resolvedUnitCost = parseUnitCost(autofill.unit_cost) ?? 0;
+    const quantityNumber = Number(qty) || 0;
+    const normalizedExpiry = normalizeExpiryDate(expiry);
 
-    const payload = {
-      pharmacy_id: selectedPharmacyId,
-      drug_code: autofill.drug_code,
-      drug_name: resolvedDrugName,
-      brand_name: autofill.brand_name || null,
-      generic_name: autofill.generic_name || null,
-      barcode: autofill.barcode || null,
-      quantity: Number(qty) || 0,
-      unit_cost: resolvedUnitCost,
-      expiry_date: expiry || null,
-      batch_no: batch.trim() || null,
-    };
+    if (!normalizedExpiry) {
+      setError("Expiry date is invalid. Please provide a valid date.");
+      return;
+    }
 
-    const legacyPayload = {
-      pharmacy_id: selectedPharmacyId,
-      drug_name: resolvedDrugName,
-      barcode: autofill.barcode || null,
-      quantity: Number(qty) || 0,
-      unit_cost: resolvedUnitCost,
-      expiry_date: expiry || null,
-      batch_no: batch.trim() || null,
-    };
-
-    const mutation = await runInventoryMutation({
-      editingRowId: editingId,
+    const {
       payload,
-      legacyPayload,
+      autofill,
+      resolvedDrugName,
+      resolvedUnitCost,
+      resolvedSalesPrice,
+      resolvedUnit,
+    } = buildInventoryPayload({
+      pharmacyId: selectedPharmacyId,
+      matchedDrug,
+      quantity: quantityNumber,
+      expiryDate: normalizedExpiry,
+      batchNo: batch.trim() || null,
+      lookupValue: normalizedDrugCode,
     });
 
+    if (!resolvedDrugName || !String(resolvedDrugName).trim()) {
+      setError("Drug name is required before saving.");
+      return;
+    }
+
+    let mutation;
+
+    try {
+      mutation = await runInventoryMutation({
+        editingRowId: editingId,
+        payloadAttempts: [{ name: "minimal_autofill_payload", payload }],
+      });
+    } catch (submitErr) {
+      console.error("Unexpected inventory save exception:", {
+        error: submitErr,
+        editingId,
+        selectedPharmacyId,
+        drugName: resolvedDrugName,
+        quantity: quantityNumber,
+      });
+      setError("Unexpected error while saving inventory. Please try again.");
+      return;
+    }
+
     if (mutation.error) {
-      console.error("Inventory insert/update error:", mutation.error);
-      setError(
-        (editingId ? "Failed to update record: " : "Failed to add record: ") +
-          (mutation.error.message || "Unknown error")
-      );
+      const errorMessage = String(mutation.error.message || "");
+
+      console.error("Inventory insert/update error details:", {
+        error: mutation.error,
+        code: mutation.error.code,
+        details: mutation.error.details,
+        hint: mutation.error.hint,
+        editingId,
+        selectedPharmacyId,
+        quantity: quantityNumber,
+        drugName: resolvedDrugName,
+      });
+
+      setError(errorMessage || "Unknown database error");
       return;
     }
 
@@ -563,21 +557,23 @@ export default function InventoryManagementPage() {
     const pharmacyName = selectedPharmacy?.name || `Pharmacy ${selectedPharmacyId}`;
     const actionVerb = editingId ? "Updated" : "Added";
     const movementType = editingId ? "UPDATE" : "ADD";
-    const quantityNumber = Number(qty) || 0;
     const batchValue = batch.trim() || "-";
     const expiryValue = expiry || "-";
     const nowIso = new Date().toISOString();
     const referenceValue = `Inventory ${movementType} - ${resolvedDrugName}`;
+    const costValue = calculateLineValue(quantityNumber, resolvedUnitCost);
 
     const txSummary =
       `${movementType} inventory transaction | ` +
       `Drug: ${resolvedDrugName} | ` +
-      `Qty: ${quantityNumber} | ` +
+      `Qty: ${quantityNumber} ${resolvedUnit || "units"} | ` +
       `Barcode: ${autofill.barcode || "-"} | ` +
       `Pharmacy: ${pharmacyName} | ` +
       `Batch: ${batchValue} | ` +
       `Expiry: ${expiryValue} | ` +
-      `Unit cost: ${resolvedUnitCost}`;
+      `Cost price: ${formatCurrency(resolvedUnitCost)} | ` +
+      `Sales price: ${formatCurrency(resolvedSalesPrice)} | ` +
+      `Cost value: ${formatCurrency(costValue)}`;
 
     try {
       const { error: activityError } = await supabase.from("activity_log").insert([
@@ -652,29 +648,41 @@ export default function InventoryManagementPage() {
       console.error("stock_movements insert failed:", stockInsertErr);
     }
 
+    resetForm({ keepMessages: true, focusDrug: true });
     setSuccess(
       editingId
         ? "Inventory record updated successfully."
-        : "Drug added successfully."
+        : "Inventory saved successfully."
     );
-
-    resetForm();
     fetchInventory(selectedPharmacyId);
   }
 
   function handleEdit(item) {
+    const lookupValue = item.barcode || item.drug_code || item.drug_name || item.drug || "";
+    const matchedDrug = findDrugByIdentifier(lookupValue, drugCodeMap, allDrugs);
+
     setEditingId(item.id);
-    setDrugCode(item.drug_code || "");
-    setDrug(item.drug_name || item.drug || "");
-    setBrandName(item.brand_name || "");
-    setGenericName(item.generic_name || "");
-    setBarcode(item.barcode || "");
+    setDrugCode(String(lookupValue || ""));
+
+    if (matchedDrug) {
+      applyDrugSelection(matchedDrug, lookupValue);
+    } else {
+      clearSelectedDrug();
+      setDrug(item.drug_name || item.drug || "");
+      setBrandName(item.brand_name || "");
+      setGenericName(item.generic_name || "");
+      setBarcode(item.barcode || "");
+      setStockUnit(item.stock_unit || item.unit || "");
+      setCost(item.unit_cost ?? "");
+      setSalesPrice(item.sales_price ?? item.price_to_public ?? "");
+    }
+
     setQty(item.quantity ?? "");
-    setCost(item.unit_cost ?? "");
     setExpiry(item.expiry_date || "");
     setBatch(item.batch_no || item.batch || "");
     setShowDrugDropdown(false);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    focusQuantityField();
   }
 
   async function handleDelete(id) {
@@ -802,10 +810,15 @@ export default function InventoryManagementPage() {
   }, [inventory]);
 
   const totalValue = useMemo(() => {
-    return inventory.reduce(
-      (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0),
-      0
-    );
+    return inventory.reduce((sum, item) => sum + resolveCostValue(item), 0);
+  }, [inventory]);
+
+  const totalSalesValue = useMemo(() => {
+    return inventory.reduce((sum, item) => sum + resolveSalesValue(item), 0);
+  }, [inventory]);
+
+  const potentialMargin = useMemo(() => {
+    return roundMoney(inventory.reduce((sum, item) => sum + resolveMarginValue(item), 0));
   }, [inventory]);
 
   const filteredDrugs = useMemo(
@@ -815,6 +828,8 @@ export default function InventoryManagementPage() {
 
   const animTotalItems = useAnimatedCounter(totalItems);
   const animTotalValue = useAnimatedCounter(totalValue);
+  const animTotalSalesValue = useAnimatedCounter(totalSalesValue);
+  const animPotentialMargin = useAnimatedCounter(potentialMargin);
   const animRecords = useAnimatedCounter(inventory.length);
 
   const inventoryInsight = useMemo(() => {
@@ -868,7 +883,7 @@ export default function InventoryManagementPage() {
     });
 
     const valueAtRisk = nearExpiryItems.reduce(
-      (sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_cost || 0),
+      (sum, item) => sum + resolveCostValue(item),
       0
     );
 
@@ -876,7 +891,7 @@ export default function InventoryManagementPage() {
     if (nearExpiryItems.length > 0) {
       let maxRiskValue = 0;
       nearExpiryItems.forEach((item) => {
-        const riskValue = Number(item.quantity || 0) * Number(item.unit_cost || 0);
+        const riskValue = resolveCostValue(item);
         if (riskValue > maxRiskValue) {
           maxRiskValue = riskValue;
           highestRiskItem = {
@@ -924,7 +939,7 @@ export default function InventoryManagementPage() {
         ...item,
         daysUntilExpiry,
         riskLevel,
-        riskValue: Number(item.quantity || 0) * Number(item.unit_cost || 0),
+        riskValue: calculateLineValue(item.quantity, item.unit_cost),
       });
     });
 
@@ -953,7 +968,6 @@ export default function InventoryManagementPage() {
 
     inventory.forEach((item) => {
       const qty = Number(item.quantity || 0);
-      const unitCost = Number(item.unit_cost || 0);
       if (qty > 0 && qty <= 10) lowStockCount += 1;
       if (item.expiry_date) {
         try {
@@ -961,10 +975,10 @@ export default function InventoryManagementPage() {
           if (!isNaN(expDate.getTime())) {
             if (expDate >= today && expDate <= in30) {
               criticalExpiryCount += 1;
-              valueAtRisk += qty * unitCost;
+              valueAtRisk += resolveCostValue(item);
             } else if (expDate > in30 && expDate <= in180) {
               nearExpiryCount += 1;
-              valueAtRisk += qty * unitCost;
+              valueAtRisk += resolveCostValue(item);
             }
           }
         } catch {
@@ -991,7 +1005,8 @@ export default function InventoryManagementPage() {
   }, [inventory, loading]);
 
   const handleDrugSelect = (selectedDrug) => {
-    setDrugCode(selectedDrug?.drug_code || "");
+    setDrugCode(getDrugLookupLabel(selectedDrug));
+    applyDrugSelection(selectedDrug, getDrugLookupLabel(selectedDrug));
     setShowDrugDropdown(false);
   };
 
@@ -1073,12 +1088,6 @@ export default function InventoryManagementPage() {
     boxShadow: "inset 0 1px 2px rgba(15,23,42,0.04)",
   };
 
-  const readonlyInputStyle = {
-    background: "#f8fafc",
-    color: "#334155",
-    cursor: "not-allowed",
-  };
-
   const fieldHint = {
     marginTop: "6px",
     fontSize: "11px",
@@ -1124,6 +1133,37 @@ export default function InventoryManagementPage() {
     lineHeight: 1.6,
   };
 
+  const selectedDrugCard = {
+    marginTop: "16px",
+    border: "1px solid #dbe7f5",
+    borderRadius: "16px",
+    padding: "16px",
+    background: "linear-gradient(180deg, #f8fbff 0%, #ffffff 100%)",
+  };
+
+  const selectedDrugGrid = {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+    gap: "12px",
+    marginTop: "14px",
+  };
+
+  const selectedDrugLabel = {
+    fontSize: "10px",
+    fontWeight: 700,
+    color: "#64748b",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    marginBottom: "6px",
+  };
+
+  const selectedDrugValue = {
+    fontSize: "14px",
+    fontWeight: 700,
+    color: "#0f172a",
+    lineHeight: 1.4,
+  };
+
   const buttonStyle = {
     padding: "11px 24px",
     borderRadius: "12px",
@@ -1156,7 +1196,7 @@ export default function InventoryManagementPage() {
 
   const kpiGrid = {
     display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
     gap: "16px",
   };
 
@@ -1274,9 +1314,9 @@ export default function InventoryManagementPage() {
   };
 
   const templateSample = [
-    "drug_code,current_stock_qty,batch_no,expiry_date",
+    "drug_code,quantity,batch_no,expiry_date",
     "H03-4489-00178-02,25,BATCH001,2027-12-31",
-    "N05-5258-05575-01,337,BATCH001,2027-12-31",
+    "N05-5258-05575-01,337,BATCH002,2027-12-31",
   ].join("\n");
 
   const handleDownloadCsvTemplate = () => {
@@ -1289,6 +1329,136 @@ export default function InventoryManagementPage() {
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+  };
+
+  const handleBulkUpload = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setBulkUploadSummary(null);
+
+    if (!selectedPharmacyId) {
+      setError("Please select a pharmacy before uploading CSV.");
+      event.target.value = "";
+      return;
+    }
+
+    if (!supabase) {
+      setError("Database is not configured.");
+      event.target.value = "";
+      return;
+    }
+
+    setBulkUploadProcessing(true);
+
+    try {
+      const text = await file.text();
+      const { rows, headers } = parseCsvText(text);
+      const requiredHeaders = ["drug_code", "quantity", "batch_no", "expiry_date"];
+      const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
+
+      if (missingHeaders.length > 0) {
+        setError(`CSV is missing required columns: ${missingHeaders.join(", ")}`);
+        return;
+      }
+
+      if (rows.length === 0) {
+        setError("CSV file does not contain any data rows.");
+        return;
+      }
+
+      const validPayloads = [];
+      const skippedRows = [];
+
+      rows.forEach((row, index) => {
+        const rowNumber = index + 2;
+        const drugCodeValue = String(row.drug_code || "").trim();
+        const quantityNumber = Number(row.quantity || 0);
+        const batchValue = String(row.batch_no || "").trim();
+        const normalizedExpiry = normalizeExpiryDate(row.expiry_date);
+
+        if (!drugCodeValue) {
+          skippedRows.push(`Row ${rowNumber}: drug_code is required.`);
+          return;
+        }
+
+        if (!Number.isFinite(quantityNumber) || quantityNumber <= 0) {
+          skippedRows.push(`Row ${rowNumber}: quantity must be greater than 0.`);
+          return;
+        }
+
+        if (!batchValue) {
+          skippedRows.push(`Row ${rowNumber}: batch_no is required.`);
+          return;
+        }
+
+        if (!normalizedExpiry) {
+          skippedRows.push(`Row ${rowNumber}: expiry_date is invalid.`);
+          return;
+        }
+
+        const matchedDrug = findDrugByDrugCode(drugCodeValue, allDrugs);
+        if (!matchedDrug) {
+          skippedRows.push(`Row ${rowNumber}: drug_code ${drugCodeValue} was not found in drug master.`);
+          return;
+        }
+
+        validPayloads.push(
+          buildInventoryPayload({
+            pharmacyId: selectedPharmacyId,
+            matchedDrug,
+            quantity: quantityNumber,
+            expiryDate: normalizedExpiry,
+            batchNo: batchValue,
+            lookupValue: drugCodeValue,
+          }).payload
+        );
+      });
+
+      if (validPayloads.length === 0) {
+        setError(skippedRows[0] || "No valid rows found in CSV upload.");
+        setBulkUploadSummary({ inserted: 0, skipped: skippedRows.length, issues: skippedRows.slice(0, 5) });
+        return;
+      }
+
+      const { error: uploadError } = await supabase.from("pharmacy_inventory").insert(validPayloads);
+
+      if (uploadError) {
+        console.error("Bulk inventory upload failed:", {
+          error: uploadError,
+          payloadSize: validPayloads.length,
+          samplePayload: validPayloads[0],
+        });
+        setError(String(uploadError.message || "Bulk upload failed."));
+        return;
+      }
+
+      setBulkUploadSummary({
+        inserted: validPayloads.length,
+        skipped: skippedRows.length,
+        issues: skippedRows.slice(0, 5),
+      });
+      setSuccess(
+        skippedRows.length > 0
+          ? `Bulk upload inserted ${validPayloads.length} rows. ${skippedRows.length} rows were skipped.`
+          : `Bulk upload inserted ${validPayloads.length} rows successfully.`
+      );
+      if (bulkFileInputRef.current) {
+        bulkFileInputRef.current.value = "";
+      }
+      fetchInventory(selectedPharmacyId);
+      focusDrugField();
+    } catch (uploadException) {
+      console.error("Bulk upload processing failed:", uploadException);
+      setError("Failed to process CSV upload.");
+    } finally {
+      setBulkUploadProcessing(false);
+      event.target.value = "";
+    }
   };
 
   const bannerError = {
@@ -1380,7 +1550,7 @@ export default function InventoryManagementPage() {
 
           <div style={kpiGrid}>
             {loading ? (
-              Array.from({ length: 3 }).map((_, index) => (
+              Array.from({ length: 4 }).map((_, index) => (
                 <SkeletonCard
                   key={`inventory-kpi-skeleton-${index}`}
                   style={{ ...kpiCard, borderTop: "4px solid #e2e8f0", minHeight: 112 }}
@@ -1410,7 +1580,7 @@ export default function InventoryManagementPage() {
                   style={kpiCard}
                   accentColor="#10b981"
                   accentBorderWidth={4}
-                  label="Total Value"
+                  label="Total Cost Value"
                   value={formatCurrency(animTotalValue)}
                   hint="Stock valuation at cost"
                   labelStyle={kpiLabel}
@@ -1420,11 +1590,23 @@ export default function InventoryManagementPage() {
                 <StatCard
                   className="ui-hover-lift"
                   style={kpiCard}
+                  accentColor="#0ea5e9"
+                  accentBorderWidth={4}
+                  label="Total Sales Value"
+                  value={formatCurrency(animTotalSalesValue)}
+                  hint="Projected retail valuation"
+                  labelStyle={kpiLabel}
+                  valueStyle={{ ...kpiValue, fontSize: "20px" }}
+                  hintStyle={kpiHint}
+                />
+                <StatCard
+                  className="ui-hover-lift"
+                  style={kpiCard}
                   accentColor="#8b5cf6"
                   accentBorderWidth={4}
-                  label="Records"
-                  value={animRecords}
-                  hint="Inventory line items"
+                  label="Potential Margin"
+                  value={formatCurrency(animPotentialMargin)}
+                  hint={`Records: ${animRecords}`}
                   labelStyle={kpiLabel}
                   valueStyle={kpiValue}
                   hintStyle={kpiHint}
@@ -1437,26 +1619,33 @@ export default function InventoryManagementPage() {
 
       <div style={cardStyle}>
         <div style={sectionTitle}>
-          {editingId ? "Edit Inventory Record" : "Add Inventory Entry"}
+          {editingId ? "Edit Inventory Record" : "Fast Inventory Entry"}
         </div>
 
         <form onSubmit={handleSubmit}>
           <div style={gridStyle}>
             <div>
-              <label style={labelStyle}>Search Drug (code or name)</label>
+              <label style={labelStyle}>Drug</label>
               <div style={{ position: "relative" }}>
                 <input
+                  ref={drugInputRef}
                   value={drugCode}
                   onChange={(e) => {
                     setDrugCode(e.target.value);
                     setShowDrugDropdown(true);
                   }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && selectedDrugMaster) {
+                      event.preventDefault();
+                      focusQuantityField();
+                    }
+                  }}
                   onFocus={() => setShowDrugDropdown(true)}
                   onBlur={() => setTimeout(() => setShowDrugDropdown(false), 160)}
-                  placeholder="Search by code, brand, or generic"
+                  placeholder="Scan barcode or type code / drug name"
                   style={inputStyle}
                 />
-                <div style={fieldHint}>Enter drug code to auto-fill drug details</div>
+                <div style={fieldHint}>Barcode scans auto-select the drug and move focus to quantity.</div>
                 {masterLookupStatus ? (
                   <div
                     style={{
@@ -1480,10 +1669,12 @@ export default function InventoryManagementPage() {
                         }}
                       >
                         <div style={{ fontWeight: 700, color: "#0f172a", fontSize: "14px" }}>
-                          {result.drug_code || "No code"} - {getDrugDisplayName(result)}
+                          {getDrugDisplayName(result)}
                         </div>
                         <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                          {result.generic_name || "Generic name unavailable"}
+                          {[result.barcode, result.drug_code, result.generic_name]
+                            .filter(Boolean)
+                            .join(" • ") || "Generic name unavailable"}
                         </div>
                       </div>
                     ))}
@@ -1493,51 +1684,11 @@ export default function InventoryManagementPage() {
             </div>
 
             <div>
-              <label style={labelStyle}>Brand Name</label>
+              <label style={labelStyle}>Quantity</label>
               <input
-                value={brandName}
-                readOnly
-                placeholder="Auto-filled from drug master"
-                style={{ ...inputStyle, ...readonlyInputStyle }}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Generic Name</label>
-              <input
-                value={genericName}
-                readOnly
-                placeholder="Auto-filled from drug master"
-                style={{ ...inputStyle, ...readonlyInputStyle }}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Barcode</label>
-              <input
-                value={barcode}
-                readOnly
-                placeholder="Auto-filled from drug master"
-                style={{ ...inputStyle, ...readonlyInputStyle }}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Unit Cost (AED)</label>
-              <input
+                ref={quantityInputRef}
                 type="number"
                 step="0.01"
-                value={cost}
-                readOnly
-                placeholder="Auto-filled from drug master"
-                style={{ ...inputStyle, ...readonlyInputStyle }}
-              />
-            </div>
-
-            <div>
-              <label style={labelStyle}>Quantity Added</label>
-              <input
-                type="number"
                 value={qty}
                 onChange={(e) => setQty(e.target.value)}
                 placeholder="e.g. 100"
@@ -1566,11 +1717,52 @@ export default function InventoryManagementPage() {
             </div>
           </div>
 
+          {selectedDrugMaster ? (
+            <div style={selectedDrugCard}>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                Auto-filled from drug master
+              </div>
+              <div style={{ marginTop: "8px", fontSize: "22px", fontWeight: 800, color: "#0f172a" }}>
+                {drug || getDrugDisplayName(selectedDrugMaster)}
+              </div>
+              <div style={selectedDrugGrid}>
+                <div>
+                  <div style={selectedDrugLabel}>Barcode</div>
+                  <div style={selectedDrugValue}>{barcode || "-"}</div>
+                </div>
+                <div>
+                  <div style={selectedDrugLabel}>Brand</div>
+                  <div style={selectedDrugValue}>{brandName || "-"}</div>
+                </div>
+                <div>
+                  <div style={selectedDrugLabel}>Generic</div>
+                  <div style={selectedDrugValue}>{genericName || "-"}</div>
+                </div>
+                <div>
+                  <div style={selectedDrugLabel}>Unit</div>
+                  <div style={selectedDrugValue}>{stockUnit || "-"}</div>
+                </div>
+                <div>
+                  <div style={selectedDrugLabel}>Unit Cost</div>
+                  <div style={selectedDrugValue}>{cost ? formatCurrency(cost) : "AED 0.00"}</div>
+                </div>
+                <div>
+                  <div style={selectedDrugLabel}>Sales Price</div>
+                  <div style={selectedDrugValue}>{salesPrice ? formatCurrency(salesPrice) : "AED 0.00"}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div style={{ display: "flex", gap: "10px", marginTop: "14px", flexWrap: "wrap" }}>
             <button type="submit" style={buttonStyle}>
               {editingId ? "Update Record" : "Save Entry"}
             </button>
-            <button type="button" style={secondaryButtonStyle} onClick={resetForm}>
+            <button
+              type="button"
+              style={secondaryButtonStyle}
+              onClick={() => resetForm({ focusDrug: true })}
+            >
               Clear
             </button>
           </div>
@@ -1578,32 +1770,45 @@ export default function InventoryManagementPage() {
       </div>
 
       <div style={cardStyle}>
-        <div style={sectionTitle}>Bulk Upload (Admin Setup)</div>
+        <div style={sectionTitle}>Bulk Upload</div>
         <div style={guideText}>
-          For large inventory uploads, use the prepared CSV template and import directly through Supabase Table Editor. Use Smart Entry for daily operations.
+          Upload a CSV with only drug code, quantity, batch number, and expiry date. FalconMed will enrich each row from drug master before inserting it.
         </div>
         <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
           <button type="button" style={buttonStyle} onClick={handleDownloadCsvTemplate}>
             Download CSV Template
           </button>
-          <a
-            href="https://supabase.com/docs/guides/database/tables#importing-data"
-            target="_blank"
-            rel="noreferrer"
+          <label
             style={{
               ...secondaryButtonStyle,
-              textDecoration: "none",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            How to Import in Supabase
-          </a>
+            {bulkUploadProcessing ? "Uploading..." : "Upload Inventory CSV"}
+            <input
+              ref={bulkFileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              onChange={handleBulkUpload}
+              style={{ display: "none" }}
+              disabled={bulkUploadProcessing}
+            />
+          </label>
         </div>
         <div style={smallNote}>
-          Recommended for first-time onboarding and large data uploads.
+          Required columns: drug_code, quantity, batch_no, expiry_date.
         </div>
+        {bulkUploadSummary ? (
+          <div style={importSummaryCard}>
+            <div style={importSummaryRow}>Inserted rows: {bulkUploadSummary.inserted}</div>
+            <div style={importSummaryRow}>Skipped rows: {bulkUploadSummary.skipped}</div>
+            {bulkUploadSummary.issues?.map((issue) => (
+              <div key={issue} style={importSummaryRow}>{issue}</div>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <div style={cardStyle}>
@@ -1802,6 +2007,7 @@ export default function InventoryManagementPage() {
                   <th style={thStyle}>Drug</th>
                   <th style={thStyle}>Barcode</th>
                   <th style={thStyle}>Qty</th>
+                  <th style={thStyle}>Unit</th>
                   <th style={thStyle}>Unit Cost</th>
                   <th style={thStyle}>Expiry Date</th>
                   <th style={thStyle}>Risk Value</th>
@@ -1824,7 +2030,9 @@ export default function InventoryManagementPage() {
                       <td style={{ ...tdStyle, fontWeight: 700 }}>{item.drug_name || "-"}</td>
                       <td style={{ ...tdStyle, color: "#64748b" }}>{item.barcode || "-"}</td>
                       <td style={tdStyle}>{item.quantity}</td>
-                      <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(item.unit_cost)}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>
+                        {item.unit_cost == null ? "-" : formatCurrency(item.unit_cost)}
+                      </td>
                       <td style={{ ...tdStyle, color: "#64748b" }}>{item.expiry_date || "-"}</td>
                       <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(item.riskValue)}</td>
                       <td style={tdStyle}>
@@ -2044,7 +2252,11 @@ export default function InventoryManagementPage() {
                   <th style={thStyle}>Drug</th>
                   <th style={thStyle}>Barcode</th>
                   <th style={thStyle}>Qty</th>
-                  <th style={thStyle}>Unit Cost</th>
+                  <th style={thStyle}>Unit</th>
+                  <th style={thStyle}>Cost Price</th>
+                  <th style={thStyle}>Sales Price</th>
+                  <th style={thStyle}>Cost Value</th>
+                  <th style={thStyle}>Sales Value</th>
                   <th style={thStyle}>Expiry</th>
                   <th style={thStyle}>Batch</th>
                   <th style={thStyle}>Actions</th>
@@ -2059,7 +2271,17 @@ export default function InventoryManagementPage() {
                     <td style={{ ...tdStyle, fontWeight: 700 }}>{item.drug_name || "-"}</td>
                     <td style={{ ...tdStyle, color: "#64748b" }}>{item.barcode || "-"}</td>
                     <td style={tdStyle}>{item.quantity}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(item.unit_cost)}</td>
+                    <td style={{ ...tdStyle, color: "#64748b" }}>{item.stock_unit || item.unit || "-"}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>{formatCurrency(resolveCostPrice(item))}</td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>
+                      {formatCurrency(resolveSalesPrice(item))}
+                    </td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>
+                      {formatCurrency(resolveCostValue(item))}
+                    </td>
+                    <td style={{ ...tdStyle, fontWeight: 600 }}>
+                      {formatCurrency(resolveSalesValue(item))}
+                    </td>
                     <td style={{ ...tdStyle, color: "#64748b" }}>{item.expiry_date || "-"}</td>
                     <td style={{ ...tdStyle, color: "#64748b" }}>{item.batch_no || "-"}</td>
                     <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
