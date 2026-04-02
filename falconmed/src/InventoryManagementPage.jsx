@@ -18,6 +18,46 @@ import {
   parseCsvText,
 } from "./utils/drugMasterLookup";
 import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
+import { emitInventoryUpdated } from "./utils/inventoryEvents";
+
+const INVENTORY_DRAFT_STORAGE_KEY = "falconmed_inventory_draft";
+const INVENTORY_BULK_PREVIEW_STORAGE_KEY = "falconmed_bulk_upload_preview";
+const INVENTORY_BULK_SUMMARY_STORAGE_KEY = "falconmed_inventory_upload_summary";
+
+function readStorageJson(key) {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStorageJson(key, value) {
+  try {
+    window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Ignore storage quota or serialization failures.
+  }
+}
+
+function clearStorageKey(key) {
+  try {
+    window.sessionStorage.removeItem(key);
+  } catch {
+    // Ignore storage remove failures.
+  }
+}
+
+function clearInventoryDraftStorage() {
+  clearStorageKey(INVENTORY_DRAFT_STORAGE_KEY);
+}
+
+function clearInventoryBulkPreviewStorage() {
+  clearStorageKey(INVENTORY_BULK_PREVIEW_STORAGE_KEY);
+}
 
 function normalizeLookupValue(value) {
   return String(value || "").trim().toLowerCase();
@@ -137,10 +177,163 @@ export default function InventoryManagementPage() {
   const [recentTransactions, setRecentTransactions] = useState([]);
   const [bulkUploadSummary, setBulkUploadSummary] = useState(null);
   const [bulkUploadProcessing, setBulkUploadProcessing] = useState(false);
+  const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
+
+  // Import preview + batch tracking
+  const [importPreview, setImportPreview] = useState(null);
+  // { pharmacyId, pharmacyName, validPayloads, skippedRows, totalQty, estimatedValue, previewRows }
+  const [lastImportBatch, setLastImportBatch] = useState(null);
+  // { batchId, pharmacyId, pharmacyName, rowCount }
+  const [undoProcessing, setUndoProcessing] = useState(false);
+  const [lastUploadSignature, setLastUploadSignature] = useState(null);
+  // duplicate-detection: "pharmacyId::filename::filesize"
 
   const drugInputRef = useRef(null);
   const quantityInputRef = useRef(null);
   const bulkFileInputRef = useRef(null);
+
+  const hasUnsavedInventoryFormChanges = useMemo(() => {
+    if (editingId) return true;
+    return Boolean(
+      String(drugCode || "").trim() ||
+      String(qty || "").trim() ||
+      String(batch || "").trim() ||
+      String(expiry || "").trim()
+    );
+  }, [batch, drugCode, editingId, expiry, qty]);
+
+  const hasUnsavedBulkChanges = useMemo(() => {
+    return Boolean(importPreview);
+  }, [importPreview]);
+
+  const hasUnsavedChanges = hasUnsavedInventoryFormChanges || hasUnsavedBulkChanges;
+
+  useEffect(() => {
+    const draft = readStorageJson(INVENTORY_DRAFT_STORAGE_KEY);
+    const preview = readStorageJson(INVENTORY_BULK_PREVIEW_STORAGE_KEY);
+    const summary = readStorageJson(INVENTORY_BULK_SUMMARY_STORAGE_KEY);
+
+    let restored = false;
+
+    if (draft?.selectedPharmacyId) {
+      setSelectedPharmacyId(String(draft.selectedPharmacyId));
+      restored = true;
+    }
+
+    if (draft?.form && typeof draft.form === "object") {
+      setDrugCode(String(draft.form.drugCode || ""));
+      setDrug(String(draft.form.drug || ""));
+      setBrandName(String(draft.form.brandName || ""));
+      setGenericName(String(draft.form.genericName || ""));
+      setBarcode(String(draft.form.barcode || ""));
+      setQty(String(draft.form.qty || ""));
+      setStockUnit(String(draft.form.stockUnit || ""));
+      setCost(String(draft.form.cost || ""));
+      setSalesPrice(String(draft.form.salesPrice || ""));
+      setExpiry(String(draft.form.expiry || ""));
+      setBatch(String(draft.form.batch || ""));
+      setMasterLookupStatus(String(draft.form.masterLookupStatus || ""));
+      setMasterLookupTone(String(draft.form.masterLookupTone || "neutral"));
+      setEditingId(draft.form.editingId || null);
+      restored = restored || Boolean(
+        String(draft.form.drugCode || "") ||
+        String(draft.form.qty || "") ||
+        String(draft.form.batch || "") ||
+        String(draft.form.expiry || "")
+      );
+    }
+
+    if (preview) {
+      setImportPreview(preview);
+      restored = true;
+    }
+
+    if (summary) {
+      if (summary.bulkUploadSummary) setBulkUploadSummary(summary.bulkUploadSummary);
+      if (summary.lastImportBatch) setLastImportBatch(summary.lastImportBatch);
+      if (summary.lastUploadSignature) {
+        setLastUploadSignature(String(summary.lastUploadSignature));
+      }
+    }
+
+    if (restored) {
+      setRestoredDraftMessage("Restored unsaved draft");
+    }
+  }, []);
+
+  useEffect(() => {
+    const draftPayload = {
+      selectedPharmacyId,
+      form: {
+        drugCode,
+        drug,
+        brandName,
+        genericName,
+        barcode,
+        qty,
+        stockUnit,
+        cost,
+        salesPrice,
+        expiry,
+        batch,
+        masterLookupStatus,
+        masterLookupTone,
+        editingId,
+      },
+    };
+
+    writeStorageJson(INVENTORY_DRAFT_STORAGE_KEY, draftPayload);
+  }, [
+    selectedPharmacyId,
+    drugCode,
+    drug,
+    brandName,
+    genericName,
+    barcode,
+    qty,
+    stockUnit,
+    cost,
+    salesPrice,
+    expiry,
+    batch,
+    masterLookupStatus,
+    masterLookupTone,
+    editingId,
+  ]);
+
+  useEffect(() => {
+    if (importPreview) {
+      writeStorageJson(INVENTORY_BULK_PREVIEW_STORAGE_KEY, importPreview);
+      return;
+    }
+    clearStorageKey(INVENTORY_BULK_PREVIEW_STORAGE_KEY);
+  }, [importPreview]);
+
+  useEffect(() => {
+    writeStorageJson(INVENTORY_BULK_SUMMARY_STORAGE_KEY, {
+      bulkUploadSummary,
+      lastImportBatch,
+      lastUploadSignature,
+    });
+  }, [bulkUploadSummary, lastImportBatch, lastUploadSignature]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+
+    const beforeUnloadHandler = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+    return () => window.removeEventListener("beforeunload", beforeUnloadHandler);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!restoredDraftMessage) return undefined;
+    const timer = window.setTimeout(() => setRestoredDraftMessage(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [restoredDraftMessage]);
 
   useEffect(() => {
     fetchPharmacies();
@@ -187,7 +380,15 @@ export default function InventoryManagementPage() {
     setPharmacies(data || []);
 
     if (data && data.length > 0) {
-      setSelectedPharmacyId(String(data[0].id));
+      const persisted = readStorageJson(INVENTORY_DRAFT_STORAGE_KEY);
+      const persistedPharmacyId = String(persisted?.selectedPharmacyId || "");
+      const hasPersistedPharmacy = data.some((row) => String(row?.id) === persistedPharmacyId);
+
+      if (hasPersistedPharmacy) {
+        setSelectedPharmacyId(persistedPharmacyId);
+      } else if (!selectedPharmacyId) {
+        setSelectedPharmacyId(String(data[0].id));
+      }
     } else {
       setLoading(false);
     }
@@ -654,7 +855,9 @@ export default function InventoryManagementPage() {
         ? "Inventory record updated successfully."
         : "Inventory saved successfully."
     );
+    clearInventoryDraftStorage();
     fetchInventory(selectedPharmacyId);
+    emitInventoryUpdated(selectedPharmacyId);
   }
 
   function handleEdit(item) {
@@ -803,6 +1006,7 @@ export default function InventoryManagementPage() {
 
     setSuccess("Record deleted successfully.");
     fetchInventory(selectedPharmacyId);
+    emitInventoryUpdated(selectedPharmacyId);
   }
 
   const totalItems = useMemo(() => {
@@ -1088,6 +1292,12 @@ export default function InventoryManagementPage() {
     boxShadow: "inset 0 1px 2px rgba(15,23,42,0.04)",
   };
 
+  const readonlyInputStyle = {
+    background: "#f8fafc",
+    color: "#334155",
+    cursor: "not-allowed",
+  };
+
   const fieldHint = {
     marginTop: "6px",
     fontSize: "11px",
@@ -1340,11 +1550,24 @@ export default function InventoryManagementPage() {
     setError("");
     setSuccess("");
     setBulkUploadSummary(null);
+    setImportPreview(null);
 
     if (!selectedPharmacyId) {
       setError("Please select a pharmacy before uploading CSV.");
       event.target.value = "";
       return;
+    }
+
+    // Duplicate-upload guard: same pharmacy + same filename + same size in same session
+    const uploadSignature = `${selectedPharmacyId}::${file.name}::${file.size}`;
+    if (lastUploadSignature === uploadSignature) {
+      const proceed = window.confirm(
+        "This file was already uploaded for this pharmacy in the current session.\nAre you sure you want to upload it again?"
+      );
+      if (!proceed) {
+        event.target.value = "";
+        return;
+      }
     }
 
     if (!supabase) {
@@ -1403,7 +1626,7 @@ export default function InventoryManagementPage() {
 
         const matchedDrug = findDrugByDrugCode(drugCodeValue, allDrugs);
         if (!matchedDrug) {
-          skippedRows.push(`Row ${rowNumber}: drug_code ${drugCodeValue} was not found in drug master.`);
+          skippedRows.push(`Row ${rowNumber}: drug_code "${drugCodeValue}" not found in drug master.`);
           return;
         }
 
@@ -1421,43 +1644,221 @@ export default function InventoryManagementPage() {
 
       if (validPayloads.length === 0) {
         setError(skippedRows[0] || "No valid rows found in CSV upload.");
-        setBulkUploadSummary({ inserted: 0, skipped: skippedRows.length, issues: skippedRows.slice(0, 5) });
-        return;
-      }
-
-      const { error: uploadError } = await supabase.from("pharmacy_inventory").insert(validPayloads);
-
-      if (uploadError) {
-        console.error("Bulk inventory upload failed:", {
-          error: uploadError,
-          payloadSize: validPayloads.length,
-          samplePayload: validPayloads[0],
+        setBulkUploadSummary({
+          inserted: 0,
+          skipped: skippedRows.length,
+          issues: skippedRows,
         });
-        setError(String(uploadError.message || "Bulk upload failed."));
         return;
       }
 
-      setBulkUploadSummary({
-        inserted: validPayloads.length,
-        skipped: skippedRows.length,
-        issues: skippedRows.slice(0, 5),
-      });
-      setSuccess(
-        skippedRows.length > 0
-          ? `Bulk upload inserted ${validPayloads.length} rows. ${skippedRows.length} rows were skipped.`
-          : `Bulk upload inserted ${validPayloads.length} rows successfully.`
+      const selectedPharmacy = pharmacies.find((p) => String(p.id) === String(selectedPharmacyId));
+      const pharmacyName = selectedPharmacy?.name || `Pharmacy ${selectedPharmacyId}`;
+      const totalQty = validPayloads.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
+      const estimatedValue = validPayloads.reduce(
+        (sum, p) => sum + Number(p.quantity || 0) * Number(p.unit_cost || 0),
+        0
       );
-      if (bulkFileInputRef.current) {
-        bulkFileInputRef.current.value = "";
-      }
-      fetchInventory(selectedPharmacyId);
-      focusDrugField();
+
+      setImportPreview({
+        pharmacyId: selectedPharmacyId,
+        pharmacyName,
+        validPayloads,
+        skippedRows,
+        totalQty,
+        estimatedValue,
+        previewRows: validPayloads.slice(0, 10),
+        fileName: file.name,
+        uploadSignature,
+      });
     } catch (uploadException) {
       console.error("Bulk upload processing failed:", uploadException);
-      setError("Failed to process CSV upload.");
+      setError("Failed to process CSV file.");
     } finally {
       setBulkUploadProcessing(false);
       event.target.value = "";
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPreview || importPreview.validPayloads.length === 0) return;
+
+    setBulkUploadProcessing(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const batchId =
+        typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : `import-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+      const payloadsWithBatch = importPreview.validPayloads.map((p) => ({
+        ...p,
+        import_batch_id: batchId,
+      }));
+
+      const { error: uploadError } = await supabase
+        .from("pharmacy_inventory")
+        .insert(payloadsWithBatch);
+
+      if (uploadError) {
+        console.error("Bulk inventory insert failed:", {
+          error: uploadError,
+          batchId,
+          payloadSize: payloadsWithBatch.length,
+          samplePayload: payloadsWithBatch[0],
+        });
+        setError(String(uploadError.message || "Import failed."));
+        return;
+      }
+
+      const { skippedRows, validPayloads, pharmacyName, pharmacyId } = importPreview;
+
+      setLastImportBatch({
+        batchId,
+        pharmacyId,
+        pharmacyName,
+        rowCount: validPayloads.length,
+      });
+      setLastUploadSignature(importPreview.uploadSignature);
+      setBulkUploadSummary({
+        inserted: validPayloads.length,
+        skipped: skippedRows.length,
+        issues: skippedRows,
+      });
+      setSuccess(
+        skippedRows.length > 0
+          ? `Import complete: ${validPayloads.length} rows inserted, ${skippedRows.length} skipped.`
+          : `Import complete: ${validPayloads.length} rows inserted successfully.`
+      );
+      setImportPreview(null);
+      clearInventoryBulkPreviewStorage();
+      clearInventoryDraftStorage();
+
+      try {
+        const nowIso = new Date().toISOString();
+        const totalImportedQty = validPayloads.reduce(
+          (sum, row) => sum + Number(row.quantity || 0),
+          0
+        );
+        const totalImportedValue = validPayloads.reduce(
+          (sum, row) => sum + Number(row.quantity || 0) * Number(row.unit_cost || 0),
+          0
+        );
+
+        await supabase.from("activity_log").insert([
+          {
+            action: "Imported",
+            module: "Inventory",
+            description:
+              `Bulk inventory import | Pharmacy: ${pharmacyName} | ` +
+              `Rows: ${validPayloads.length} | Qty: ${totalImportedQty} | ` +
+              `Value: ${formatCurrency(totalImportedValue)} | Batch: ${batchId}`,
+            created_at: nowIso,
+          },
+        ]);
+
+        await supabase.from("stock_movements").insert([
+          {
+            movement_type: "IMPORT",
+            drug_name: "Bulk Inventory Import",
+            quantity: totalImportedQty,
+            notes: `Imported ${validPayloads.length} inventory row(s) via CSV preview flow`,
+            from_pharmacy: "CSV Upload",
+            to_pharmacy: pharmacyName,
+            reference_no: `Inventory IMPORT - ${batchId}`,
+            created_by: "falconmed.demo@preview",
+            created_at: nowIso,
+          },
+        ]);
+      } catch (logErr) {
+        console.error("Bulk import log insert failed:", logErr);
+      }
+
+      if (bulkFileInputRef.current) bulkFileInputRef.current.value = "";
+      fetchInventory(selectedPharmacyId);
+      focusDrugField();
+      emitInventoryUpdated(selectedPharmacyId);
+    } catch (ex) {
+      console.error("Import confirm exception:", ex);
+      setError("Unexpected error during import. No rows were inserted.");
+    } finally {
+      setBulkUploadProcessing(false);
+    }
+  };
+
+  const handleCancelImport = () => {
+    setImportPreview(null);
+    clearInventoryBulkPreviewStorage();
+    if (bulkFileInputRef.current) bulkFileInputRef.current.value = "";
+  };
+
+  const handleUndoLastImport = async () => {
+    if (!lastImportBatch) return;
+
+    const { batchId, pharmacyName, rowCount } = lastImportBatch;
+    const confirmed = window.confirm(
+      `Undo last import?\nThis will permanently remove ${rowCount} row(s) imported for ${pharmacyName}.\n\nBatch ID: ${batchId}`
+    );
+    if (!confirmed) return;
+
+    setUndoProcessing(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const { error: deleteError } = await supabase
+        .from("pharmacy_inventory")
+        .delete()
+        .eq("import_batch_id", batchId)
+        .eq("pharmacy_id", lastImportBatch.pharmacyId);
+
+      if (deleteError) {
+        console.error("Undo import delete failed:", deleteError);
+        setError(String(deleteError.message || "Undo failed."));
+        return;
+      }
+
+      setSuccess(`Undo complete: ${rowCount} row(s) removed from ${pharmacyName}.`);
+      setLastImportBatch(null);
+      setBulkUploadSummary(null);
+
+      try {
+        const nowIso = new Date().toISOString();
+        await supabase.from("activity_log").insert([
+          {
+            action: "Undo Import",
+            module: "Inventory",
+            description: `Undo bulk inventory import | Pharmacy: ${pharmacyName} | Rows: ${rowCount} | Batch: ${batchId}`,
+            created_at: nowIso,
+          },
+        ]);
+
+        await supabase.from("stock_movements").insert([
+          {
+            movement_type: "UNDO_IMPORT",
+            drug_name: "Bulk Import Rollback",
+            quantity: rowCount,
+            notes: `Rolled back batch ${batchId}`,
+            from_pharmacy: pharmacyName,
+            to_pharmacy: "Rollback",
+            reference_no: `Inventory UNDO - ${batchId}`,
+            created_by: "falconmed.demo@preview",
+            created_at: nowIso,
+          },
+        ]);
+      } catch (undoLogErr) {
+        console.error("Undo import log insert failed:", undoLogErr);
+      }
+
+      fetchInventory(selectedPharmacyId);
+      emitInventoryUpdated(selectedPharmacyId);
+    } catch (ex) {
+      console.error("Undo import exception:", ex);
+      setError("Unexpected error during undo.");
+    } finally {
+      setUndoProcessing(false);
     }
   };
 
@@ -1513,6 +1914,7 @@ export default function InventoryManagementPage() {
       </div>
 
       {error && <div style={bannerError}>{error}</div>}
+      {restoredDraftMessage && <div style={bannerSuccess}>{restoredDraftMessage}</div>}
       {success && <div style={bannerSuccess}>{success}</div>}
 
       <div style={cardStyle}>
@@ -1619,7 +2021,7 @@ export default function InventoryManagementPage() {
 
       <div style={cardStyle}>
         <div style={sectionTitle}>
-          {editingId ? "Edit Inventory Record" : "Fast Inventory Entry"}
+          {editingId ? "Edit Inventory Record" : "Add Inventory Entry"}
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -1684,6 +2086,90 @@ export default function InventoryManagementPage() {
             </div>
 
             <div>
+              <label style={labelStyle}>Drug Name</label>
+              <input
+                value={drug}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Drug Code</label>
+              <input
+                value={selectedDrugMaster?.drug_code || ""}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Brand Name</label>
+              <input
+                value={brandName}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Generic Name</label>
+              <input
+                value={genericName}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Barcode</label>
+              <input
+                value={barcode}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Unit</label>
+              <input
+                value={stockUnit}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Unit Cost (AED)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={cost}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
+              <label style={labelStyle}>Sales Price (AED)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={salesPrice}
+                readOnly
+                placeholder="Auto-filled from drug master"
+                style={{ ...inputStyle, ...readonlyInputStyle }}
+              />
+            </div>
+
+            <div>
               <label style={labelStyle}>Quantity</label>
               <input
                 ref={quantityInputRef}
@@ -1728,7 +2214,7 @@ export default function InventoryManagementPage() {
               <div style={selectedDrugGrid}>
                 <div>
                   <div style={selectedDrugLabel}>Barcode</div>
-                  <div style={selectedDrugValue}>{barcode || "-"}</div>
+                  <div style={selectedDrugValue}>{barcode || selectedDrugMaster?.drug_code || "-"}</div>
                 </div>
                 <div>
                   <div style={selectedDrugLabel}>Brand</div>
@@ -1771,44 +2257,193 @@ export default function InventoryManagementPage() {
 
       <div style={cardStyle}>
         <div style={sectionTitle}>Bulk Upload</div>
-        <div style={guideText}>
-          Upload a CSV with only drug code, quantity, batch number, and expiry date. FalconMed will enrich each row from drug master before inserting it.
-        </div>
-        <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-          <button type="button" style={buttonStyle} onClick={handleDownloadCsvTemplate}>
-            Download CSV Template
-          </button>
-          <label
-            style={{
-              ...secondaryButtonStyle,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {bulkUploadProcessing ? "Uploading..." : "Upload Inventory CSV"}
-            <input
-              ref={bulkFileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              onChange={handleBulkUpload}
-              style={{ display: "none" }}
-              disabled={bulkUploadProcessing}
-            />
-          </label>
-        </div>
-        <div style={smallNote}>
-          Required columns: drug_code, quantity, batch_no, expiry_date.
-        </div>
-        {bulkUploadSummary ? (
-          <div style={importSummaryCard}>
-            <div style={importSummaryRow}>Inserted rows: {bulkUploadSummary.inserted}</div>
-            <div style={importSummaryRow}>Skipped rows: {bulkUploadSummary.skipped}</div>
-            {bulkUploadSummary.issues?.map((issue) => (
-              <div key={issue} style={importSummaryRow}>{issue}</div>
-            ))}
+
+        {/* ── Step 1: upload controls (hidden while preview is showing) ── */}
+        {!importPreview && (
+          <>
+            <div style={guideText}>
+              Upload a CSV with only drug code, quantity, batch number, and expiry date.
+              FalconMed validates every row against drug master and shows a preview before
+              inserting anything.
+            </div>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
+              <button type="button" style={buttonStyle} onClick={handleDownloadCsvTemplate}>
+                Download CSV Template
+              </button>
+              <label
+                style={{
+                  ...secondaryButtonStyle,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  opacity: bulkUploadProcessing ? 0.6 : 1,
+                  cursor: bulkUploadProcessing ? "not-allowed" : "pointer",
+                }}
+              >
+                {bulkUploadProcessing ? "Reading file…" : "Upload Inventory CSV"}
+                <input
+                  ref={bulkFileInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={handleBulkUpload}
+                  style={{ display: "none" }}
+                  disabled={bulkUploadProcessing}
+                />
+              </label>
+              {lastImportBatch && (
+                <button
+                  type="button"
+                  disabled={undoProcessing}
+                  onClick={handleUndoLastImport}
+                  style={{
+                    ...secondaryButtonStyle,
+                    borderColor: "#fca5a5",
+                    color: "#b91c1c",
+                    background: "#fff5f5",
+                    opacity: undoProcessing ? 0.6 : 1,
+                    cursor: undoProcessing ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {undoProcessing ? "Undoing…" : `Undo Last Import (${lastImportBatch.rowCount} rows)`}
+                </button>
+              )}
+            </div>
+            <div style={smallNote}>
+              Required columns: drug_code, quantity, batch_no, expiry_date.
+            </div>
+
+            {/* Post-import summary (shown after confirm or undo) */}
+            {bulkUploadSummary && !importPreview && (
+              <div style={{ ...importSummaryCard, marginTop: "16px" }}>
+                <div style={{ ...importSummaryRow, fontWeight: 700 }}>
+                  ✓ Import complete
+                </div>
+                <div style={importSummaryRow}>Inserted: {bulkUploadSummary.inserted} rows</div>
+                {bulkUploadSummary.skipped > 0 && (
+                  <div style={{ ...importSummaryRow, color: "#92400e" }}>
+                    Skipped: {bulkUploadSummary.skipped} rows
+                  </div>
+                )}
+                {bulkUploadSummary.issues?.slice(0, 5).map((issue) => (
+                  <div key={issue} style={{ ...importSummaryRow, color: "#b91c1c", fontSize: "12px" }}>
+                    {issue}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Step 2: preview card (shown after parsing, before confirming) ── */}
+        {importPreview && (
+          <div>
+            {/* Summary bar */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                gap: "12px",
+                marginBottom: "18px",
+              }}
+            >
+              {[
+                { label: "Pharmacy", value: importPreview.pharmacyName },
+                { label: "Total Rows", value: importPreview.validPayloads.length + importPreview.skippedRows.length },
+                { label: "Valid Rows", value: importPreview.validPayloads.length },
+                { label: "Skipped", value: importPreview.skippedRows.length },
+                { label: "Total Qty", value: importPreview.totalQty.toLocaleString() },
+                { label: "Est. Cost Value", value: formatCurrency(importPreview.estimatedValue) },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ ...kpiCard, textAlign: "left", padding: "14px 16px" }}>
+                  <div style={kpiLabel}>{label}</div>
+                  <div style={{ ...kpiValue, fontSize: "18px" }}>{value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Validation errors */}
+            {importPreview.skippedRows.length > 0 && (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  borderRadius: "12px",
+                  padding: "12px 14px",
+                }}
+              >
+                <div style={{ fontWeight: 700, fontSize: "12px", color: "#92400e", marginBottom: "6px" }}>
+                  {importPreview.skippedRows.length} row(s) will be skipped
+                </div>
+                {importPreview.skippedRows.slice(0, 5).map((issue) => (
+                  <div key={issue} style={{ fontSize: "12px", color: "#b45309", lineHeight: 1.7 }}>{issue}</div>
+                ))}
+                {importPreview.skippedRows.length > 5 && (
+                  <div style={{ fontSize: "12px", color: "#b45309" }}>
+                    … and {importPreview.skippedRows.length - 5} more.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* First-10 rows preview table */}
+            <div style={{ overflowX: "auto", marginBottom: "18px" }}>
+              <div style={{ fontWeight: 700, fontSize: "12px", color: "#334155", marginBottom: "8px" }}>
+                Preview (first {importPreview.previewRows.length} of {importPreview.validPayloads.length} valid rows)
+              </div>
+              <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, fontSize: "13px" }}>
+                <thead>
+                  <tr>
+                    {["Drug Name", "Brand", "Barcode", "Qty", "Unit", "Unit Cost", "Sales Price", "Expiry", "Batch"].map((h) => (
+                      <th key={h} style={{ ...thStyle, fontSize: "10px" }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {importPreview.previewRows.map((row, idx) => (
+                    <tr key={`preview-${idx}`} style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}>
+                      <td style={{ ...tdStyle, fontWeight: 600 }}>{row.drug_name || "-"}</td>
+                      <td style={tdStyle}>{row.brand_name || "-"}</td>
+                      <td style={{ ...tdStyle, color: "#64748b" }}>{row.barcode || "-"}</td>
+                      <td style={tdStyle}>{row.quantity}</td>
+                      <td style={tdStyle}>{row.unit || "-"}</td>
+                      <td style={tdStyle}>{formatCurrency(row.unit_cost)}</td>
+                      <td style={tdStyle}>{formatCurrency(row.sales_price)}</td>
+                      <td style={{ ...tdStyle, color: "#64748b" }}>{row.expiry_date}</td>
+                      <td style={{ ...tdStyle, color: "#64748b" }}>{row.batch_no}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Confirm / Cancel */}
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                disabled={bulkUploadProcessing}
+                onClick={handleConfirmImport}
+                style={{
+                  ...buttonStyle,
+                  opacity: bulkUploadProcessing ? 0.6 : 1,
+                  cursor: bulkUploadProcessing ? "not-allowed" : "pointer",
+                }}
+              >
+                {bulkUploadProcessing
+                  ? "Inserting…"
+                  : `Confirm Import (${importPreview.validPayloads.length} rows)`}
+              </button>
+              <button
+                type="button"
+                style={secondaryButtonStyle}
+                disabled={bulkUploadProcessing}
+                onClick={handleCancelImport}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-        ) : null}
+        )}
       </div>
 
       <div style={cardStyle}>

@@ -30,6 +30,7 @@ import {
   getUpgradeMessage,
   PLAN_LABELS,
 } from "./config/featureAccess";
+import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
 
 const NAVIGATION_SECTIONS = [
   {
@@ -113,8 +114,17 @@ export default function App() {
   const [liveOperationsToday, setLiveOperationsToday] = useState(0);
   const [inventoryRiskHeatmap, setInventoryRiskHeatmap] = useState([]);
   const [heatmapLoading, setHeatmapLoading] = useState(false);
+  const [inventoryRefreshTick, setInventoryRefreshTick] = useState(0);
 
-  const safeCount = async (tableName) => {
+  useEffect(() => {
+    const unsubscribe = subscribeInventoryUpdated(() => {
+      setInventoryRefreshTick((prev) => prev + 1);
+    });
+
+    return unsubscribe;
+  }, []);
+
+  const safeCount = useCallback(async (tableName) => {
     if (!supabase) return 0;
 
     try {
@@ -127,7 +137,7 @@ export default function App() {
     } catch {
       return 0;
     }
-  };
+  }, []);
 
   const loadRecentActivity = async () => {
     if (!supabase) {
@@ -230,7 +240,7 @@ export default function App() {
   useEffect(() => {
     if (!user || page !== "dashboard") return;
     void loadRecentActivity();
-  }, [page, user]);
+  }, [page, user, inventoryRefreshTick]);
 
   const loadInventoryRiskHeatmap = async () => {
     if (!supabase) {
@@ -283,7 +293,7 @@ export default function App() {
 
         const entry = pharmacyMap.get(key);
         const qty = Number(row?.quantity ?? 0);
-        if (Number.isFinite(qty) && qty <= 10) {
+        if (Number.isFinite(qty) && qty > 0 && qty <= 10) {
           entry.lowStockCount += 1;
         }
 
@@ -296,23 +306,11 @@ export default function App() {
         }
       });
 
-      const byName = new Map();
-      Array.from(pharmacyMap.values()).forEach((entry) => {
-        const normalizedName = String(entry?.pharmacyName || "Unknown Pharmacy").trim().toLowerCase();
-        if (!byName.has(normalizedName)) {
-          byName.set(normalizedName, {
-            pharmacyName: String(entry?.pharmacyName || "Unknown Pharmacy"),
-            lowStockCount: 0,
-            nearExpiryCount: 0,
-          });
-        }
-
-        const agg = byName.get(normalizedName);
-        agg.lowStockCount += Number(entry?.lowStockCount || 0);
-        agg.nearExpiryCount += Number(entry?.nearExpiryCount || 0);
-      });
-
-      const rows = Array.from(byName.values())
+      const rows = Array.from(pharmacyMap.entries())
+        .map(([pharmacyId, entry]) => ({
+          pharmacyId,
+          ...entry,
+        }))
         .map((entry) => ({
           ...entry,
           issueCount: Number(entry.lowStockCount || 0) + Number(entry.nearExpiryCount || 0),
@@ -330,40 +328,85 @@ export default function App() {
   useEffect(() => {
     if (!user || page !== "dashboard") return;
     void loadInventoryRiskHeatmap();
-  }, [page, user]);
+  }, [page, user, inventoryRefreshTick]);
+
+  const loadDashboardMetrics = useCallback(async () => {
+    if (!supabase) {
+      setActiveSites(0);
+      setInventoryRecords(0);
+      setNearExpiry(0);
+      setShortageRequests(0);
+      setPurchaseRequests(0);
+      setRefillRequests(0);
+      return;
+    }
+
+    const [
+      inventoryResult,
+      shortageCount,
+      purchaseCount,
+      refillCount,
+      pharmaciesCount,
+    ] = await Promise.all([
+      supabase
+        .from("pharmacy_inventory")
+        .select("pharmacy_id,quantity,expiry_date")
+        .limit(30000),
+      safeCount("shortage_requests"),
+      safeCount("purchase_requests"),
+      safeCount("refill_requests"),
+      safeCount("pharmacies"),
+    ]);
+
+    const rows = inventoryResult?.error ? [] : inventoryResult?.data || [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const nearExpiryCutoff = new Date(today);
+    nearExpiryCutoff.setDate(nearExpiryCutoff.getDate() + 180);
+
+    const uniqueSites = new Set();
+    let nearExpiryCount = 0;
+
+    rows.forEach((row) => {
+      const pharmacyId = String(row?.pharmacy_id || "").trim();
+      if (pharmacyId) {
+        uniqueSites.add(pharmacyId);
+      }
+
+      const expiryRaw = row?.expiry_date;
+      if (!expiryRaw) return;
+      const expiryDate = new Date(expiryRaw);
+      if (Number.isNaN(expiryDate.getTime())) return;
+      if (expiryDate >= today && expiryDate <= nearExpiryCutoff) {
+        nearExpiryCount += 1;
+      }
+    });
+
+    const fallbackInventoryCount = await safeCount("pharmacy_inventory");
+    const resolvedInventoryCount = rows.length > 0 ? rows.length : fallbackInventoryCount;
+    const resolvedSiteCount = uniqueSites.size > 0 ? uniqueSites.size : pharmaciesCount;
+
+    setActiveSites(resolvedSiteCount || 0);
+    setInventoryRecords(resolvedInventoryCount || 0);
+    setNearExpiry(nearExpiryCount);
+    setShortageRequests(shortageCount || 0);
+    setPurchaseRequests(purchaseCount || 0);
+    setRefillRequests(refillCount || 0);
+  }, [safeCount]);
 
   useEffect(() => {
     if (!user) return undefined;
 
     let isMounted = true;
 
-    const loadDashboardMetrics = async () => {
-      const [pharmaciesCount, inventoryCount, expiryCount, shortageCount, purchaseCount, refillCount] =
-        await Promise.all([
-          safeCount("pharmacies"),
-          safeCount("pharmacy_inventory"),
-          safeCount("expiry_records"),
-          safeCount("shortage_requests"),
-          safeCount("purchase_requests"),
-          safeCount("refill_requests"),
-        ]);
-
+    void loadDashboardMetrics().then(() => {
       if (!isMounted) return;
-
-      setActiveSites(pharmaciesCount || 0);
-      setInventoryRecords(inventoryCount || 0);
-      setNearExpiry(expiryCount || 0);
-      setShortageRequests(shortageCount || 0);
-      setPurchaseRequests(purchaseCount || 0);
-      setRefillRequests(refillCount || 0);
-    };
-
-    void loadDashboardMetrics();
+    });
 
     return () => {
       isMounted = false;
     };
-  }, [user]);
+  }, [user, inventoryRefreshTick, loadDashboardMetrics]);
 
   const totalDrugsInDatabase = inventoryRecords;
   const nearExpiryItems = nearExpiry;
@@ -874,7 +917,7 @@ export default function App() {
                               : heatIndicatorRed;
 
                         return (
-                          <div key={`${row.pharmacyName}-${idx}`} style={heatmapCard}>
+                          <div key={`${row.pharmacyId}-${idx}`} style={heatmapCard}>
                             <div style={heatmapCardHeader}>
                               <div style={heatmapPharmacyName}>{row.pharmacyName}</div>
                               <span style={{ ...heatIndicatorBase, ...indicatorStyle }}>

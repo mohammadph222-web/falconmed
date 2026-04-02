@@ -4,6 +4,7 @@ import SkeletonCard from "./components/SkeletonCard";
 import { supabase } from "./lib/supabaseClient";
 import { loadPharmaciesWithFallback, normalizeInventoryRow } from "./utils/pharmacyData";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
+import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
 
 function formatCurrency(value) {
   const n = Number(value || 0);
@@ -24,6 +25,14 @@ export default function PharmacyNetwork() {
 
   useEffect(() => {
     loadData();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeInventoryUpdated(() => {
+      void loadData();
+    });
+
+    return unsubscribe;
   }, []);
 
   async function loadData() {
@@ -98,7 +107,18 @@ export default function PharmacyNetwork() {
 
     for (const item of inventory) {
       const key = item.pharmacy_id;
-      if (!groups[key]) continue;
+      if (!groups[key]) {
+        groups[key] = {
+          pharmacy: {
+            id: key,
+            name: pharmacyMap[key]?.name || `Pharmacy ${key}`,
+            location: pharmacyMap[key]?.location || "",
+          },
+          items: [],
+          totalQty: 0,
+          totalValue: 0,
+        };
+      }
 
       groups[key].items.push(item);
       groups[key].totalQty += toSafeNumber(item.quantity);
@@ -106,7 +126,7 @@ export default function PharmacyNetwork() {
     }
 
     return Object.values(groups);
-  }, [pharmacies, inventory]);
+  }, [pharmacies, inventory, pharmacyMap]);
 
   const inventoryRows = useMemo(
     () =>

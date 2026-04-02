@@ -7,7 +7,6 @@ import {
   buildExecutiveNarrative,
   calculateExpiryIntelligence,
   calculateFinancialKpis,
-  calculateInventoryFinancials,
   calculateShortagePredictions,
   calculateSmartTransferRecommendations,
 } from "../../utils/pdss";
@@ -15,6 +14,7 @@ import { buildDrugPriceMap } from "../../utils/drugPricing";
 import { generateAiRecommendations } from "../../utils/recommendationEngine";
 import { loadLocalArray, safeFetch } from "../../utils/pdssHelpers";
 import { riskBadgeStyles } from "../../utils/badgeStyles";
+import { subscribeInventoryUpdated } from "../../utils/inventoryEvents";
 
 export default function ExecutiveDashboard() {
   const [shortageRows, setShortageRows] = useState([]);
@@ -40,6 +40,53 @@ export default function ExecutiveDashboard() {
   });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+
+  const computeInventorySnapshot = (inventoryRows = []) => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const nearExpiryLimit = new Date(today);
+    nearExpiryLimit.setDate(nearExpiryLimit.getDate() + 180);
+
+    let totalInventoryValue = 0;
+    let nearExpiryRiskValue = 0;
+    let deadStockValue = 0;
+    let nearExpiryItems = 0;
+    const activeSites = new Set();
+
+    (inventoryRows || []).forEach((row) => {
+      const pharmacyId = String(row?.pharmacy_id || "").trim();
+      if (pharmacyId) {
+        activeSites.add(pharmacyId);
+      }
+
+      const qty = Number(row?.quantity || 0);
+      const unitCost = Number(row?.unit_cost || 0);
+      const lineValue = Math.max(0, qty) * Math.max(0, unitCost);
+      totalInventoryValue += lineValue;
+
+      const expiryRaw = row?.expiry_date;
+      if (!expiryRaw) return;
+      const expiryDate = new Date(expiryRaw);
+      if (Number.isNaN(expiryDate.getTime())) return;
+
+      if (expiryDate >= today && expiryDate <= nearExpiryLimit) {
+        nearExpiryItems += 1;
+        nearExpiryRiskValue += lineValue;
+      }
+
+      if (expiryDate < today) {
+        deadStockValue += lineValue;
+      }
+    });
+
+    return {
+      activeSites: activeSites.size,
+      nearExpiryItems,
+      totalInventoryValue,
+      nearExpiryRiskValue,
+      deadStockValue,
+    };
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -72,8 +119,8 @@ export default function ExecutiveDashboard() {
         safeFetch("pharmacies", "id,name", 3000),
         safeFetch(
           "pharmacy_inventory",
-          "id,drug_name,quantity,unit_cost,expiry_date,batch_no,pharmacy_id",
-          3000
+          "pharmacy_id,quantity,unit_cost,expiry_date",
+          30000
         ),
         safeFetch("purchase_requests", "id,status,drug_name,created_at", 3000),
       ]);
@@ -84,9 +131,9 @@ export default function ExecutiveDashboard() {
       const shortages = [...(shortageRes.data || []), ...localShortages];
       const refills = [...(refillRes.data || []), ...localRefills];
       const expiryRecords = expiryRes.data || [];
-      const pharmacies = pharmacyRes.data || [];
       const inventoryRecords = inventoryRes.data || [];
       const purchaseRequests = purchaseRes.data || [];
+      const inventorySnapshot = computeInventorySnapshot(inventoryRecords);
 
       const computedShortageRows = calculateShortagePredictions({
         shortages,
@@ -119,17 +166,16 @@ export default function ExecutiveDashboard() {
         })
       );
 
-      setInventoryFinancials(
-        calculateInventoryFinancials({
-          expiryRows: computedExpiryRows,
-          drugPriceMap,
-        })
-      );
+      setInventoryFinancials({
+        totalInventoryValue: inventorySnapshot.totalInventoryValue,
+        nearExpiryRiskValue: inventorySnapshot.nearExpiryRiskValue,
+        deadStockValue: inventorySnapshot.deadStockValue,
+      });
 
       setSnapshotCounts({
-        activeSites: pharmacies.length,
+        activeSites: inventorySnapshot.activeSites,
         inventoryRecords: inventoryRecords.length,
-        nearExpiryItems: expiryRecords.length,
+        nearExpiryItems: inventorySnapshot.nearExpiryItems,
         shortageRequests: shortages.length,
         purchaseRequests: purchaseRequests.length,
         refillRequests: refills.length,
@@ -139,7 +185,6 @@ export default function ExecutiveDashboard() {
         shortageRes.error,
         refillRes.error,
         expiryRes.error,
-        pharmacyRes.error,
         inventoryRes.error,
         purchaseRes.error,
       ].filter(Boolean);
@@ -154,6 +199,12 @@ export default function ExecutiveDashboard() {
     };
 
     void load();
+
+    const unsubscribe = subscribeInventoryUpdated(() => {
+      void load();
+    });
+
+    return unsubscribe;
   }, []);
 
   const metrics = useMemo(

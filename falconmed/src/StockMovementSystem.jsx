@@ -1,5 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
+import { emitInventoryUpdated } from "./utils/inventoryEvents";
+
+const STOCK_MOVEMENT_DRAFT_STORAGE_KEY = "falconmed_stock_movement_draft";
+
+function readStockMovementDraft() {
+  try {
+    const raw = window.sessionStorage.getItem(STOCK_MOVEMENT_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeStockMovementDraft(value) {
+  try {
+    window.sessionStorage.setItem(STOCK_MOVEMENT_DRAFT_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function clearStockMovementDraft() {
+  try {
+    window.sessionStorage.removeItem(STOCK_MOVEMENT_DRAFT_STORAGE_KEY);
+  } catch {
+    // Ignore storage failures.
+  }
+}
 
 const movementTypes = [
   "Receive",
@@ -36,6 +66,7 @@ export default function StockMovementSystem() {
   const [submitting, setSubmitting] = useState(false);
   const [formData, setFormData] = useState(initialForm);
   const [feedback, setFeedback] = useState({ type: "", text: "" });
+  const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
   const [drugOptions, setDrugOptions] = useState([]);
   const [pharmacyOptions, setPharmacyOptions] = useState([]);
   const [pharmacyIdMap, setPharmacyIdMap] = useState(new Map());
@@ -53,6 +84,55 @@ export default function StockMovementSystem() {
 
     return { total, transferOuts, transferIns, adjustments };
   }, [rows]);
+
+  const hasUnsavedChanges = useMemo(() => {
+    return Object.keys(initialForm).some((key) => {
+      const current = String(formData[key] || "").trim();
+      const initial = String(initialForm[key] || "").trim();
+      return current !== initial;
+    });
+  }, [formData]);
+
+  useEffect(() => {
+    const persisted = readStockMovementDraft();
+    if (!persisted?.formData || typeof persisted.formData !== "object") return;
+
+    setFormData((prev) => ({
+      ...prev,
+      ...persisted.formData,
+    }));
+
+    const restored = Object.keys(initialForm).some((key) => {
+      const value = String(persisted.formData[key] || "").trim();
+      return value !== String(initialForm[key] || "").trim();
+    });
+
+    if (restored) {
+      setRestoredDraftMessage("Restored unsaved draft");
+    }
+  }, []);
+
+  useEffect(() => {
+    writeStockMovementDraft({ formData });
+  }, [formData]);
+
+  useEffect(() => {
+    if (!hasUnsavedChanges) return undefined;
+
+    const beforeUnloadHandler = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", beforeUnloadHandler);
+    return () => window.removeEventListener("beforeunload", beforeUnloadHandler);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    if (!restoredDraftMessage) return undefined;
+    const timer = window.setTimeout(() => setRestoredDraftMessage(""), 3000);
+    return () => window.clearTimeout(timer);
+  }, [restoredDraftMessage]);
 
   const loadMovements = async () => {
     setLoading(true);
@@ -431,7 +511,9 @@ export default function StockMovementSystem() {
 
       setRows((prev) => [data, ...prev]);
       setFormData(initialForm);
+      clearStockMovementDraft();
       setFeedback({ type: "success", text: "Stock movement added and inventory updated successfully." });
+      emitInventoryUpdated(formData.to_pharmacy || formData.from_pharmacy || "");
     } catch (err) {
       setFeedback({
         type: "error",
@@ -491,6 +573,18 @@ export default function StockMovementSystem() {
       </div>
 
       {feedback.text ? <div style={{ ...feedbackBox, ...feedbackStyle }}>{feedback.text}</div> : null}
+      {restoredDraftMessage ? (
+        <div
+          style={{
+            ...feedbackBox,
+            background: "#ecfdf3",
+            color: "#166534",
+            border: "1px solid #bbf7d0",
+          }}
+        >
+          {restoredDraftMessage}
+        </div>
+      ) : null}
 
       <div style={contentCard}>
         <h3 style={sectionTitle}>Add Movement</h3>
