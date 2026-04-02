@@ -31,6 +31,12 @@ import {
   PLAN_LABELS,
 } from "./config/featureAccess";
 import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
+import {
+  computeInventoryAggregates,
+  formatAed,
+  formatQty,
+  isNearExpiry,
+} from "./utils/inventoryAnalytics";
 
 const NAVIGATION_SECTIONS = [
   {
@@ -105,7 +111,11 @@ export default function App() {
   const [accessNotice, setAccessNotice] = useState("");
   const [activeSites, setActiveSites] = useState(0);
   const [inventoryRecords, setInventoryRecords] = useState(0);
+  const [totalQty, setTotalQty] = useState(0);
+  const [stockValue, setStockValue] = useState(0);
   const [nearExpiry, setNearExpiry] = useState(0);
+  const [nearExpiryStockValue, setNearExpiryStockValue] = useState(0);
+  const [expiredStockValue, setExpiredStockValue] = useState(0);
   const [shortageRequests, setShortageRequests] = useState(0);
   const [purchaseRequests, setPurchaseRequests] = useState(0);
   const [refillRequests, setRefillRequests] = useState(0);
@@ -262,10 +272,7 @@ export default function App() {
         return;
       }
 
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const nearExpiryLimit = new Date(now);
-      nearExpiryLimit.setDate(nearExpiryLimit.getDate() + 180);
+      const aggregates = computeInventoryAggregates(inventory || []);
 
       const pharmacyMap = new Map();
       (pharmacies || []).forEach((p) => {
@@ -297,12 +304,18 @@ export default function App() {
           entry.lowStockCount += 1;
         }
 
-        const expiryRaw = row?.expiry_date;
-        if (expiryRaw) {
-          const expiryDate = new Date(expiryRaw);
-          if (!Number.isNaN(expiryDate.getTime()) && expiryDate >= now && expiryDate <= nearExpiryLimit) {
-            entry.nearExpiryCount += 1;
-          }
+        if (isNearExpiry(row?.expiry_date)) {
+          entry.nearExpiryCount += 1;
+        }
+      });
+
+      Object.entries(aggregates.byPharmacyId).forEach(([pharmacyId]) => {
+        if (!pharmacyMap.has(pharmacyId)) {
+          pharmacyMap.set(pharmacyId, {
+            pharmacyName: "Unknown Pharmacy",
+            lowStockCount: 0,
+            nearExpiryCount: 0,
+          });
         }
       });
 
@@ -334,7 +347,11 @@ export default function App() {
     if (!supabase) {
       setActiveSites(0);
       setInventoryRecords(0);
+      setTotalQty(0);
+      setStockValue(0);
       setNearExpiry(0);
+      setNearExpiryStockValue(0);
+      setExpiredStockValue(0);
       setShortageRequests(0);
       setPurchaseRequests(0);
       setRefillRequests(0);
@@ -350,45 +367,23 @@ export default function App() {
     ] = await Promise.all([
       supabase
         .from("pharmacy_inventory")
-        .select("pharmacy_id,quantity,expiry_date")
+        .select("pharmacy_id,quantity,unit_cost,expiry_date")
         .limit(30000),
       safeCount("shortage_requests"),
       safeCount("purchase_requests"),
       safeCount("refill_requests"),
-      safeCount("pharmacies"),
     ]);
 
     const rows = inventoryResult?.error ? [] : inventoryResult?.data || [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const nearExpiryCutoff = new Date(today);
-    nearExpiryCutoff.setDate(nearExpiryCutoff.getDate() + 180);
+    const aggregates = computeInventoryAggregates(rows);
 
-    const uniqueSites = new Set();
-    let nearExpiryCount = 0;
-
-    rows.forEach((row) => {
-      const pharmacyId = String(row?.pharmacy_id || "").trim();
-      if (pharmacyId) {
-        uniqueSites.add(pharmacyId);
-      }
-
-      const expiryRaw = row?.expiry_date;
-      if (!expiryRaw) return;
-      const expiryDate = new Date(expiryRaw);
-      if (Number.isNaN(expiryDate.getTime())) return;
-      if (expiryDate >= today && expiryDate <= nearExpiryCutoff) {
-        nearExpiryCount += 1;
-      }
-    });
-
-    const fallbackInventoryCount = await safeCount("pharmacy_inventory");
-    const resolvedInventoryCount = rows.length > 0 ? rows.length : fallbackInventoryCount;
-    const resolvedSiteCount = uniqueSites.size > 0 ? uniqueSites.size : pharmaciesCount;
-
-    setActiveSites(resolvedSiteCount || 0);
-    setInventoryRecords(resolvedInventoryCount || 0);
-    setNearExpiry(nearExpiryCount);
+    setActiveSites(aggregates.activeSites || 0);
+    setInventoryRecords(aggregates.inventoryRecords || 0);
+    setTotalQty(aggregates.totalQty || 0);
+    setStockValue(aggregates.stockValue || 0);
+    setNearExpiry(aggregates.nearExpiryItems || 0);
+    setNearExpiryStockValue(aggregates.nearExpiryStockValue || 0);
+    setExpiredStockValue(aggregates.expiredStockValue || 0);
     setShortageRequests(shortageCount || 0);
     setPurchaseRequests(purchaseCount || 0);
     setRefillRequests(refillCount || 0);
@@ -420,12 +415,11 @@ export default function App() {
     (Number(activeUrgentActions) || 0) * 5;
   const operationalRiskScore = Math.min(100, computedRiskScore);
 
-  const potentialWaste = (Number(nearExpiryItems) || 0) * 150;
-  const potentialSavings = (Number(shortageRequestsToday) || 0) * 200;
-  const financialImpact = potentialWaste + potentialSavings;
-  const expiryRiskExposure = potentialWaste;
-  const deadStockExposure = Math.round((Number(activeUrgentActions) || 0) * 120);
-  const shortageRiskExposure = potentialSavings;
+  const financialImpact = Number(stockValue || 0);
+  const expiryRiskExposure = Number(nearExpiryStockValue || 0);
+  const deadStockExposure = Number(expiredStockValue || 0);
+  const shortageRiskExposure = 0;
+  const potentialSavings = 0;
   const totalFinancialExposure =
     Number(expiryRiskExposure || 0) +
     Number(deadStockExposure || 0) +
@@ -509,10 +503,13 @@ export default function App() {
     activityLoading,
     activeSites,
     dashboardLoading,
+    expiredStockValue,
     inventoryRecords,
+    nearExpiryStockValue,
     nearExpiryItems,
     recentActivity,
     shortageRequestsToday,
+    stockValue,
   ]);
 
   useEffect(() => {
@@ -808,7 +805,7 @@ export default function App() {
 
                 <div style={{ ...insightBox, ...(isCommandCenterMode ? commandModeInsightBox : null) }}>
                   <span style={insightBullet}>◆</span>{" "}
-                  FalconMed is currently tracking {inventoryRecords.toLocaleString()} inventory records across {activeSites.toLocaleString()} pharmacy sites.
+                  FalconMed is currently tracking {formatQty(inventoryRecords)} inventory records across {formatQty(activeSites)} pharmacy sites.
                 </div>
 
                 <div
@@ -828,27 +825,27 @@ export default function App() {
                 <div style={{ ...cardsGrid, ...(isCommandCenterMode ? commandModeCardsGrid : null) }}>
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>TOTAL DRUGS IN DATABASE</div>
-                    <div style={statValue}>{animDrugs.toLocaleString()}</div>
+                    <div style={statValue}>{formatQty(animDrugs)}</div>
                     <div style={kpiHint}>Active formulary records across FalconMed.</div>
                   </div>
 
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #2f4f9f" }}>
                     <div style={statLabel}>NEAR EXPIRY ITEMS</div>
-                    <div style={statValue}>{animNearExpiry}</div>
+                    <div style={statValue}>{formatQty(animNearExpiry)}</div>
                     <div style={expiryRiskMiniLabel}>Estimated Expiry Risk</div>
-                    <div style={expiryRiskMiniValue}>Financial estimate unavailable</div>
+                    <div style={expiryRiskMiniValue}>{formatAed(nearExpiryStockValue)}</div>
                     <div style={kpiHint}>Items requiring near-term stock planning.</div>
                   </div>
 
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #3557ab" }}>
                     <div style={statLabel}>SHORTAGE REQUESTS TODAY</div>
-                    <div style={statValue}>{animShortageToday}</div>
+                    <div style={statValue}>{formatQty(animShortageToday)}</div>
                     <div style={kpiHint}>Current shortage pressure logged today.</div>
                   </div>
 
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #4267bb" }}>
                     <div style={statLabel}>ACTIVE SITES</div>
-                    <div style={statValue}>{animActiveSites}</div>
+                    <div style={statValue}>{formatQty(animActiveSites)}</div>
                     <div style={kpiHint}>Sites currently contributing activity data.</div>
                   </div>
 
@@ -877,22 +874,22 @@ export default function App() {
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #1f3c88" }}>
                     <div style={statLabel}>INVENTORY FINANCIAL IMPACT</div>
                     <div style={{ ...statValue, fontSize: "26px" }}>
-                      AED {animFinancialImpact.toLocaleString()}
+                      {formatAed(animFinancialImpact)}
                     </div>
                     <div style={financialSubline}>
-                      Waste Risk AED {potentialWaste.toLocaleString()} | Savings Opportunity AED {potentialSavings.toLocaleString()}
+                      Near-expiry Risk {formatAed(expiryRiskExposure)} | Total Qty {formatQty(totalQty)}
                     </div>
                   </div>
 
                   <div className="ui-hover-lift" style={{ ...statCard, ...(isCommandCenterMode ? commandModeStatCard : null), borderTop: "4px solid #2f4f9f" }}>
                     <div style={statLabel}>FINANCIAL EXPOSURE</div>
                     <div style={{ ...statValue, fontSize: "26px" }}>
-                      AED {totalFinancialExposure.toLocaleString()}
+                      {formatAed(totalFinancialExposure)}
                     </div>
                     <div style={financialExposureBreakdown}>
-                      Expiry Risk: AED {expiryRiskExposure.toLocaleString()}<br />
-                      Dead Stock: AED {deadStockExposure.toLocaleString()}<br />
-                      Shortage Risk: AED {shortageRiskExposure.toLocaleString()}
+                      Expiry Risk: {formatAed(expiryRiskExposure)}<br />
+                      Dead Stock: {formatAed(deadStockExposure)}<br />
+                      Shortage Risk: {formatAed(shortageRiskExposure)}
                     </div>
                   </div>
                 </div>

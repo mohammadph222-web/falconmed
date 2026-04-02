@@ -17,6 +17,17 @@ function toSafeNumber(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function parseCreatedAt(createdAt) {
+  const raw = String(createdAt || "").trim();
+  if (!raw) return Number.POSITIVE_INFINITY;
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : Number.POSITIVE_INFINITY;
+}
+
 export default function PharmacyNetwork() {
   const [pharmacies, setPharmacies] = useState([]);
   const [inventory, setInventory] = useState([]);
@@ -72,13 +83,102 @@ export default function PharmacyNetwork() {
     }
   }
 
+  const uniquePharmacies = useMemo(() => {
+    const map = new Map();
+    for (const pharmacy of pharmacies) {
+      const key = String(pharmacy?.id || "");
+      if (!key || map.has(key)) continue;
+      map.set(key, {
+        ...pharmacy,
+        id: key,
+      });
+    }
+    return Array.from(map.values());
+  }, [pharmacies]);
+
   const pharmacyMap = useMemo(() => {
     const map = {};
-    for (const p of pharmacies) {
-      map[p.id] = p;
+    for (const p of uniquePharmacies) {
+      map[String(p.id)] = p;
     }
     return map;
-  }, [pharmacies]);
+  }, [uniquePharmacies]);
+
+  const aggregateByPharmacyId = useMemo(() => {
+    const aggregates = {};
+
+    for (const item of inventory) {
+      const key = String(item?.pharmacy_id || "");
+      if (!key) continue;
+
+      if (!aggregates[key]) {
+        aggregates[key] = {
+          items: 0,
+          totalQty: 0,
+          totalValue: 0,
+        };
+      }
+
+      aggregates[key].items += 1;
+      aggregates[key].totalQty += toSafeNumber(item.quantity);
+      aggregates[key].totalValue +=
+        toSafeNumber(item.quantity) * toSafeNumber(item.unit_cost);
+    }
+
+    return aggregates;
+  }, [inventory]);
+
+  const canonicalVisiblePharmacies = useMemo(() => {
+    const groupedCandidates = new Map();
+
+    uniquePharmacies.forEach((pharmacy, index) => {
+      const id = String(pharmacy?.id || "");
+      const normalizedName = normalizeText(pharmacy?.name);
+      const normalizedLocation = normalizeText(pharmacy?.location);
+      const logicalKey =
+        normalizedName || normalizedLocation
+          ? `${normalizedName}::${normalizedLocation}`
+          : `__id__:${id}`;
+
+      if (!groupedCandidates.has(logicalKey)) {
+        groupedCandidates.set(logicalKey, []);
+      }
+
+      groupedCandidates.get(logicalKey).push({
+        pharmacy,
+        index,
+        hasInventory: Boolean(aggregateByPharmacyId[id]?.items),
+        createdAtTs: parseCreatedAt(pharmacy?.created_at),
+      });
+    });
+
+    const selected = [];
+
+    groupedCandidates.forEach((candidates) => {
+      const sortedCandidates = [...candidates].sort((a, b) => {
+        if (a.hasInventory !== b.hasInventory) {
+          return a.hasInventory ? -1 : 1;
+        }
+
+        if (a.createdAtTs !== b.createdAtTs) {
+          return a.createdAtTs - b.createdAtTs;
+        }
+
+        return a.index - b.index;
+      });
+
+      selected.push(sortedCandidates[0].pharmacy);
+    });
+
+    return selected.sort((a, b) =>
+      String(a?.name || "").localeCompare(String(b?.name || ""))
+    );
+  }, [aggregateByPharmacyId, uniquePharmacies]);
+
+  const totalPharmacies = useMemo(() => {
+    const ids = new Set(canonicalVisiblePharmacies.map((p) => String(p?.id || "")).filter(Boolean));
+    return ids.size;
+  }, [canonicalVisiblePharmacies]);
 
   const totalInventoryQty = useMemo(
     () => inventory.reduce((sum, item) => sum + toSafeNumber(item.quantity), 0),
@@ -95,38 +195,26 @@ export default function PharmacyNetwork() {
   );
 
   const groupedByPharmacy = useMemo(() => {
-    const groups = {};
-    for (const p of pharmacies) {
-      groups[p.id] = {
-        pharmacy: p,
-        items: [],
-        totalQty: 0,
-        totalValue: 0,
-      };
-    }
-
-    for (const item of inventory) {
-      const key = item.pharmacy_id;
-      if (!groups[key]) {
-        groups[key] = {
-          pharmacy: {
-            id: key,
-            name: pharmacyMap[key]?.name || `Pharmacy ${key}`,
-            location: pharmacyMap[key]?.location || "",
-          },
-          items: [],
+    return canonicalVisiblePharmacies
+      .map((pharmacy) => {
+        const key = String(pharmacy.id);
+        const aggregate = aggregateByPharmacyId[key] || {
+          items: 0,
           totalQty: 0,
           totalValue: 0,
         };
-      }
 
-      groups[key].items.push(item);
-      groups[key].totalQty += toSafeNumber(item.quantity);
-      groups[key].totalValue += toSafeNumber(item.quantity) * toSafeNumber(item.unit_cost);
-    }
-
-    return Object.values(groups);
-  }, [pharmacies, inventory, pharmacyMap]);
+        return {
+          pharmacy,
+          itemCount: aggregate.items,
+          totalQty: aggregate.totalQty,
+          totalValue: aggregate.totalValue,
+        };
+      })
+      .sort((a, b) =>
+        String(a?.pharmacy?.name || "").localeCompare(String(b?.pharmacy?.name || ""))
+      );
+  }, [aggregateByPharmacyId, canonicalVisiblePharmacies]);
 
   const inventoryRows = useMemo(
     () =>
@@ -140,7 +228,7 @@ export default function PharmacyNetwork() {
   const imbalanceInsight = useMemo(() => {
     if (loading || groupedByPharmacy.length < 2) return null;
 
-    const activeGroups = groupedByPharmacy.filter((group) => group.items.length > 0);
+    const activeGroups = groupedByPharmacy.filter((group) => group.itemCount > 0);
     if (activeGroups.length < 2) return null;
 
     const sorted = [...activeGroups].sort((a, b) => b.totalQty - a.totalQty);
@@ -190,7 +278,7 @@ export default function PharmacyNetwork() {
           ))
         ) : (
           <>
-            <MetricCard label="TOTAL PHARMACIES" value={pharmacies.length} accent="#3b82f6" hint="registered" />
+            <MetricCard label="TOTAL PHARMACIES" value={totalPharmacies} accent="#3b82f6" hint="registered" />
             <MetricCard label="INVENTORY RECORDS" value={inventory.length} accent="#8b5cf6" hint="line items" />
             <MetricCard label="TOTAL STOCK QTY" value={totalInventoryQty} accent="#10b981" hint="units on hand" />
             <MetricCard label="TOTAL STOCK VALUE" value={totalInventoryValue} valueFn={formatCurrency} accent="#f59e0b" hint="estimated value" />
@@ -228,7 +316,7 @@ export default function PharmacyNetwork() {
                 />
               ))}
             </div>
-          ) : pharmacies.length === 0 ? (
+          ) : canonicalVisiblePharmacies.length === 0 ? (
             <div style={emptyStateBox}>
               <p style={{ margin: 0, fontWeight: 600, color: "#475569" }}>No pharmacies found</p>
               <p style={{ margin: "6px 0 0 0", color: "#94a3b8", fontSize: 13 }}>Add pharmacies to see them here</p>
@@ -239,7 +327,7 @@ export default function PharmacyNetwork() {
                 <div className="ui-hover-lift" key={group.pharmacy.id} style={pharmacyCard}>
                   <div style={pharmacyNameRow}>
                     <span style={pharmacyNameText}>{group.pharmacy.name}</span>
-                    <span style={pharmacyItemsBadge}>{group.items.length} items</span>
+                    <span style={pharmacyItemsBadge}>{group.itemCount} items</span>
                   </div>
                   {group.pharmacy.location && (
                     <div style={pharmacyMetaRow}>

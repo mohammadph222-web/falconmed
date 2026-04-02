@@ -178,6 +178,7 @@ export default function InventoryManagementPage() {
   const [bulkUploadSummary, setBulkUploadSummary] = useState(null);
   const [bulkUploadProcessing, setBulkUploadProcessing] = useState(false);
   const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
+  const [draftHydrated, setDraftHydrated] = useState(false);
 
   // Import preview + batch tracking
   const [importPreview, setImportPreview] = useState(null);
@@ -259,9 +260,13 @@ export default function InventoryManagementPage() {
     if (restored) {
       setRestoredDraftMessage("Restored unsaved draft");
     }
+
+    setDraftHydrated(true);
   }, []);
 
   useEffect(() => {
+    if (!draftHydrated) return;
+
     const draftPayload = {
       selectedPharmacyId,
       form: {
@@ -284,6 +289,7 @@ export default function InventoryManagementPage() {
 
     writeStorageJson(INVENTORY_DRAFT_STORAGE_KEY, draftPayload);
   }, [
+    draftHydrated,
     selectedPharmacyId,
     drugCode,
     drug,
@@ -302,20 +308,24 @@ export default function InventoryManagementPage() {
   ]);
 
   useEffect(() => {
+    if (!draftHydrated) return;
+
     if (importPreview) {
       writeStorageJson(INVENTORY_BULK_PREVIEW_STORAGE_KEY, importPreview);
       return;
     }
     clearStorageKey(INVENTORY_BULK_PREVIEW_STORAGE_KEY);
-  }, [importPreview]);
+  }, [draftHydrated, importPreview]);
 
   useEffect(() => {
+    if (!draftHydrated) return;
+
     writeStorageJson(INVENTORY_BULK_SUMMARY_STORAGE_KEY, {
       bulkUploadSummary,
       lastImportBatch,
       lastUploadSignature,
     });
-  }, [bulkUploadSummary, lastImportBatch, lastUploadSignature]);
+  }, [bulkUploadSummary, draftHydrated, lastImportBatch, lastUploadSignature]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return undefined;
@@ -380,14 +390,20 @@ export default function InventoryManagementPage() {
     setPharmacies(data || []);
 
     if (data && data.length > 0) {
-      const persisted = readStorageJson(INVENTORY_DRAFT_STORAGE_KEY);
-      const persistedPharmacyId = String(persisted?.selectedPharmacyId || "");
-      const hasPersistedPharmacy = data.some((row) => String(row?.id) === persistedPharmacyId);
+      const hasCurrentSelection = data.some(
+        (row) => String(row?.id) === String(selectedPharmacyId || "")
+      );
 
-      if (hasPersistedPharmacy) {
-        setSelectedPharmacyId(persistedPharmacyId);
-      } else if (!selectedPharmacyId) {
-        setSelectedPharmacyId(String(data[0].id));
+      if (!hasCurrentSelection) {
+        const persisted = readStorageJson(INVENTORY_DRAFT_STORAGE_KEY);
+        const persistedPharmacyId = String(persisted?.selectedPharmacyId || "");
+        const hasPersistedPharmacy = data.some((row) => String(row?.id) === persistedPharmacyId);
+
+        if (hasPersistedPharmacy) {
+          setSelectedPharmacyId(persistedPharmacyId);
+        } else {
+          setSelectedPharmacyId(String(data[0].id));
+        }
       }
     } else {
       setLoading(false);
@@ -501,6 +517,10 @@ export default function InventoryManagementPage() {
     }
 
     if (selectedDrugMaster && isQueryMatchedToDrug(code, selectedDrugMaster)) {
+      return;
+    }
+
+    if (allDrugs.length === 0) {
       return;
     }
 
@@ -624,7 +644,7 @@ export default function InventoryManagementPage() {
   };
 
   function resetForm(options = {}) {
-    const { keepMessages = false, focusDrug = false } = options;
+    const { keepMessages = false, focusDrug = false, clearDraft = false } = options;
 
     setDrugCode("");
     clearSelectedDrug();
@@ -639,6 +659,10 @@ export default function InventoryManagementPage() {
     if (!keepMessages) {
       setError("");
       setSuccess("");
+    }
+
+    if (clearDraft) {
+      clearInventoryDraftStorage();
     }
 
     if (focusDrug) {
@@ -1547,19 +1571,21 @@ export default function InventoryManagementPage() {
       return;
     }
 
+    const targetPharmacyId = String(selectedPharmacyId || "").trim();
+
     setError("");
     setSuccess("");
     setBulkUploadSummary(null);
     setImportPreview(null);
 
-    if (!selectedPharmacyId) {
+    if (!targetPharmacyId) {
       setError("Please select a pharmacy before uploading CSV.");
       event.target.value = "";
       return;
     }
 
     // Duplicate-upload guard: same pharmacy + same filename + same size in same session
-    const uploadSignature = `${selectedPharmacyId}::${file.name}::${file.size}`;
+    const uploadSignature = `${targetPharmacyId}::${file.name}::${file.size}`;
     if (lastUploadSignature === uploadSignature) {
       const proceed = window.confirm(
         "This file was already uploaded for this pharmacy in the current session.\nAre you sure you want to upload it again?"
@@ -1632,7 +1658,7 @@ export default function InventoryManagementPage() {
 
         validPayloads.push(
           buildInventoryPayload({
-            pharmacyId: selectedPharmacyId,
+            pharmacyId: targetPharmacyId,
             matchedDrug,
             quantity: quantityNumber,
             expiryDate: normalizedExpiry,
@@ -1652,16 +1678,22 @@ export default function InventoryManagementPage() {
         return;
       }
 
-      const selectedPharmacy = pharmacies.find((p) => String(p.id) === String(selectedPharmacyId));
-      const pharmacyName = selectedPharmacy?.name || `Pharmacy ${selectedPharmacyId}`;
+      const selectedPharmacy = pharmacies.find((p) => String(p.id) === targetPharmacyId);
+      const pharmacyName = selectedPharmacy?.name || `Pharmacy ${targetPharmacyId}`;
       const totalQty = validPayloads.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
       const estimatedValue = validPayloads.reduce(
         (sum, p) => sum + Number(p.quantity || 0) * Number(p.unit_cost || 0),
         0
       );
 
+      console.info("[Bulk Import Preview] Target pharmacy selected", {
+        selectedPharmacyId: targetPharmacyId,
+        pharmacyName,
+        validRows: validPayloads.length,
+      });
+
       setImportPreview({
-        pharmacyId: selectedPharmacyId,
+        pharmacyId: targetPharmacyId,
         pharmacyName,
         validPayloads,
         skippedRows,
@@ -1688,6 +1720,12 @@ export default function InventoryManagementPage() {
     setSuccess("");
 
     try {
+      const previewPharmacyId = String(importPreview.pharmacyId || "").trim();
+      if (!previewPharmacyId) {
+        setError("Import preview is missing pharmacy ID. Please upload the CSV again.");
+        return;
+      }
+
       const batchId =
         typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
           ? crypto.randomUUID()
@@ -1695,8 +1733,34 @@ export default function InventoryManagementPage() {
 
       const payloadsWithBatch = importPreview.validPayloads.map((p) => ({
         ...p,
+        pharmacy_id: previewPharmacyId,
         import_batch_id: batchId,
       }));
+
+      const distinctPayloadPharmacyIds = Array.from(
+        new Set(payloadsWithBatch.map((row) => String(row?.pharmacy_id || "").trim()).filter(Boolean))
+      );
+
+      if (
+        distinctPayloadPharmacyIds.length !== 1 ||
+        distinctPayloadPharmacyIds[0] !== previewPharmacyId
+      ) {
+        setError("Import validation failed: inconsistent pharmacy_id in payload.");
+        console.error("Bulk import payload pharmacy mismatch", {
+          expectedPharmacyId: previewPharmacyId,
+          distinctPayloadPharmacyIds,
+          selectedPharmacyId,
+          batchId,
+        });
+        return;
+      }
+
+      console.info("[Bulk Import Confirm] Writing pharmacy_inventory rows", {
+        expectedPharmacyId: previewPharmacyId,
+        selectedPharmacyId,
+        payloadSize: payloadsWithBatch.length,
+        distinctPayloadPharmacyIds,
+      });
 
       const { error: uploadError } = await supabase
         .from("pharmacy_inventory")
@@ -2247,7 +2311,7 @@ export default function InventoryManagementPage() {
             <button
               type="button"
               style={secondaryButtonStyle}
-              onClick={() => resetForm({ focusDrug: true })}
+              onClick={() => resetForm({ focusDrug: true, clearDraft: true })}
             >
               Clear
             </button>
