@@ -17,6 +17,7 @@ import RefillTracker from "./RefillTracker";
 import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
 import StockMovementSystem from "./StockMovementSystem";
+import StockMovementPage from "./StockMovementPage";
 import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
 import InventoryManagementPage from "./InventoryManagementPage.jsx";
 import SubscriptionCenter from "./SubscriptionCenter";
@@ -61,6 +62,7 @@ const NAVIGATION_SECTIONS = [
       { label: "Purchase Requests", subtitle: "Manage purchase requests", page: "purchases", icon: "+", keywords: ["purchase", "procurement"] },
       { label: "Stocktaking", subtitle: "Count and variance checks", page: "stocktaking", icon: "✓", keywords: ["stocktaking", "count"] },
       { label: "Stock Movement", subtitle: "Record stock movement transactions", page: "stock-movement", icon: "⇄", keywords: ["stock movement", "transfer", "receive", "issue"] },
+      { label: "Stock Movement V1", subtitle: "Ledger-first movement workflow", page: "stock-movement-v1", icon: "↹", keywords: ["stock movement v1", "ledger", "balance"] },
     ],
   },
   {
@@ -671,6 +673,8 @@ export default function App() {
         return renderGuardedPage("stocktaking", "Stocktaking", <Stocktaking />);
       case "stock-movement":
         return renderGuardedPage("stock-movement", "Stock Movement", <StockMovementSystem />);
+      case "stock-movement-v1":
+        return renderGuardedPage("stock-movement-v1", "Stock Movement V1", <StockMovementPage />);
       case "network":
         return renderGuardedPage("network", "Network Intelligence", <NetworkIntelligence />);
       case "pharmacy-network":

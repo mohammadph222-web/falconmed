@@ -16,6 +16,7 @@ export const PAGE_ACCESS = {
   billing: { minimumPlan: "starter", label: "Billing" },
   reports: { minimumPlan: "professional", label: "Analytics" },
   "stock-movement": { minimumPlan: "professional", label: "Stock Movement" },
+  "stock-movement-v1": { minimumPlan: "professional", label: "Stock Movement V1" },
   stocktaking: { minimumPlan: "professional", label: "Stocktaking" },
   pdss: { minimumPlan: "professional", label: "PDSS" },
   purchases: { minimumPlan: "professional", label: "Purchase Requests" },
