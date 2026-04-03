@@ -1,49 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import drugsMasterCsv from "../public/dru_gmaster.csv?raw";
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    const next = line[i + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeKey(key) {
-  return String(key || "")
-    .toLowerCase()
-    .replace(/[\s/_-]+/g, "")
-    .trim();
-}
-
-function getValue(row, possibleKeys) {
-  for (const key of possibleKeys) {
-    if (row[key] !== undefined && row[key] !== null && row[key] !== "") {
-      return row[key];
-    }
-  }
-  return "";
-}
+import { getDrugDisplayName, loadDrugMaster } from "./utils/drugMaster";
 
 function formatCoverageValue(value) {
   const text = String(value ?? "").trim();
@@ -58,32 +14,6 @@ function parseNumber(value) {
   if (!normalized) return null;
   const num = Number(normalized);
   return Number.isFinite(num) ? num : null;
-}
-
-function extractPackageUnits(packageSize) {
-  const text = String(packageSize ?? "").trim();
-  const match = text.match(/\d+(?:\.\d+)?/);
-  if (!match) return 1;
-  const units = Number(match[0]);
-  if (!Number.isFinite(units) || units <= 0) {
-    return 1;
-  }
-  return units;
-}
-
-function calculateUnitPrice(packagePrice, packageUnits) {
-  const packagePriceNum = parseNumber(packagePrice);
-  const packageUnitsNum = parseNumber(packageUnits);
-
-  if (
-    packagePriceNum === null ||
-    packageUnitsNum === null ||
-    packageUnitsNum <= 0
-  ) {
-    return null;
-  }
-
-  return packagePriceNum / packageUnitsNum;
 }
 
 function formatPrice(value) {
@@ -108,99 +38,18 @@ export default function DrugSearch() {
   const [basicFilter, setBasicFilter] = useState("");
 
   useEffect(() => {
-    const loadCSV = async () => {
+    const run = async () => {
       try {
-        const text = String(drugsMasterCsv || "");
-
-        if (!text.trim()) {
-          throw new Error("Drug dataset is empty or failed to import");
-        }
-
-        const lines = text
-          .split(/\r?\n/)
-          .filter((line) => line.trim() !== "");
-
-        if (lines.length < 2) {
-          setAllDrugs([]);
-          setLoading(false);
-          return;
-        }
-
-        const rawHeaders = parseCSVLine(lines[0]);
-        const headers = rawHeaders.map((h) => normalizeKey(h));
-
-        const parsed = lines.slice(1).map((line) => {
-          const cols = parseCSVLine(line);
-          const rawRow = {};
-
-          headers.forEach((header, index) => {
-            rawRow[header] = cols[index] ?? "";
-          });
-
-          const packageSizeValue = getValue(rawRow, ["packagesize", "packsize", "packqty"]);
-          const priceToPharmacyValue = getValue(rawRow, [
-            "pharmacyprice",
-            "pricetopharmacy",
-            "packagepricetopharmacy",
-            "packpricetopharmacy",
-            "packagepricepharmacy",
-          ]);
-          const priceToPublicValue = getValue(rawRow, [
-            "publicprice",
-            "pricetopublic",
-            "packagepricetopublic",
-            "packpricetopublic",
-            "packagepricepublic",
-          ]);
-          const packageUnitsValue = extractPackageUnits(packageSizeValue);
-
-          return {
-            brand: getValue(rawRow, ["brand", "brandname", "packagename", "tradename"]),
-            generic: getValue(rawRow, ["generic", "genericname", "scientificname"]),
-            strength: getValue(rawRow, ["strength"]),
-            dosage_form: getValue(rawRow, ["dosageform", "dosage", "form"]),
-            drug_code: getValue(rawRow, ["drugcode", "code", "id"]),
-            barcode: getValue(rawRow, ["barcode"]),
-            rx_otc: getValue(rawRow, ["rxotc", "prescriptionrequired", "rx"]),
-            upp_scope: getValue(rawRow, ["uppscope", "upp"]),
-            thiqa_abm: getValue(rawRow, ["thiqaabmcoverage", "thiqaabm", "thiqa"]),
-            basic_coverage: getValue(rawRow, ["basiccoverage", "basic"]),
-            public_price: getValue(rawRow, ["publicprice", "price", "unitprice"]),
-            package_size: packageSizeValue,
-            package_units: packageUnitsValue,
-            price_to_pharmacy: priceToPharmacyValue,
-            price_to_public: priceToPublicValue,
-            package_price_to_pharmacy: priceToPharmacyValue,
-            package_price_to_public: priceToPublicValue,
-            unit_price_to_pharmacy: getValue(rawRow, [
-              "unitpricetopharmacy",
-              "unitpricepharmacy",
-            ]),
-            unit_price_to_public: getValue(rawRow, [
-              "unitpricetopublic",
-              "unitpricepublic",
-            ]),
-            calculated_unit_price_to_pharmacy: calculateUnitPrice(
-              priceToPharmacyValue,
-              packageUnitsValue
-            ),
-            calculated_unit_price_to_public: calculateUnitPrice(
-              priceToPublicValue,
-              packageUnitsValue
-            ),
-          };
-        });
-
-        setAllDrugs(parsed);
-      } catch (error) {
-        console.error("Error loading drugs CSV:", error);
+        const rows = await loadDrugMaster();
+        setAllDrugs(rows || []);
+      } catch {
         setAllDrugs([]);
       } finally {
         setLoading(false);
       }
     };
 
-    loadCSV();
+    void run();
   }, []);
 
   const filteredDrugs = useMemo(() => {
@@ -209,18 +58,19 @@ export default function DrugSearch() {
     return allDrugs.filter((drug) => {
       const searchMatch =
         !q ||
-        drug.brand?.toLowerCase().includes(q) ||
-        drug.generic?.toLowerCase().includes(q) ||
+        drug.drug_name?.toLowerCase().includes(q) ||
+        drug.brand_name?.toLowerCase().includes(q) ||
+        drug.generic_name?.toLowerCase().includes(q) ||
         drug.drug_code?.toLowerCase().includes(q) ||
         drug.strength?.toLowerCase().includes(q) ||
         drug.dosage_form?.toLowerCase().includes(q) ||
         drug.barcode?.toLowerCase().includes(q);
 
       const brandMatch =
-        !brandFilter || drug.brand?.toLowerCase().includes(brandFilter.toLowerCase());
+        !brandFilter || drug.brand_name?.toLowerCase().includes(brandFilter.toLowerCase());
 
       const genericMatch =
-        !genericFilter || drug.generic?.toLowerCase().includes(genericFilter.toLowerCase());
+        !genericFilter || drug.generic_name?.toLowerCase().includes(genericFilter.toLowerCase());
 
       const strengthMatch =
         !strengthFilter || drug.strength?.toLowerCase().includes(strengthFilter.toLowerCase());
@@ -230,17 +80,17 @@ export default function DrugSearch() {
         drug.dosage_form?.toLowerCase().includes(dosageFilter.toLowerCase());
 
       const rxMatch =
-        !rxFilter || drug.rx_otc?.toLowerCase().includes(rxFilter.toLowerCase());
+        !rxFilter || drug.dispense_mode?.toLowerCase().includes(rxFilter.toLowerCase());
 
       const uppMatch =
         !uppFilter || drug.upp_scope?.toLowerCase().includes(uppFilter.toLowerCase());
 
       const thiqaMatch =
-        !thiqaFilter || drug.thiqa_abm?.toLowerCase().includes(thiqaFilter.toLowerCase());
+        !thiqaFilter || drug.included_thiqa_abm?.toLowerCase().includes(thiqaFilter.toLowerCase());
 
       const basicMatch =
         !basicFilter ||
-        drug.basic_coverage?.toLowerCase().includes(basicFilter.toLowerCase());
+        drug.included_basic?.toLowerCase().includes(basicFilter.toLowerCase());
 
       return (
         searchMatch &&
@@ -267,7 +117,7 @@ export default function DrugSearch() {
     basicFilter,
   ]);
 
-  const displayedDrugs = filteredDrugs.slice(0, 750);
+  const displayedDrugs = filteredDrugs;
 
   return (
     <div>
@@ -384,7 +234,7 @@ export default function DrugSearch() {
           <span>
             <strong>Total loaded drugs:</strong> {allDrugs.length.toLocaleString()} |{" "}
             <strong>Filtered results:</strong> {filteredDrugs.length.toLocaleString()}{" "}
-            (showing top {displayedDrugs.length})
+            (showing {displayedDrugs.length})
           </span>
         )}
       </div>
@@ -408,12 +258,12 @@ export default function DrugSearch() {
             <tbody>
               {displayedDrugs.map((drug, index) => (
                 <tr key={index}>
-                  <td style={td}>{drug.brand || "-"}</td>
-                  <td style={td}>{drug.generic || "-"}</td>
+                  <td style={td}>{drug.brand_name || drug.drug_name || "-"}</td>
+                  <td style={td}>{drug.generic_name || "-"}</td>
                   <td style={td}>{drug.strength || "-"}</td>
                   <td style={td}>{drug.dosage_form || "-"}</td>
-                  <td style={td}>{drug.rx_otc || "-"}</td>
-                  <td style={td}>{drug.public_price || "-"}</td>
+                  <td style={td}>{drug.dispense_mode || "-"}</td>
+                  <td style={td}>{drug.public_price || drug.price_to_public || "-"}</td>
                   <td style={td}>
                     <button style={smallBtn} onClick={() => setSelectedDrug(drug)}>
                       View
@@ -447,12 +297,17 @@ export default function DrugSearch() {
             <div style={detailsGrid}>
               <div style={detailItem}>
                 <div style={detailLabel}>Brand</div>
-                <div style={detailValue}>{selectedDrug.brand || "-"}</div>
+                <div style={detailValue}>{selectedDrug.brand_name || selectedDrug.drug_name || "-"}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Generic</div>
-                <div style={detailValue}>{selectedDrug.generic || "-"}</div>
+                <div style={detailValue}>{selectedDrug.generic_name || "-"}</div>
+              </div>
+
+              <div style={detailItem}>
+                <div style={detailLabel}>Display Name</div>
+                <div style={detailValue}>{getDrugDisplayName(selectedDrug) || "-"}</div>
               </div>
 
               <div style={detailItem}>
@@ -477,7 +332,7 @@ export default function DrugSearch() {
 
               <div style={detailItem}>
                 <div style={detailLabel}>Rx / OTC</div>
-                <div style={detailValue}>{selectedDrug.rx_otc || "-"}</div>
+                <div style={detailValue}>{selectedDrug.dispense_mode || "-"}</div>
               </div>
 
               <div style={detailItem}>
@@ -492,44 +347,44 @@ export default function DrugSearch() {
 
               <div style={detailItem}>
                 <div style={detailLabel}>Package Units</div>
-                <div style={detailValue}>{selectedDrug.package_units ?? 1}</div>
+                <div style={detailValue}>{selectedDrug.pack_size || "-"}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Package Price to Pharmacy</div>
                 <div style={detailValue}>
-                  {selectedDrug.package_price_to_pharmacy || "-"}
+                  {selectedDrug.price_to_pharmacy || selectedDrug.pharmacy_price || "-"}
                 </div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Package Price to Public</div>
-                <div style={detailValue}>{selectedDrug.package_price_to_public || "-"}</div>
+                <div style={detailValue}>{selectedDrug.price_to_public || selectedDrug.public_price || "-"}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Unit Price to Pharmacy</div>
                 <div style={detailValue}>
-                  {selectedDrug.unit_price_to_pharmacy || "-"}
+                  {selectedDrug.unit_price_to_pharmacy || selectedDrug.unit_price_pharmacy || "-"}
                 </div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Unit Price to Public</div>
-                <div style={detailValue}>{selectedDrug.unit_price_to_public || "-"}</div>
+                <div style={detailValue}>{selectedDrug.unit_price_to_public || selectedDrug.unit_price_public || "-"}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Calculated Unit Price to Pharmacy</div>
                 <div style={detailValue}>
-                  {formatPrice(selectedDrug.calculated_unit_price_to_pharmacy)}
+                  {formatPrice(selectedDrug.unit_price_to_pharmacy || selectedDrug.unit_price_pharmacy)}
                 </div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Calculated Unit Price to Public</div>
                 <div style={detailValue}>
-                  {formatPrice(selectedDrug.calculated_unit_price_to_public)}
+                  {formatPrice(selectedDrug.unit_price_to_public || selectedDrug.unit_price_public)}
                 </div>
               </div>
 
@@ -540,12 +395,12 @@ export default function DrugSearch() {
 
               <div style={detailItem}>
                 <div style={detailLabel}>Thiqa/ABM Coverage</div>
-                <div style={detailValue}>{formatCoverageValue(selectedDrug.thiqa_abm)}</div>
+                <div style={detailValue}>{formatCoverageValue(selectedDrug.included_thiqa_abm)}</div>
               </div>
 
               <div style={detailItem}>
                 <div style={detailLabel}>Basic Coverage</div>
-                <div style={detailValue}>{formatCoverageValue(selectedDrug.basic_coverage)}</div>
+                <div style={detailValue}>{formatCoverageValue(selectedDrug.included_basic)}</div>
               </div>
             </div>
           </div>

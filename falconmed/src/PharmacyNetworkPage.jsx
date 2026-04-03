@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import InsightCard from "./components/InsightCard";
 import SkeletonCard from "./components/SkeletonCard";
 import { supabase } from "./lib/supabaseClient";
@@ -77,19 +77,7 @@ export default function PharmacyNetwork() {
   const [error, setError] = useState("");
   const [selectedPharmacyId, setSelectedPharmacyId] = useState("");
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = subscribeInventoryUpdated(() => {
-      void loadData();
-    });
-
-    return unsubscribe;
-  }, []);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
 
@@ -140,7 +128,7 @@ export default function PharmacyNetwork() {
             _pharmacyId: normalizePharmacyId(normalizedRow?.pharmacy_id || row?.pharmacy_id),
             _stockUnit: resolveStockUnit({ ...row, ...normalizedRow }),
           });
-        } catch (normalizeError) {
+        } catch {
           skippedRows += 1;
         }
       }
@@ -152,12 +140,24 @@ export default function PharmacyNetwork() {
       const uniquePharmacies = buildUniquePharmacies(pharmaciesData || []);
       setPharmacies(uniquePharmacies);
       setInventory(normalizedInventory);
-    } catch (loadError) {
+    } catch {
       setError("Unexpected error while loading pharmacy network data.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeInventoryUpdated(() => {
+      void loadData();
+    });
+
+    return unsubscribe;
+  }, [loadData]);
 
   const pharmacyMap = useMemo(() => {
     const map = new Map();
@@ -186,6 +186,20 @@ export default function PharmacyNetwork() {
   const pharmacyCards = useMemo(() => {
     try {
       const byPharmacyId = new Map();
+
+      for (const pharmacy of pharmacyOptions) {
+        const pharmacyId = normalizePharmacyId(pharmacy?.id);
+        if (!pharmacyId || byPharmacyId.has(pharmacyId)) continue;
+
+        byPharmacyId.set(pharmacyId, {
+          pharmacy_id: pharmacyId,
+          name: String(pharmacy?.name || "").trim() || "Unknown Pharmacy",
+          location: String(pharmacy?.location || "").trim(),
+          item_count: 0,
+          total_qty: 0,
+          stock_value: 0,
+        });
+      }
 
       for (const row of Array.isArray(filteredInventory) ? filteredInventory : []) {
         const pharmacyId = normalizePharmacyId(row?._pharmacyId || row?.pharmacy_id);
@@ -222,7 +236,7 @@ export default function PharmacyNetwork() {
     } catch (groupError) {
       return [];
     }
-  }, [filteredInventory, pharmacyMap]);
+  }, [filteredInventory, pharmacyMap, pharmacyOptions]);
 
   const totalInventoryQty = useMemo(
     () => pharmacyCards.reduce((sum, card) => sum + Number(card.total_qty || 0), 0),
@@ -540,6 +554,8 @@ const metricValue = {
   color: "#0f172a",
   letterSpacing: "-0.02em",
   lineHeight: 1.1,
+  fontVariantNumeric: "tabular-nums",
+  minHeight: 36,
 };
 
 const metricHint = {

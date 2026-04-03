@@ -18,11 +18,12 @@ import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
 import StockMovementSystem from "./StockMovementSystem";
 import StockMovementPage from "./StockMovementPage";
+import SinglePharmacyDashboard from "./SinglePharmacyDashboard";
+import InventoryOverviewPage from "./InventoryOverviewPage";
 import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
 import InventoryManagementPage from "./InventoryManagementPage.jsx";
 import SubscriptionCenter from "./SubscriptionCenter";
 import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
-import UrgentActionsWidget from "./modules/pdss/UrgentActionsWidget";
 import PurchaseRequests from "./PurchaseRequests";
 import NetworkIntelligence from "./modules/network/NetworkIntelligence";
 import {
@@ -42,14 +43,13 @@ import {
 
 const NAVIGATION_SECTIONS = [
   {
-    label: "Core",
+    label: "Foundation",
     items: [
       { label: "Dashboard", subtitle: "Overview and live ops", page: "dashboard", icon: "⌂", keywords: ["home", "overview", "kpi"] },
-      { label: "Subscription Center", subtitle: "Plans and entitlement visibility", page: "subscription-center", icon: "¤", keywords: ["subscription", "plans", "upgrade", "billing"] },
+      { label: "Inventory Overview", subtitle: "Single-pharmacy stock visibility", page: "inventory-overview", icon: "▣", keywords: ["inventory overview", "stock visibility", "single pharmacy"] },
       { label: "Drug Intelligence", subtitle: "Search and inspect drug data", page: "drugsearch", icon: "⌕", keywords: ["drug", "master", "search"] },
       { label: "Expiry Tracker", subtitle: "Near-expiry and expired stock", page: "expiry", icon: "◷", keywords: ["expiry", "near expiry", "expired"] },
       { label: "Shortage Tracker", subtitle: "Shortage requests and status", page: "shortage", icon: "!", keywords: ["shortage", "stockout"] },
-      { label: "Analytics", subtitle: "Operational reports", page: "reports", icon: "▤", keywords: ["reports", "analytics", "insights"] },
     ],
   },
   {
@@ -57,20 +57,8 @@ const NAVIGATION_SECTIONS = [
     items: [
       { label: "Labeling Suite", subtitle: "Generate labels", page: "labels", icon: "#", keywords: ["label", "print"] },
       { label: "Billing", subtitle: "Billing and invoice tools", page: "billing", icon: "$", keywords: ["invoice", "bill"] },
-      { label: "Refill Tracker", subtitle: "Track refill schedules", page: "refill", icon: "↺", keywords: ["refill", "patient"] },
-      { label: "PDSS", subtitle: "Executive dashboard", page: "pdss", pdssView: "executive-dashboard", icon: "⚙", keywords: ["pdss", "decision support", "executive"] },
-      { label: "Purchase Requests", subtitle: "Manage purchase requests", page: "purchases", icon: "+", keywords: ["purchase", "procurement"] },
       { label: "Stocktaking", subtitle: "Count and variance checks", page: "stocktaking", icon: "✓", keywords: ["stocktaking", "count"] },
-      { label: "Stock Movement", subtitle: "Record stock movement transactions", page: "stock-movement", icon: "⇄", keywords: ["stock movement", "transfer", "receive", "issue"] },
       { label: "Stock Movement V1", subtitle: "Ledger-first movement workflow", page: "stock-movement-v1", icon: "↹", keywords: ["stock movement v1", "ledger", "balance"] },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { label: "Network Intelligence", subtitle: "Cross-site network signals", page: "network", icon: "◎", keywords: ["network", "intelligence"] },
-      { label: "Pharmacy Network", subtitle: "Pharmacy-level inventory view", page: "pharmacy-network", icon: "◉", keywords: ["pharmacy", "branches"] },
-      { label: "Inventory Management", subtitle: "Inventory add/edit workflow", page: "inventory-management", icon: "▦", keywords: ["inventory", "stock"] },
     ],
   },
 ];
@@ -651,6 +639,10 @@ export default function App() {
           "Subscription Center",
           <SubscriptionCenter plan={plan} status={subscriptionStatus} isDemoMode={isDemoMode} />
         );
+      case "dashboard":
+        return renderGuardedPage("dashboard", "Single Pharmacy Dashboard", <SinglePharmacyDashboard />);
+      case "inventory-overview":
+        return renderGuardedPage("inventory-overview", "Inventory Overview", <InventoryOverviewPage />);
       case "drugsearch":
         return renderGuardedPage("drugsearch", "Drug Intelligence", <DrugSearch />);
       case "expiry":
@@ -1023,22 +1015,13 @@ export default function App() {
                       "Drug Intelligence",
                       "Shortage Tracking",
                       "Expiry Management",
-                      "Network Analytics",
-                      "PDSS",
+                      "Stock Movement V1",
+                      "Inventory Overview",
                       "Labeling Suite",
                     ].map((f) => (
                       <span key={f} style={featurePill}>{f}</span>
                     ))}
                   </div>
-                </div>
-
-                <div style={{ ...contentCard, ...(isCommandCenterMode ? commandModeContentCard : null) }}>
-                  <UrgentActionsWidget
-                    onViewAll={() => {
-                      setPdssView("action-center");
-                      setPage("pdss");
-                    }}
-                  />
                 </div>
               </>
             )}

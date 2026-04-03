@@ -1,14 +1,11 @@
 import { supabase } from "./supabaseClient";
 
-const MOVEMENT_TYPES = {
-  RECEIVE: "Receive",
-  ISSUE: "Issue",
-  TRANSFER_OUT: "Transfer Out",
-  TRANSFER_IN: "Transfer In",
-  ADJUSTMENT_PLUS: "Adjustment+",
-  ADJUSTMENT_MINUS: "Adjustment-",
-  RETURN: "Return",
-};
+const MOVEMENT_TYPES = [
+  "Receive",
+  "Dispense",
+  "Adjustment Remove",
+  "Transfer Out",
+];
 
 function toNumber(value) {
   const parsed = Number(value);
@@ -24,24 +21,40 @@ function normalizeOptional(value) {
   return cleaned || null;
 }
 
+function normalizeNumeric(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 async function insertMovementRow(payload) {
-  let movementInsert = await supabase
-    .from("stock_movements")
-    .insert([payload])
-    .select("*")
-    .single();
+  const runInsert = async (value) =>
+    supabase
+      .from("stock_movements")
+      .insert([value])
+      .select("*")
+      .single();
+
+  let movementInsert = await runInsert(payload);
 
   if (movementInsert.error) {
     const message = String(movementInsert.error.message || "").toLowerCase();
-    const createdByMissing = message.includes("created_by") && message.includes("column");
+    let fallbackPayload = { ...payload };
+    let changed = false;
 
-    if (createdByMissing) {
-      const { created_by, ...fallbackPayload } = payload;
-      movementInsert = await supabase
-        .from("stock_movements")
-        .insert([fallbackPayload])
-        .select("*")
-        .single();
+    if (message.includes("created_by") && message.includes("column")) {
+      const { created_by, ...nextPayload } = fallbackPayload;
+      fallbackPayload = nextPayload;
+      changed = true;
+    }
+
+    if (message.includes("barcode") && message.includes("column")) {
+      const { barcode, ...nextPayload } = fallbackPayload;
+      fallbackPayload = nextPayload;
+      changed = true;
+    }
+
+    if (changed) {
+      movementInsert = await runInsert(fallbackPayload);
     }
   }
 
@@ -52,12 +65,27 @@ async function insertMovementRow(payload) {
   return movementInsert.data;
 }
 
-async function getInventoryRow(pharmacyId, drugName) {
+async function getInventoryRows(pharmacyId, drugName) {
   const { data, error } = await supabase
     .from("pharmacy_inventory")
-    .select("id, quantity, batch_no, expiry_date, unit_cost")
+    .select("id, pharmacy_id, drug_name, quantity, batch_no, expiry_date, barcode, unit_cost")
     .eq("pharmacy_id", pharmacyId)
     .eq("drug_name", drugName)
+    .order("expiry_date", { ascending: true, nullsFirst: false })
+    .limit(500);
+
+  if (error) {
+    throw new Error(`Inventory lookup failed: ${error.message}`);
+  }
+
+  return data || [];
+}
+
+async function getInventoryRowById(rowId) {
+  const { data, error } = await supabase
+    .from("pharmacy_inventory")
+    .select("id, pharmacy_id, drug_name, quantity, batch_no, expiry_date, barcode, unit_cost")
+    .eq("id", rowId)
     .limit(1);
 
   if (error) {
@@ -67,50 +95,88 @@ async function getInventoryRow(pharmacyId, drugName) {
   return data?.[0] || null;
 }
 
-async function applyInventoryDelta({
+async function subtractFromInventoryRow({ inventoryRowId, quantity, pharmacyName, drugName }) {
+  const row = await getInventoryRowById(inventoryRowId);
+
+  if (!row) {
+    throw new Error("Selected source inventory row no longer exists.");
+  }
+
+  const currentQty = Number(row.quantity || 0);
+  const nextQty = currentQty - quantity;
+
+  if (nextQty < 0) {
+    throw new Error(
+      `Insufficient stock at \"${pharmacyName}\": available ${currentQty}, requested ${quantity}.`
+    );
+  }
+
+  const { error } = await supabase
+    .from("pharmacy_inventory")
+    .update({ quantity: nextQty })
+    .eq("id", row.id);
+
+  if (error) {
+    throw new Error(`Inventory update failed: ${error.message}`);
+  }
+
+  return {
+    ...row,
+    quantity: nextQty,
+    drug_name: drugName || row.drug_name,
+  };
+}
+
+async function addToInventoryRow({
   pharmacyId,
-  pharmacyName,
   drugName,
   quantity,
-  direction,
   batchNo,
   expiryDate,
+  barcode,
+  unitCost,
 }) {
-  const existing = await getInventoryRow(pharmacyId, drugName);
+  const unitCostValue = normalizeNumeric(unitCost);
 
-  if (direction === "subtract") {
-    if (!existing) {
-      throw new Error(
-        `No inventory record found for \"${drugName}\" at \"${pharmacyName}\". Cannot reduce stock.`
-      );
-    }
+  let query = supabase
+    .from("pharmacy_inventory")
+    .select("id, quantity")
+    .eq("pharmacy_id", pharmacyId)
+    .eq("drug_name", drugName);
 
-    const currentQty = Number(existing.quantity || 0);
-    const nextQty = currentQty - quantity;
-
-    if (nextQty < 0) {
-      throw new Error(
-        `Insufficient stock at \"${pharmacyName}\": available ${currentQty}, requested ${quantity}.`
-      );
-    }
-
-    const { error } = await supabase
-      .from("pharmacy_inventory")
-      .update({ quantity: nextQty })
-      .eq("id", existing.id);
-
-    if (error) {
-      throw new Error(`Inventory update failed: ${error.message}`);
-    }
-
-    return;
+  if (batchNo) {
+    query = query.eq("batch_no", batchNo);
+  } else {
+    query = query.is("batch_no", null);
   }
+
+  if (expiryDate) {
+    query = query.eq("expiry_date", expiryDate);
+  } else {
+    query = query.is("expiry_date", null);
+  }
+
+  if (barcode) {
+    query = query.eq("barcode", barcode);
+  }
+
+  const { data: existingRows, error: existingError } = await query.limit(1);
+  if (existingError) {
+    throw new Error(`Inventory lookup failed: ${existingError.message}`);
+  }
+
+  const existing = existingRows?.[0] || null;
 
   if (existing) {
-    const currentQty = Number(existing.quantity || 0);
+    const nextQty = Number(existing.quantity || 0) + quantity;
+    const updatePayload = { quantity: nextQty };
+    if (unitCostValue != null) {
+      updatePayload.unit_cost = unitCostValue;
+    }
+
     const { error } = await supabase
       .from("pharmacy_inventory")
-      .update({ quantity: currentQty + quantity })
+      .update(updatePayload)
       .eq("id", existing.id);
 
     if (error) {
@@ -120,17 +186,17 @@ async function applyInventoryDelta({
     return;
   }
 
-  const { error } = await supabase.from("pharmacy_inventory").insert([
-    {
-      pharmacy_id: pharmacyId,
-      drug_name: drugName,
-      quantity,
-      batch_no: batchNo || null,
-      expiry_date: expiryDate || null,
-      unit_cost: 0,
-    },
-  ]);
+  const insertPayload = {
+    pharmacy_id: pharmacyId,
+    drug_name: drugName,
+    quantity,
+    batch_no: batchNo || null,
+    expiry_date: expiryDate || null,
+    barcode: barcode || null,
+    unit_cost: unitCostValue || 0,
+  };
 
+  const { error } = await supabase.from("pharmacy_inventory").insert([insertPayload]);
   if (error) {
     throw new Error(`Inventory insert failed: ${error.message}`);
   }
@@ -163,23 +229,20 @@ function validateTransfer(fromPharmacyId, toPharmacyId) {
 export async function fetchStockMovementOptions() {
   if (!supabase) {
     return {
-      drugs: [],
       pharmacies: [],
     };
   }
 
-  const [drugsResult, pharmaciesResult] = await Promise.all([
-    supabase.from("drug_master").select("drug_name").limit(5000),
-    supabase.from("pharmacies").select("id, name, location").order("name", { ascending: true }),
-  ]);
+  const { data, error } = await supabase
+    .from("pharmacies")
+    .select("id, name, location")
+    .order("name", { ascending: true });
 
-  const drugs = (drugsResult.data || [])
-    .map((item) => cleanString(item?.drug_name))
-    .filter(Boolean)
-    .filter((item, index, arr) => arr.indexOf(item) === index)
-    .sort((left, right) => left.localeCompare(right));
+  if (error) {
+    return { pharmacies: [] };
+  }
 
-  const pharmacies = (pharmaciesResult.data || [])
+  const pharmacies = (data || [])
     .map((item) => ({
       id: cleanString(item?.id),
       name: cleanString(item?.name) || "Unknown Pharmacy",
@@ -188,7 +251,45 @@ export async function fetchStockMovementOptions() {
     .filter((item) => Boolean(item.id))
     .filter((item, index, arr) => arr.findIndex((x) => x.id === item.id) === index);
 
-  return { drugs, pharmacies };
+  return { pharmacies };
+}
+
+export async function fetchInventoryRowsByPharmacy(pharmacyId, searchTerm = "", limit = 80) {
+  requireSupabase();
+
+  const id = cleanString(pharmacyId);
+  if (!id) return [];
+
+  const q = cleanString(searchTerm).toLowerCase();
+  const cap = Math.max(10, Math.min(Number(limit) || 80, 200));
+
+  const { data, error } = await supabase
+    .from("pharmacy_inventory")
+    .select("id, pharmacy_id, drug_name, quantity, batch_no, expiry_date, barcode, unit_cost")
+    .eq("pharmacy_id", id)
+    .gt("quantity", 0)
+    .order("drug_name", { ascending: true })
+    .order("expiry_date", { ascending: true, nullsFirst: false })
+    .limit(1000);
+
+  if (error) {
+    throw new Error(`Failed to load source inventory rows: ${error.message}`);
+  }
+
+  const rows = (data || []).filter((row) => {
+    if (!q) return true;
+    const haystack = [
+      cleanString(row?.drug_name),
+      cleanString(row?.batch_no),
+      cleanString(row?.barcode),
+      cleanString(row?.expiry_date),
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(q);
+  });
+
+  return rows.slice(0, cap);
 }
 
 export async function fetchRecentStockMovements(limit = 50) {
@@ -218,8 +319,8 @@ export async function fetchInventoryBalance(pharmacyId, drugName) {
     return 0;
   }
 
-  const row = await getInventoryRow(pharmacy, drug);
-  return Number(row?.quantity || 0);
+  const rows = await getInventoryRows(pharmacy, drug);
+  return rows.reduce((sum, row) => sum + Number(row?.quantity || 0), 0);
 }
 
 export async function postStockMovement(input) {
@@ -233,240 +334,149 @@ export async function postStockMovement(input) {
   const toPharmacyId = cleanString(input?.toPharmacyId);
   const fromPharmacyName = cleanString(input?.fromPharmacyName);
   const toPharmacyName = cleanString(input?.toPharmacyName);
+  const sourceInventoryRowId = cleanString(input?.sourceInventoryRowId);
+  const sourceInventoryRow = input?.sourceInventoryRow || null;
 
   const batchNo = normalizeOptional(input?.batchNo);
   const expiryDate = normalizeOptional(input?.expiryDate);
+  const barcode = normalizeOptional(input?.barcode);
+  const unitCost = normalizeNumeric(input?.unitCost);
   const referenceNo = normalizeOptional(input?.referenceNo);
   const notes = normalizeOptional(input?.notes);
   const createdBy = normalizeOptional(input?.createdBy) || "falconmed.v1@system";
 
-  if (!drugName) {
+  const nowIso = new Date().toISOString();
+
+  if (!MOVEMENT_TYPES.includes(movementType)) {
+    throw new Error("Unsupported movement type.");
+  }
+
+  const derivedDrug = drugName || cleanString(sourceInventoryRow?.drug_name);
+  const derivedBatch = batchNo || normalizeOptional(sourceInventoryRow?.batch_no);
+  const derivedExpiry = expiryDate || normalizeOptional(sourceInventoryRow?.expiry_date);
+  const derivedBarcode = barcode || normalizeOptional(sourceInventoryRow?.barcode);
+  const effectiveDrugName = derivedDrug;
+
+  if (!effectiveDrugName) {
     throw new Error("Drug name is required.");
   }
 
-  const nowIso = new Date().toISOString();
-
-  if (movementType === MOVEMENT_TYPES.TRANSFER_OUT || movementType === MOVEMENT_TYPES.TRANSFER_IN) {
-    validateTransfer(fromPharmacyId, toPharmacyId);
-
-    if (!fromPharmacyName || !toPharmacyName) {
-      throw new Error("Valid source and destination pharmacy names are required.");
-    }
-
-    const sourceBalance = await fetchInventoryBalance(fromPharmacyId, drugName);
-    if (sourceBalance - quantity < 0) {
-      throw new Error(
-        `Insufficient stock at \"${fromPharmacyName}\": available ${sourceBalance}, requested ${quantity}.`
-      );
-    }
-
-    const txRef = referenceNo || `TX-${Date.now()}`;
-
-    const transferOutRow = await insertMovementRow({
-      movement_type: MOVEMENT_TYPES.TRANSFER_OUT,
-      drug_name: drugName,
-      quantity,
-      from_pharmacy: fromPharmacyName,
-      to_pharmacy: toPharmacyName,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
-      reference_no: txRef,
-      notes,
-      created_at: nowIso,
-      created_by: createdBy,
-    });
-
-    const transferInRow = await insertMovementRow({
-      movement_type: MOVEMENT_TYPES.TRANSFER_IN,
-      drug_name: drugName,
-      quantity,
-      from_pharmacy: fromPharmacyName,
-      to_pharmacy: toPharmacyName,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
-      reference_no: txRef,
-      notes,
-      created_at: nowIso,
-      created_by: createdBy,
-    });
-
-    await applyInventoryDelta({
-      pharmacyId: fromPharmacyId,
-      pharmacyName: fromPharmacyName,
-      drugName,
-      quantity,
-      direction: "subtract",
-      batchNo,
-      expiryDate,
-    });
-
-    await applyInventoryDelta({
-      pharmacyId: toPharmacyId,
-      pharmacyName: toPharmacyName,
-      drugName,
-      quantity,
-      direction: "add",
-      batchNo,
-      expiryDate,
-    });
-
-    return {
-      records: [transferOutRow, transferInRow],
-      emittedPharmacyId: toPharmacyId,
-    };
-  }
-
-  if (movementType === MOVEMENT_TYPES.RECEIVE) {
+  if (movementType === "Receive") {
     if (!toPharmacyId || !toPharmacyName) {
       throw new Error("Destination pharmacy is required for Receive movements.");
     }
 
     const record = await insertMovementRow({
-      movement_type: MOVEMENT_TYPES.RECEIVE,
-      drug_name: drugName,
+      movement_type: "Receive",
+      drug_name: effectiveDrugName,
       quantity,
       from_pharmacy: fromPharmacyName || null,
       to_pharmacy: toPharmacyName,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
+      batch_no: derivedBatch,
+      expiry_date: derivedExpiry,
+      barcode: derivedBarcode,
       reference_no: referenceNo,
       notes,
       created_at: nowIso,
       created_by: createdBy,
     });
 
-    await applyInventoryDelta({
+    await addToInventoryRow({
       pharmacyId: toPharmacyId,
-      pharmacyName: toPharmacyName,
-      drugName,
+      drugName: effectiveDrugName,
       quantity,
-      direction: "add",
-      batchNo,
-      expiryDate,
+      batchNo: derivedBatch,
+      expiryDate: derivedExpiry,
+      barcode: derivedBarcode,
+      unitCost,
     });
 
     return { records: [record], emittedPharmacyId: toPharmacyId };
   }
 
-  if (movementType === MOVEMENT_TYPES.ISSUE) {
+  if (movementType === "Dispense" || movementType === "Adjustment Remove" || movementType === "Transfer Out") {
     if (!fromPharmacyId || !fromPharmacyName) {
-      throw new Error("Source pharmacy is required for Issue movements.");
+      throw new Error("Source pharmacy is required for this movement.");
     }
 
-    const sourceBalance = await fetchInventoryBalance(fromPharmacyId, drugName);
-    if (sourceBalance - quantity < 0) {
+    const isTransferOut = movementType === "Transfer Out";
+    if (isTransferOut) {
+      validateTransfer(fromPharmacyId, toPharmacyId);
+      if (!toPharmacyName) {
+        throw new Error("Destination pharmacy is required for Transfer Out movements.");
+      }
+    }
+
+    if (!sourceInventoryRowId) {
+      throw new Error("Select a source inventory row before posting this movement.");
+    }
+
+    const sourceRow = await getInventoryRowById(sourceInventoryRowId);
+    if (!sourceRow) {
+      throw new Error("Selected source inventory row no longer exists.");
+    }
+
+    if (cleanString(sourceRow.pharmacy_id) !== fromPharmacyId) {
+      throw new Error("Selected source row does not belong to the selected source pharmacy.");
+    }
+
+    const sourceQty = Number(sourceRow.quantity || 0);
+    if (sourceQty - quantity < 0) {
       throw new Error(
-        `Insufficient stock at \"${fromPharmacyName}\": available ${sourceBalance}, requested ${quantity}.`
+        `Insufficient stock at \"${fromPharmacyName}\": available ${sourceQty}, requested ${quantity}.`
       );
     }
 
+    const dbMovementType =
+      movementType === "Dispense"
+        ? "Issue"
+        : movementType === "Adjustment Remove"
+          ? "Adjustment-"
+          : "Transfer Out";
+
     const record = await insertMovementRow({
-      movement_type: MOVEMENT_TYPES.ISSUE,
-      drug_name: drugName,
+      movement_type: dbMovementType,
+      drug_name: effectiveDrugName,
       quantity,
       from_pharmacy: fromPharmacyName,
-      to_pharmacy: toPharmacyName || null,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
+      to_pharmacy: isTransferOut ? toPharmacyName : null,
+      batch_no: derivedBatch,
+      expiry_date: derivedExpiry,
+      barcode: derivedBarcode,
       reference_no: referenceNo,
       notes,
       created_at: nowIso,
       created_by: createdBy,
     });
 
-    await applyInventoryDelta({
-      pharmacyId: fromPharmacyId,
+    await subtractFromInventoryRow({
+      inventoryRowId: sourceInventoryRowId,
+      quantity,
       pharmacyName: fromPharmacyName,
-      drugName,
-      quantity,
-      direction: "subtract",
-      batchNo,
-      expiryDate,
+      drugName: effectiveDrugName,
     });
 
-    return { records: [record], emittedPharmacyId: fromPharmacyId };
-  }
-
-  if (movementType === MOVEMENT_TYPES.ADJUSTMENT_PLUS || movementType === MOVEMENT_TYPES.RETURN) {
-    const targetPharmacyId = toPharmacyId || fromPharmacyId;
-    const targetPharmacyName = toPharmacyName || fromPharmacyName;
-
-    if (!targetPharmacyId || !targetPharmacyName) {
-      throw new Error("A pharmacy is required for positive adjustments and returns.");
+    if (isTransferOut) {
+      await addToInventoryRow({
+        pharmacyId: toPharmacyId,
+        drugName: effectiveDrugName,
+        quantity,
+        batchNo: derivedBatch,
+        expiryDate: derivedExpiry,
+        barcode: derivedBarcode,
+        unitCost: unitCost ?? sourceRow?.unit_cost,
+      });
     }
 
-    const record = await insertMovementRow({
-      movement_type: movementType,
-      drug_name: drugName,
-      quantity,
-      from_pharmacy: fromPharmacyName || null,
-      to_pharmacy: toPharmacyName || targetPharmacyName,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
-      reference_no: referenceNo,
-      notes,
-      created_at: nowIso,
-      created_by: createdBy,
-    });
-
-    await applyInventoryDelta({
-      pharmacyId: targetPharmacyId,
-      pharmacyName: targetPharmacyName,
-      drugName,
-      quantity,
-      direction: "add",
-      batchNo,
-      expiryDate,
-    });
-
-    return { records: [record], emittedPharmacyId: targetPharmacyId };
-  }
-
-  if (movementType === MOVEMENT_TYPES.ADJUSTMENT_MINUS) {
-    const sourcePharmacyId = fromPharmacyId || toPharmacyId;
-    const sourcePharmacyName = fromPharmacyName || toPharmacyName;
-
-    if (!sourcePharmacyId || !sourcePharmacyName) {
-      throw new Error("A pharmacy is required for negative adjustments.");
-    }
-
-    const sourceBalance = await fetchInventoryBalance(sourcePharmacyId, drugName);
-    if (sourceBalance - quantity < 0) {
-      throw new Error(
-        `Insufficient stock at \"${sourcePharmacyName}\": available ${sourceBalance}, requested ${quantity}.`
-      );
-    }
-
-    const record = await insertMovementRow({
-      movement_type: MOVEMENT_TYPES.ADJUSTMENT_MINUS,
-      drug_name: drugName,
-      quantity,
-      from_pharmacy: fromPharmacyName || sourcePharmacyName,
-      to_pharmacy: toPharmacyName || null,
-      batch_no: batchNo,
-      expiry_date: expiryDate,
-      reference_no: referenceNo,
-      notes,
-      created_at: nowIso,
-      created_by: createdBy,
-    });
-
-    await applyInventoryDelta({
-      pharmacyId: sourcePharmacyId,
-      pharmacyName: sourcePharmacyName,
-      drugName,
-      quantity,
-      direction: "subtract",
-      batchNo,
-      expiryDate,
-    });
-
-    return { records: [record], emittedPharmacyId: sourcePharmacyId };
+    return {
+      records: [record],
+      emittedPharmacyId: isTransferOut ? toPharmacyId : fromPharmacyId,
+    };
   }
 
   throw new Error("Unsupported movement type.");
 }
 
 export function getStockMovementTypes() {
-  return Object.values(MOVEMENT_TYPES);
+  return [...MOVEMENT_TYPES];
 }

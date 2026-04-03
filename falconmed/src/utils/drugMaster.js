@@ -1,4 +1,3 @@
-import drugsMasterCsv from "../../public/dru_gmaster.csv?raw";
 import { supabase } from "../lib/supabaseClient";
 
 const DRUG_MASTER_COLUMNS = [
@@ -35,43 +34,6 @@ const DRUG_MASTER_COLUMNS = [
 
 let cachedDrugs = null;
 let loadPromise = null;
-
-function parseCSVLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let index = 0; index < line.length; index += 1) {
-    const char = line[index];
-    const next = line[index + 1];
-
-    if (char === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        index += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === "," && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-
-  result.push(current.trim());
-  return result;
-}
-
-function normalizeHeader(value) {
-  return String(value || "")
-    .replace(/\ufeff/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
 
 function getValue(row, keys) {
   for (const key of keys) {
@@ -194,35 +156,33 @@ function dedupeDrugs(rows) {
   );
 }
 
-function parseCsvDrugMaster() {
-  const text = String(drugsMasterCsv || "");
-  if (!text.trim()) return [];
-
-  const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "");
-  if (lines.length < 2) return [];
-
-  const rawHeaders = parseCSVLine(lines[0]);
-  const headers = rawHeaders.map((header) => normalizeHeader(header));
-
-  const rows = lines.slice(1).map((line) => {
-    const cols = parseCSVLine(line);
-    const row = {};
-    headers.forEach((header, index) => {
-      row[header] = cols[index] ?? "";
-    });
-    return row;
-  });
-
-  return dedupeDrugs(rows);
-}
-
 async function fetchSupabaseDrugMaster() {
   if (!supabase) return [];
 
   try {
-    const { data, error } = await supabase.from("drug_master").select(DRUG_MASTER_COLUMNS).limit(30000);
-    if (error) return [];
-    return dedupeDrugs(data || []);
+    const allRows = [];
+    let from = 0;
+    const PAGE_SIZE = 1000;
+
+    while (true) {
+      const { data, error } = await supabase
+        .from("drug_master")
+        .select(DRUG_MASTER_COLUMNS)
+        .range(from, from + PAGE_SIZE - 1);
+
+      if (error) return [];
+
+      const page = Array.isArray(data) ? data : [];
+      if (page.length === 0) break;
+
+      allRows.push(...page);
+      if (page.length < PAGE_SIZE) break;
+
+      from += PAGE_SIZE;
+      if (from >= 500000) break;
+    }
+
+    return dedupeDrugs(allRows);
   } catch {
     return [];
   }
@@ -236,7 +196,7 @@ export async function loadDrugMaster() {
   if (!loadPromise) {
     loadPromise = (async () => {
       const supabaseRows = await fetchSupabaseDrugMaster();
-      cachedDrugs = supabaseRows.length > 0 ? supabaseRows : parseCsvDrugMaster();
+      cachedDrugs = supabaseRows;
       return cachedDrugs;
     })();
   }
@@ -250,8 +210,7 @@ export function searchDrugMaster(drugs, query, limit = 25) {
     return [];
   }
 
-  return (drugs || [])
-    .filter((drug) => {
+  const matches = (drugs || []).filter((drug) => {
       const code = cleanText(drug.drug_code).toLowerCase();
       const drugName = cleanText(drug.drug_name).toLowerCase();
       const brand = cleanText(drug.brand_name).toLowerCase();
@@ -264,8 +223,14 @@ export function searchDrugMaster(drugs, query, limit = 25) {
         brand.includes(normalizedQuery) ||
         generic.includes(normalizedQuery)
       );
-    })
-    .slice(0, limit);
+    });
+
+  // Preserve the third argument for compatibility while avoiding capped master lists.
+  if (typeof limit !== "number") {
+    return matches;
+  }
+
+  return matches;
 }
 
 export function getDrugUnitPrice(drug, preferredField = "public") {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuthContext } from "./lib/authContext";
+import DrugMasterPicker from "./components/DrugMasterPicker";
+import InventoryRowPicker from "./components/InventoryRowPicker";
 import {
-  fetchInventoryBalance,
   fetchRecentStockMovements,
   fetchStockMovementOptions,
   getStockMovementTypes,
@@ -13,12 +14,15 @@ const STOCK_MOVEMENT_V1_DRAFT_KEY = "falconmed_stock_movement_v1_draft";
 
 const initialForm = {
   movementType: "Receive",
+  sourcePharmacyId: "",
+  destinationPharmacyId: "",
+  inventorySearch: "",
   drugName: "",
   quantity: "",
-  fromPharmacyId: "",
-  toPharmacyId: "",
   batchNo: "",
   expiryDate: "",
+  barcode: "",
+  unitCost: "",
   referenceNo: "",
   notes: "",
 };
@@ -57,6 +61,13 @@ function formatDate(value) {
   return date.toLocaleString();
 }
 
+function formatExpiry(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleDateString();
+}
+
 function getFeedbackStyle(type) {
   if (type === "error") {
     return {
@@ -89,12 +100,12 @@ export default function StockMovementPage() {
 
   const [form, setForm] = useState(initialForm);
   const [pharmacies, setPharmacies] = useState([]);
-  const [drugs, setDrugs] = useState([]);
+  const [selectedDrug, setSelectedDrug] = useState(null);
+  const [selectedSourceRow, setSelectedSourceRow] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState({ type: "", text: "" });
-  const [balancePreview, setBalancePreview] = useState(null);
 
   const movementTypes = useMemo(() => getStockMovementTypes(), []);
 
@@ -107,14 +118,12 @@ export default function StockMovementPage() {
     return map;
   }, [pharmacies]);
 
-  const isTransfer =
-    form.movementType === "Transfer Out" || form.movementType === "Transfer In";
-
-  const drugSuggestions = useMemo(() => {
-    const query = String(form.drugName || "").trim().toLowerCase();
-    if (!query) return drugs;
-    return drugs.filter((name) => name.toLowerCase().includes(query));
-  }, [drugs, form.drugName]);
+  const isReceive = form.movementType === "Receive";
+  const isInventoryFirst =
+    form.movementType === "Dispense" ||
+    form.movementType === "Adjustment Remove" ||
+    form.movementType === "Transfer Out";
+  const isTransferOut = form.movementType === "Transfer Out";
 
   useEffect(() => {
     const draft = readDraft();
@@ -138,7 +147,6 @@ export default function StockMovementPage() {
       ]);
 
       setPharmacies(options.pharmacies || []);
-      setDrugs(options.drugs || []);
       setRows(recent || []);
     } catch (error) {
       setFeedback({
@@ -154,56 +162,6 @@ export default function StockMovementPage() {
     void loadPage();
   }, []);
 
-  useEffect(() => {
-    const drugName = String(form.drugName || "").trim();
-    if (!drugName) {
-      setBalancePreview(null);
-      return;
-    }
-
-    let pharmacyId = "";
-    if (form.movementType === "Receive") pharmacyId = form.toPharmacyId;
-    if (form.movementType === "Issue") pharmacyId = form.fromPharmacyId;
-    if (form.movementType === "Adjustment+") pharmacyId = form.toPharmacyId || form.fromPharmacyId;
-    if (form.movementType === "Adjustment-") pharmacyId = form.fromPharmacyId || form.toPharmacyId;
-    if (form.movementType === "Return") pharmacyId = form.toPharmacyId || form.fromPharmacyId;
-    if (isTransfer) pharmacyId = form.fromPharmacyId;
-
-    if (!pharmacyId) {
-      setBalancePreview(null);
-      return;
-    }
-
-    let canceled = false;
-
-    const run = async () => {
-      try {
-        const qty = await fetchInventoryBalance(pharmacyId, drugName);
-        if (!canceled) {
-          const pharmacyName = pharmacyMap.get(pharmacyId)?.name || "Unknown Pharmacy";
-          setBalancePreview({ pharmacyName, quantity: qty });
-        }
-      } catch {
-        if (!canceled) {
-          setBalancePreview(null);
-        }
-      }
-    };
-
-    void run();
-
-    return () => {
-      canceled = true;
-    };
-  }, [
-    form.drugName,
-    form.fromPharmacyId,
-    form.toPharmacyId,
-    form.movementType,
-    isTransfer,
-    pharmacyMap,
-  ]);
-
   const handleChange = (event) => {
     const { name, value } = event.target;
 
@@ -211,26 +169,62 @@ export default function StockMovementPage() {
       const next = { ...prev, [name]: value };
 
       if (name === "movementType") {
-        const nextTransfer = value === "Transfer Out" || value === "Transfer In";
-        if (nextTransfer && next.fromPharmacyId && next.fromPharmacyId === next.toPharmacyId) {
-          next.toPharmacyId = "";
-        }
+        next.sourcePharmacyId = "";
+        next.destinationPharmacyId = "";
+        next.drugName = "";
+        next.batchNo = "";
+        next.expiryDate = "";
+        next.barcode = "";
+        next.unitCost = "";
       }
 
-      if (name === "fromPharmacyId" && isTransfer && value && value === prev.toPharmacyId) {
-        next.toPharmacyId = "";
+      if (name === "sourcePharmacyId") {
+        next.drugName = "";
+        next.batchNo = "";
+        next.expiryDate = "";
+        next.barcode = "";
+        next.unitCost = "";
       }
 
-      if (name === "toPharmacyId" && isTransfer && value && value === prev.fromPharmacyId) {
-        next.fromPharmacyId = "";
+      if (name === "destinationPharmacyId" && isTransferOut && value === prev.sourcePharmacyId) {
+        next.destinationPharmacyId = "";
       }
 
       return next;
     });
+
+    if (name === "movementType" || name === "sourcePharmacyId") {
+      setSelectedSourceRow(null);
+      setSelectedDrug(null);
+    }
+  };
+
+  const chooseMasterDrug = (drug) => {
+    setSelectedDrug(drug);
+    setForm((prev) => ({
+      ...prev,
+      drugName: drug?.drug_name || drug?.brand_name || "",
+      barcode: drug?.barcode || "",
+      unitCost: drug?.unit_price_pharmacy || drug?.pharmacy_price || drug?.unit_cost || "",
+    }));
+  };
+
+  const chooseSourceRow = (row) => {
+    setSelectedSourceRow(row);
+    setForm((prev) => ({
+      ...prev,
+      drugName: row?.drug_name || "",
+      batchNo: row?.batch_no || "",
+      expiryDate: row?.expiry_date || "",
+      barcode: row?.barcode || "",
+      unitCost: row?.unit_cost || "",
+    }));
   };
 
   const resetForm = () => {
     setForm(initialForm);
+    setSelectedDrug(null);
+    setSelectedSourceRow(null);
     clearDraft();
   };
 
@@ -240,21 +234,29 @@ export default function StockMovementPage() {
     setFeedback({ type: "", text: "" });
 
     try {
-      const fromPharmacy = pharmacyMap.get(form.fromPharmacyId) || null;
-      const toPharmacy = pharmacyMap.get(form.toPharmacyId) || null;
+      const fromPharmacy = pharmacyMap.get(form.sourcePharmacyId) || null;
+      const toPharmacy = pharmacyMap.get(form.destinationPharmacyId) || null;
+
+      if (isInventoryFirst && !selectedSourceRow?.id) {
+        throw new Error("Select a source inventory row before posting this movement.");
+      }
 
       const result = await postStockMovement({
         movementType: form.movementType,
         drugName: form.drugName,
         quantity: form.quantity,
-        fromPharmacyId: form.fromPharmacyId,
-        toPharmacyId: form.toPharmacyId,
+        fromPharmacyId: form.sourcePharmacyId,
+        toPharmacyId: form.destinationPharmacyId,
         fromPharmacyName: fromPharmacy?.name || "",
         toPharmacyName: toPharmacy?.name || "",
         batchNo: form.batchNo,
         expiryDate: form.expiryDate,
+        barcode: form.barcode,
+        unitCost: form.unitCost,
         referenceNo: form.referenceNo,
         notes: form.notes,
+        sourceInventoryRowId: selectedSourceRow?.id || "",
+        sourceInventoryRow: selectedSourceRow,
         createdBy: user?.email || "falconmed.v1@system",
       });
 
@@ -305,24 +307,95 @@ export default function StockMovementPage() {
               </select>
             </div>
 
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Drug Name</label>
-              <input
-                name="drugName"
-                value={form.drugName}
-                onChange={handleChange}
-                style={inputStyle}
-                required
-                autoComplete="off"
-                list="stock-movement-v1-drugs"
-                placeholder={drugs.length === 0 ? "No drug options available" : "Search and select drug"}
-              />
-              <datalist id="stock-movement-v1-drugs">
-                {drugSuggestions.slice(0, 3000).map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
-            </div>
+            {isInventoryFirst ? (
+              <div style={fieldGroup}>
+                <label style={fieldLabel}>Source Pharmacy</label>
+                <select name="sourcePharmacyId" value={form.sourcePharmacyId} onChange={handleChange} style={inputStyle} required>
+                  <option value="">Select source pharmacy</option>
+                  {pharmacies
+                    .filter((item) => !(form.destinationPharmacyId && item.id === form.destinationPharmacyId))
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : (
+              <div style={fieldGroup}>
+                <label style={fieldLabel}>Pharmacy</label>
+                <select name="destinationPharmacyId" value={form.destinationPharmacyId} onChange={handleChange} style={inputStyle} required>
+                  <option value="">Select pharmacy</option>
+                  {pharmacies.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {isTransferOut ? (
+              <div style={fieldGroup}>
+                <label style={fieldLabel}>Destination Pharmacy</label>
+                <select
+                  name="destinationPharmacyId"
+                  value={form.destinationPharmacyId}
+                  onChange={handleChange}
+                  style={inputStyle}
+                  required
+                >
+                  <option value="">Select destination pharmacy</option>
+                  {pharmacies
+                    .filter((item) => !(form.sourcePharmacyId && item.id === form.sourcePharmacyId))
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+            ) : null}
+
+            {isReceive ? (
+              <>
+                <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
+                  <DrugMasterPicker value={selectedDrug} onSelect={chooseMasterDrug} required />
+                </div>
+
+                <div style={fieldGroup}>
+                  <label style={fieldLabel}>Drug Name</label>
+                  <input
+                    name="drugName"
+                    value={form.drugName}
+                    onChange={handleChange}
+                    style={inputStyle}
+                    required
+                    placeholder="Auto-filled from Drug Master Search"
+                  />
+                </div>
+
+                <div style={fieldGroup}>
+                  <label style={fieldLabel}>Batch No</label>
+                  <input name="batchNo" value={form.batchNo} onChange={handleChange} style={inputStyle} />
+                </div>
+
+                <div style={fieldGroup}>
+                  <label style={fieldLabel}>Expiry Date</label>
+                  <input type="date" name="expiryDate" value={form.expiryDate} onChange={handleChange} style={inputStyle} />
+                </div>
+
+                <div style={fieldGroup}>
+                  <label style={fieldLabel}>Barcode</label>
+                  <input name="barcode" value={form.barcode} onChange={handleChange} style={inputStyle} />
+                </div>
+
+                <div style={fieldGroup}>
+                  <label style={fieldLabel}>Unit Cost</label>
+                  <input type="number" step="0.01" min="0" name="unitCost" value={form.unitCost} onChange={handleChange} style={inputStyle} />
+                </div>
+              </>
+            ) : null}
 
             <div style={fieldGroup}>
               <label style={fieldLabel}>Quantity</label>
@@ -339,44 +412,6 @@ export default function StockMovementPage() {
             </div>
 
             <div style={fieldGroup}>
-              <label style={fieldLabel}>From Pharmacy</label>
-              <select name="fromPharmacyId" value={form.fromPharmacyId} onChange={handleChange} style={inputStyle}>
-                <option value="">Select source pharmacy</option>
-                {pharmacies
-                  .filter((item) => !(isTransfer && form.toPharmacyId && item.id === form.toPharmacyId))
-                  .map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>To Pharmacy</label>
-              <select name="toPharmacyId" value={form.toPharmacyId} onChange={handleChange} style={inputStyle}>
-                <option value="">Select destination pharmacy</option>
-                {pharmacies
-                  .filter((item) => !(isTransfer && form.fromPharmacyId && item.id === form.fromPharmacyId))
-                  .map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-              </select>
-            </div>
-
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Batch No</label>
-              <input name="batchNo" value={form.batchNo} onChange={handleChange} style={inputStyle} />
-            </div>
-
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Expiry Date</label>
-              <input type="date" name="expiryDate" value={form.expiryDate} onChange={handleChange} style={inputStyle} />
-            </div>
-
-            <div style={fieldGroup}>
               <label style={fieldLabel}>Reference No</label>
               <input name="referenceNo" value={form.referenceNo} onChange={handleChange} style={inputStyle} />
             </div>
@@ -387,9 +422,19 @@ export default function StockMovementPage() {
             </div>
           </div>
 
-          {balancePreview ? (
+          {isInventoryFirst ? (
+            <div style={inventoryPickerWrap}>
+              <InventoryRowPicker
+                pharmacyId={form.sourcePharmacyId}
+                selectedRow={selectedSourceRow}
+                onSelect={chooseSourceRow}
+              />
+            </div>
+          ) : null}
+
+          {selectedSourceRow ? (
             <div style={balanceBanner}>
-              Current balance at {balancePreview.pharmacyName}: <strong>{balancePreview.quantity}</strong>
+              Selected source row: <strong>{selectedSourceRow.drug_name || "-"}</strong> | Available: <strong>{selectedSourceRow.quantity ?? 0}</strong> | Batch: <strong>{selectedSourceRow.batch_no || "-"}</strong> | Expiry: <strong>{formatExpiry(selectedSourceRow.expiry_date)}</strong> | Barcode: <strong>{selectedSourceRow.barcode || "-"}</strong>
             </div>
           ) : null}
 
@@ -549,6 +594,33 @@ const balanceBanner = {
   color: "#075985",
   padding: "9px 10px",
   fontSize: "13px",
+};
+
+const inventoryPickerWrap = {
+  marginTop: "14px",
+  display: "grid",
+  gap: "8px",
+};
+
+const inventoryTableWrap = {
+  overflowX: "auto",
+  border: "1px solid #cbd5e1",
+  borderRadius: "8px",
+};
+
+const selectedInventoryRowStyle = {
+  background: "#eff6ff",
+};
+
+const rowSelectButton = {
+  border: "1px solid #93c5fd",
+  borderRadius: "6px",
+  background: "#ffffff",
+  color: "#1d4ed8",
+  fontSize: "12px",
+  fontWeight: 600,
+  padding: "6px 8px",
+  cursor: "pointer",
 };
 
 const actionRow = {
