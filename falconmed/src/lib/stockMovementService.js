@@ -4,7 +4,6 @@ const MOVEMENT_TYPES = [
   "Receive",
   "Dispense",
   "Adjustment Remove",
-  "Transfer Out",
 ];
 
 function toNumber(value) {
@@ -216,16 +215,6 @@ function requireValidQuantity(quantity) {
   return qty;
 }
 
-function validateTransfer(fromPharmacyId, toPharmacyId) {
-  if (!fromPharmacyId || !toPharmacyId) {
-    throw new Error("Both source and destination pharmacies are required for transfers.");
-  }
-
-  if (fromPharmacyId === toPharmacyId) {
-    throw new Error("Source and destination pharmacies must be different.");
-  }
-}
-
 export async function fetchStockMovementOptions() {
   if (!supabase) {
     return {
@@ -394,17 +383,9 @@ export async function postStockMovement(input) {
     return { records: [record], emittedPharmacyId: toPharmacyId };
   }
 
-  if (movementType === "Dispense" || movementType === "Adjustment Remove" || movementType === "Transfer Out") {
+  if (movementType === "Dispense" || movementType === "Adjustment Remove") {
     if (!fromPharmacyId || !fromPharmacyName) {
       throw new Error("Source pharmacy is required for this movement.");
-    }
-
-    const isTransferOut = movementType === "Transfer Out";
-    if (isTransferOut) {
-      validateTransfer(fromPharmacyId, toPharmacyId);
-      if (!toPharmacyName) {
-        throw new Error("Destination pharmacy is required for Transfer Out movements.");
-      }
     }
 
     if (!sourceInventoryRowId) {
@@ -430,16 +411,14 @@ export async function postStockMovement(input) {
     const dbMovementType =
       movementType === "Dispense"
         ? "Issue"
-        : movementType === "Adjustment Remove"
-          ? "Adjustment-"
-          : "Transfer Out";
+        : "Adjustment-";
 
     const record = await insertMovementRow({
       movement_type: dbMovementType,
       drug_name: effectiveDrugName,
       quantity,
       from_pharmacy: fromPharmacyName,
-      to_pharmacy: isTransferOut ? toPharmacyName : null,
+      to_pharmacy: null,
       batch_no: derivedBatch,
       expiry_date: derivedExpiry,
       barcode: derivedBarcode,
@@ -456,22 +435,7 @@ export async function postStockMovement(input) {
       drugName: effectiveDrugName,
     });
 
-    if (isTransferOut) {
-      await addToInventoryRow({
-        pharmacyId: toPharmacyId,
-        drugName: effectiveDrugName,
-        quantity,
-        batchNo: derivedBatch,
-        expiryDate: derivedExpiry,
-        barcode: derivedBarcode,
-        unitCost: unitCost ?? sourceRow?.unit_cost,
-      });
-    }
-
-    return {
-      records: [record],
-      emittedPharmacyId: isTransferOut ? toPharmacyId : fromPharmacyId,
-    };
+    return { records: [record], emittedPharmacyId: fromPharmacyId };
   }
 
   throw new Error("Unsupported movement type.");

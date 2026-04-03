@@ -650,7 +650,7 @@ export default function StockMovementSystem() {
                 autoComplete="off"
               />
               <datalist id="stock-movement-drug-options">
-                {filteredDrugOptions.slice(0, 3000).map((name) => (
+                {filteredDrugOptions.map((name) => (
                   <option key={name} value={name} />
                 ))}
               </datalist>

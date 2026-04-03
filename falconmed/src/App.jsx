@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import CommandPalette from "./components/CommandPalette";
-import FeatureGate from "./components/FeatureGate";
 import SkeletonCard from "./components/SkeletonCard";
 import { useAnimatedCounter } from "./hooks/useAnimatedCounter";
-import useSubscription from "./hooks/useSubscription";
 import useCommandPaletteShortcut from "./hooks/useCommandPaletteShortcut";
 import Login from "./Login";
 import { supabase } from "./lib/supabaseClient";
@@ -13,25 +11,10 @@ import ExpiryTracker from "./ExpiryTracker";
 import ShortageTracker from "./ShortageTracker";
 import LabelBuilder from "./LabelBuilder";
 import Billing from "./Billing";
-import RefillTracker from "./RefillTracker";
-import Reports from "./Reports";
 import Stocktaking from "./Stocktaking";
-import StockMovementSystem from "./StockMovementSystem";
 import StockMovementPage from "./StockMovementPage";
 import SinglePharmacyDashboard from "./SinglePharmacyDashboard";
 import InventoryOverviewPage from "./InventoryOverviewPage";
-import PharmacyNetwork from "./PharmacyNetworkPage.jsx";
-import InventoryManagementPage from "./InventoryManagementPage.jsx";
-import SubscriptionCenter from "./SubscriptionCenter";
-import PDSSWorkspace from "./modules/pdss/PDSSWorkspace";
-import PurchaseRequests from "./PurchaseRequests";
-import NetworkIntelligence from "./modules/network/NetworkIntelligence";
-import {
-  canAccessPage,
-  getRequiredPlan,
-  getUpgradeMessage,
-  PLAN_LABELS,
-} from "./config/featureAccess";
 import { subscribeInventoryUpdated } from "./utils/inventoryEvents";
 import {
   computeInventoryAggregates,
@@ -63,43 +46,12 @@ const NAVIGATION_SECTIONS = [
   },
 ];
 
-function formatStatusLabel(status) {
-  if (!status) return "Inactive";
-
-  return String(status)
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function getAccessModeNotice(status) {
-  const normalized = String(status || "").trim().toLowerCase();
-
-  if (normalized === "preview") {
-    return "Enterprise preview active — presentation-safe visibility";
-  }
-
-  if (normalized === "unavailable") {
-    return "Subscription unavailable — limited access mode";
-  }
-
-  if (normalized === "inactive") {
-    return "Starter access active";
-  }
-
-  return "";
-}
-
 export default function App() {
-  const { user, loading: authLoading, signOut, isDemoMode } = useAuthContext();
-  const { plan, status: subscriptionStatus, loading: subscriptionLoading } = useSubscription(user, { isDemoMode });
+  const { user, loading: authLoading, signOut } = useAuthContext();
   const [page, setPage] = useState("dashboard");
-  const [pdssView, setPdssView] = useState("executive-dashboard");
   const [commandCenterMode, setCommandCenterMode] = useState(false);
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [accessNotice, setAccessNotice] = useState("");
   const [activeSites, setActiveSites] = useState(0);
   const [inventoryRecords, setInventoryRecords] = useState(0);
   const [totalQty, setTotalQty] = useState(0);
@@ -109,7 +61,6 @@ export default function App() {
   const [expiredStockValue, setExpiredStockValue] = useState(0);
   const [shortageRequests, setShortageRequests] = useState(0);
   const [purchaseRequests, setPurchaseRequests] = useState(0);
-  const [refillRequests, setRefillRequests] = useState(0);
   const [recentActivity, setRecentActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [liveOperationsToday, setLiveOperationsToday] = useState(0);
@@ -348,7 +299,6 @@ export default function App() {
       setExpiredStockValue(0);
       setShortageRequests(0);
       setPurchaseRequests(0);
-      setRefillRequests(0);
       return;
     }
 
@@ -356,7 +306,6 @@ export default function App() {
       inventoryResult,
       shortageCount,
       purchaseCount,
-      refillCount,
     ] = await Promise.all([
       fetchAllRows("pharmacy_inventory", "pharmacy_id,quantity,unit_cost,expiry_date", {
         orderBy: "created_at",
@@ -364,7 +313,6 @@ export default function App() {
       }),
       safeCount("shortage_requests"),
       safeCount("purchase_requests"),
-      safeCount("refill_requests"),
     ]);
 
     const rows = inventoryResult?.error ? [] : inventoryResult?.data || [];
@@ -379,7 +327,6 @@ export default function App() {
     setExpiredStockValue(aggregates.expiredStockValue || 0);
     setShortageRequests(shortageCount || 0);
     setPurchaseRequests(purchaseCount || 0);
-    setRefillRequests(refillCount || 0);
   }, [safeCount]);
 
   useEffect(() => {
@@ -399,8 +346,7 @@ export default function App() {
   const totalDrugsInDatabase = inventoryRecords;
   const nearExpiryItems = nearExpiry;
   const shortageRequestsToday = shortageRequests;
-  const activeUrgentActions =
-    Number(purchaseRequests || 0) + Number(refillRequests || 0);
+  const activeUrgentActions = Number(purchaseRequests || 0);
 
   const computedRiskScore =
     (Number(shortageRequestsToday) || 0) * 15 +
@@ -539,23 +485,7 @@ export default function App() {
 
   useCommandPaletteShortcut(handlePaletteToggle, true);
 
-  const navigationSections = useMemo(
-    () =>
-      NAVIGATION_SECTIONS.map((section) => ({
-        ...section,
-        items: section.items.map((item) => {
-          const requiredPlan = getRequiredPlan(item.page);
-
-          return {
-            ...item,
-            requiredPlan,
-            requiredPlanLabel: PLAN_LABELS[requiredPlan],
-            locked: !canAccessPage(plan, item.page),
-          };
-        }),
-      })),
-    [plan]
-  );
+  const navigationSections = NAVIGATION_SECTIONS;
 
   const commandNavigationItems = useMemo(
     () => navigationSections.flatMap((section) => section.items),
@@ -563,53 +493,30 @@ export default function App() {
   );
 
   const isCommandCenterMode = page === "dashboard" && commandCenterMode;
-  const sessionHeadline = isDemoMode ? "Enterprise Preview" : user?.email || "Signed in";
-  const sessionPlanLabel = isDemoMode ? "Enterprise Preview" : PLAN_LABELS[plan];
-  const sessionStatusLabel = isDemoMode ? "Preview" : formatStatusLabel(subscriptionStatus);
-  const sessionHint = isDemoMode
-    ? "Presentation-safe access with expanded enterprise module visibility."
-    : getAccessModeNotice(subscriptionStatus);
+  const sessionHeadline = user?.email || "Signed in";
+  const sessionPlanLabel = "Foundation";
+  const sessionStatusLabel = "Active";
 
   const handleNavigationRequest = useCallback((selection) => {
     if (!selection?.page) return;
 
-    if (!canAccessPage(plan, selection.page)) {
-      setAccessNotice(getUpgradeMessage(selection.page));
-      return;
-    }
-
-    setAccessNotice("");
-
-    if (selection.page === "pdss" && selection.pdssView) {
-      setPdssView(selection.pdssView);
-    }
-
     setPage(selection.page);
-  }, [plan]);
+  }, []);
 
   const handleSignOut = useCallback(async () => {
     await signOut();
-    setAccessNotice("");
     setPaletteOpen(false);
     setCommandCenterMode(false);
     setPage("dashboard");
-    setPdssView("executive-dashboard");
   }, [signOut]);
 
-  useEffect(() => {
-    if (!accessNotice) return undefined;
-
-    const timer = window.setTimeout(() => setAccessNotice(""), 4200);
-    return () => window.clearTimeout(timer);
-  }, [accessNotice]);
-
-  if (authLoading || (user && subscriptionLoading)) {
+  if (authLoading) {
     return (
       <div style={sessionShell}>
         <div style={sessionCard}>
           <div style={sessionBadge}>FalconMed</div>
           <h1 style={sessionTitle}>Loading workspace</h1>
-          <p style={sessionText}>Restoring your session and verifying plan access.</p>
+          <p style={sessionText}>Restoring your session.</p>
         </div>
       </div>
     );
@@ -619,60 +526,26 @@ export default function App() {
     return <Login />;
   }
 
-  const renderGuardedPage = (targetPage, title, children) => (
-    <div style={contentCard}>
-      <FeatureGate
-        allowed={canAccessPage(plan, targetPage)}
-        title={title}
-        message={getUpgradeMessage(targetPage)}
-      >
-        {children}
-      </FeatureGate>
-    </div>
-  );
-
   const renderPage = () => {
     switch (page) {
-      case "subscription-center":
-        return renderGuardedPage(
-          "subscription-center",
-          "Subscription Center",
-          <SubscriptionCenter plan={plan} status={subscriptionStatus} isDemoMode={isDemoMode} />
-        );
       case "dashboard":
-        return renderGuardedPage("dashboard", "Single Pharmacy Dashboard", <SinglePharmacyDashboard />);
+        return <div style={contentCard}><SinglePharmacyDashboard /></div>;
       case "inventory-overview":
-        return renderGuardedPage("inventory-overview", "Inventory Overview", <InventoryOverviewPage />);
+        return <div style={contentCard}><InventoryOverviewPage /></div>;
       case "drugsearch":
-        return renderGuardedPage("drugsearch", "Drug Intelligence", <DrugSearch />);
+        return <div style={contentCard}><DrugSearch /></div>;
       case "expiry":
-        return renderGuardedPage("expiry", "Expiry Tracker", <ExpiryTracker />);
+        return <div style={contentCard}><ExpiryTracker /></div>;
       case "shortage":
-        return renderGuardedPage("shortage", "Shortage Tracker", <ShortageTracker />);
-      case "reports":
-        return renderGuardedPage("reports", "Analytics", <Reports />);
+        return <div style={contentCard}><ShortageTracker /></div>;
       case "labels":
-        return renderGuardedPage("labels", "Labeling Suite", <LabelBuilder />);
+        return <div style={contentCard}><LabelBuilder /></div>;
       case "billing":
-        return renderGuardedPage("billing", "Billing", <Billing />);
-      case "refill":
-        return renderGuardedPage("refill", "Refill Tracker", <RefillTracker />);
-      case "pdss":
-        return renderGuardedPage("pdss", "PDSS", <PDSSWorkspace initialView={pdssView} />);
-      case "purchases":
-        return renderGuardedPage("purchases", "Purchase Requests", <PurchaseRequests />);
+        return <div style={contentCard}><Billing /></div>;
       case "stocktaking":
-        return renderGuardedPage("stocktaking", "Stocktaking", <Stocktaking />);
-      case "stock-movement":
-        return renderGuardedPage("stock-movement", "Stock Movement", <StockMovementSystem />);
+        return <div style={contentCard}><Stocktaking /></div>;
       case "stock-movement-v1":
-        return renderGuardedPage("stock-movement-v1", "Stock Movement V1", <StockMovementPage />);
-      case "network":
-        return renderGuardedPage("network", "Network Intelligence", <NetworkIntelligence />);
-      case "pharmacy-network":
-        return renderGuardedPage("pharmacy-network", "Pharmacy Network", <PharmacyNetwork />);
-      case "inventory-management":
-        return renderGuardedPage("inventory-management", "Inventory Management", <InventoryManagementPage />);
+        return <div style={contentCard}><StockMovementPage /></div>;
       default:
         return (
           <>
@@ -1050,15 +923,12 @@ export default function App() {
             <div style={userCardRow}>
               <div style={avatarCircle}>FM</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={userLabel}>{isDemoMode ? "Demo Session" : "Active Session"}</div>
+                <div style={userLabel}>Active Session</div>
                 <div style={userEmail}>{sessionHeadline}</div>
                 <div style={planRow}>
-                  <span style={{ ...planBadge, ...(isDemoMode ? demoPlanBadge : null) }}>{sessionPlanLabel}</span>
-                  <span style={{ ...planStatusBadge, ...(isDemoMode ? demoStatusBadge : null) }}>{sessionStatusLabel}</span>
+                  <span style={planBadge}>{sessionPlanLabel}</span>
+                  <span style={planStatusBadge}>{sessionStatusLabel}</span>
                 </div>
-                {sessionHint ? (
-                  <div style={planHint}>{sessionHint}</div>
-                ) : null}
               </div>
             </div>
             <button style={signOutButton} onClick={handleSignOut}>
@@ -1074,22 +944,12 @@ export default function App() {
               {section.items.map((item) => (
                 <button
                   key={item.page}
-                  style={
-                    page === item.page
-                      ? item.locked
-                        ? lockedActiveBtn
-                        : activeBtn
-                      : item.locked
-                        ? lockedBtn
-                        : btn
-                  }
+                  style={page === item.page ? activeBtn : btn}
                   onClick={() => handleNavigationRequest(item)}
                 >
                   <span style={navButtonRow}>
                     <span>{item.label}</span>
-                    {item.locked ? <span style={lockIndicator}>Locked</span> : null}
                   </span>
-                  {item.locked ? <span style={navMetaText}>{item.requiredPlanLabel} plan</span> : null}
                 </button>
               ))}
             </div>
@@ -1110,21 +970,6 @@ export default function App() {
         className={isCommandCenterMode ? "dashboard-command-mode" : ""}
         style={{ ...main, ...(isCommandCenterMode ? commandModeMain : null) }}
       >
-        {accessNotice ? (
-          <div style={accessNoticeCard}>
-            <div style={accessNoticeTitle}>Plan Access</div>
-            <div style={accessNoticeText}>{accessNotice}</div>
-          </div>
-        ) : null}
-        {isDemoMode ? (
-          <div style={demoPreviewBanner}>
-            <div>
-              <div style={demoPreviewTitle}>Demo Session</div>
-              <div style={demoPreviewText}>Enterprise Preview unlocked for executive presentation mode.</div>
-            </div>
-            <div style={demoPreviewPill}>Read-only where available</div>
-          </div>
-        ) : null}
         {renderPage()}
         <footer style={appFooter}>
           <div style={appFooterTitle}>FalconMed v1.0</div>

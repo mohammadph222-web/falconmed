@@ -16,7 +16,6 @@ const initialForm = {
   movementType: "Receive",
   sourcePharmacyId: "",
   destinationPharmacyId: "",
-  inventorySearch: "",
   drugName: "",
   quantity: "",
   batchNo: "",
@@ -121,9 +120,7 @@ export default function StockMovementPage() {
   const isReceive = form.movementType === "Receive";
   const isInventoryFirst =
     form.movementType === "Dispense" ||
-    form.movementType === "Adjustment Remove" ||
-    form.movementType === "Transfer Out";
-  const isTransferOut = form.movementType === "Transfer Out";
+    form.movementType === "Adjustment Remove";
 
   useEffect(() => {
     const draft = readDraft();
@@ -184,10 +181,6 @@ export default function StockMovementPage() {
         next.expiryDate = "";
         next.barcode = "";
         next.unitCost = "";
-      }
-
-      if (name === "destinationPharmacyId" && isTransferOut && value === prev.sourcePharmacyId) {
-        next.destinationPharmacyId = "";
       }
 
       return next;
@@ -334,28 +327,6 @@ export default function StockMovementPage() {
                 </select>
               </div>
             )}
-
-            {isTransferOut ? (
-              <div style={fieldGroup}>
-                <label style={fieldLabel}>Destination Pharmacy</label>
-                <select
-                  name="destinationPharmacyId"
-                  value={form.destinationPharmacyId}
-                  onChange={handleChange}
-                  style={inputStyle}
-                  required
-                >
-                  <option value="">Select destination pharmacy</option>
-                  {pharmacies
-                    .filter((item) => !(form.sourcePharmacyId && item.id === form.sourcePharmacyId))
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            ) : null}
 
             {isReceive ? (
               <>
