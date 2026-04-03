@@ -8,24 +8,24 @@ export const PLAN_LABELS = {
 
 export const PAGE_ACCESS = {
   dashboard: { minimumPlan: "starter", label: "Dashboard" },
+  "inventory-overview": { minimumPlan: "starter", label: "Inventory Overview" },
   "subscription-center": { minimumPlan: "starter", label: "Subscription Center" },
   drugsearch: { minimumPlan: "starter", label: "Drug Intelligence" },
   expiry: { minimumPlan: "starter", label: "Expiry Tracker" },
   shortage: { minimumPlan: "starter", label: "Shortage Tracker" },
   labels: { minimumPlan: "starter", label: "Labeling Suite" },
   billing: { minimumPlan: "starter", label: "Billing" },
-  reports: { minimumPlan: "professional", label: "Analytics" },
-  "stock-movement": { minimumPlan: "professional", label: "Stock Movement" },
-  "stock-movement-v1": { minimumPlan: "professional", label: "Stock Movement V1" },
-  stocktaking: { minimumPlan: "professional", label: "Stocktaking" },
-  pdss: { minimumPlan: "professional", label: "PDSS" },
-  purchases: { minimumPlan: "professional", label: "Purchase Requests" },
-  refill: { minimumPlan: "enterprise", label: "Refill Tracker" },
-  network: { minimumPlan: "enterprise", label: "Network Intelligence" },
-  "pharmacy-network": { minimumPlan: "enterprise", label: "Pharmacy Network" },
-  "inventory-management": { minimumPlan: "enterprise", label: "Inventory Management" },
+  reports: { minimumPlan: "starter", label: "Analytics" },
+  "stock-movement": { minimumPlan: "starter", label: "Stock Movement" },
+  "stock-movement-v1": { minimumPlan: "starter", label: "Stock Movement V1" },
+  stocktaking: { minimumPlan: "starter", label: "Stocktaking" },
+  pdss: { minimumPlan: "starter", label: "PDSS" },
+  purchases: { minimumPlan: "starter", label: "Purchase Requests" },
+  refill: { minimumPlan: "starter", label: "Refill Tracker" },
+  network: { minimumPlan: "starter", label: "Network Intelligence" },
+  "pharmacy-network": { minimumPlan: "starter", label: "Pharmacy Network" },
+  "inventory-management": { minimumPlan: "starter", label: "Inventory Management" },
 };
-
 export function normalizePlan(plan) {
   const normalized = String(plan || "").trim().toLowerCase();
   return PLAN_ORDER.includes(normalized) ? normalized : "starter";
