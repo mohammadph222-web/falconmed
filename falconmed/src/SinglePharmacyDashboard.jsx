@@ -158,7 +158,7 @@ export default function SinglePharmacyDashboard() {
           options={pharmacies}
           value={selectedPharmacyId}
           onChange={onSelectPharmacy}
-          label="Active Demo Pharmacy"
+          label="Active Pharmacy"
         />
       </div>
 

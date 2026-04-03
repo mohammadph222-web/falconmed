@@ -103,7 +103,7 @@ export default function InventoryOverviewPage() {
       <div style={heroCard}>
         <div>
           <h1 style={heroTitle}>Inventory Overview</h1>
-          <p style={heroSub}>Premium operational view for one pharmacy workspace.</p>
+          <p style={heroSub}>Operational inventory view for one pharmacy workspace.</p>
         </div>
         <WorkspacePharmacySelector
           options={pharmacies}
