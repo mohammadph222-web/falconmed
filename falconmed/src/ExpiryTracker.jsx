@@ -6,7 +6,7 @@ import {
   getDrugUnitPrice,
   loadDrugMaster,
   searchDrugMaster,
-} from "./utils/drugMaster";
+} from "./utils/drugMasterLoader";
 import { loadPharmaciesWithFallback } from "./utils/pharmacyData";
 
 const EXPIRY_TABLE = "pharmacy_inventory";
@@ -754,7 +754,7 @@ export default function ExpiryTracker() {
 }
 
 const pageTitle = {
-  fontSize: "30px",
+  fontSize: "32px",
   fontWeight: 800,
   margin: 0,
   color: "#0f172a",
@@ -774,15 +774,15 @@ const pageHeaderRow = {
   alignItems: "flex-start",
   justifyContent: "space-between",
   gap: "12px",
-  marginBottom: "24px",
-  paddingBottom: "20px",
-  borderBottom: "1px solid #f1f5f9",
+  marginBottom: "26px",
+  paddingBottom: "22px",
+  borderBottom: "1px solid #e7eef9",
   flexWrap: "wrap",
 };
 
 const testBtn = {
   padding: "9px 15px",
-  background: "#f59e0b",
+  background: "linear-gradient(135deg, #d97706 0%, #f59e0b 100%)",
   color: "white",
   border: "none",
   borderRadius: "10px",
@@ -801,10 +801,10 @@ const cardsGrid = {
 
 const statCard = {
   background: "white",
-  borderRadius: "16px",
+  borderRadius: "14px",
   padding: "20px 18px 16px",
-  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
-  border: "1px solid #e8edf5",
+  boxShadow: "0 12px 24px rgba(15,23,42,0.06)",
+  border: "1px solid #dbe7f5",
   textAlign: "center",
 };
 
@@ -827,10 +827,10 @@ const statValue = {
 
 const formCard = {
   background: "white",
-  borderRadius: "16px",
+  borderRadius: "14px",
   padding: "24px 26px",
-  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
-  border: "1px solid #e8edf5",
+  boxShadow: "0 14px 28px rgba(15,23,42,0.06)",
+  border: "1px solid #dbe7f5",
   marginBottom: "22px",
 };
 
@@ -893,11 +893,12 @@ const input = {
   padding: "10px 12px",
   fontSize: "14px",
   borderRadius: "10px",
-  border: "1.5px solid #e2e8f0",
+  border: "1px solid #d4dfef",
   boxSizing: "border-box",
   fontFamily: "'Segoe UI', Arial, sans-serif",
   color: "#0f172a",
   background: "#fff",
+  boxShadow: "0 2px 6px rgba(15, 23, 42, 0.03)",
 };
 
 const inputReadOnly = {
@@ -946,7 +947,7 @@ const drugDropdownEmpty = {
 
 const primaryBtn = {
   padding: "10px 22px",
-  background: "#1e40af",
+  background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)",
   color: "white",
   border: "none",
   borderRadius: "10px",
@@ -954,21 +955,21 @@ const primaryBtn = {
   fontSize: "14px",
   fontWeight: 700,
   letterSpacing: "0.01em",
-  boxShadow: "0 2px 10px rgba(30,64,175,0.25)",
+  boxShadow: "0 10px 20px rgba(37,99,235,0.25)",
 };
 
 const tableCard = {
   background: "white",
-  borderRadius: "16px",
+  borderRadius: "14px",
   padding: "24px 26px",
-  boxShadow: "0 2px 10px rgba(15,23,42,0.05)",
-  border: "1px solid #e8edf5",
+  boxShadow: "0 16px 30px rgba(15,23,42,0.06)",
+  border: "1px solid #dbe7f5",
 };
 
 const tableWrap = {
   overflowX: "auto",
   borderRadius: "10px",
-  border: "1px solid #e8edf5",
+  border: "1px solid #dbe7f5",
 };
 
 const table = {
@@ -980,8 +981,8 @@ const table = {
 const th = {
   textAlign: "left",
   padding: "11px 14px",
-  background: "#f8fafc",
-  borderBottom: "1px solid #e8edf5",
+  background: "#f8fbff",
+  borderBottom: "1px solid #dbe7f5",
   color: "#64748b",
   fontSize: "11px",
   fontWeight: 700,
@@ -994,7 +995,7 @@ const th = {
 
 const td = {
   padding: "11px 14px",
-  borderBottom: "1px solid #f1f5f9",
+  borderBottom: "1px solid #edf2fa",
   color: "#0f172a",
   fontSize: "13px",
   verticalAlign: "middle",

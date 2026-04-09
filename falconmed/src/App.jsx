@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Login from "./Login";
 import { useAuthContext } from "./lib/authContext";
+
 import SinglePharmacyDashboard from "./SinglePharmacyDashboard";
 import InventoryOverviewPage from "./InventoryOverviewPage";
 import DrugSearch from "./DrugSearch";
@@ -9,7 +10,8 @@ import ShortageTracker from "./ShortageTracker";
 import StockMovementPage from "./StockMovementPage";
 import Stocktaking from "./Stocktaking";
 import Billing from "./Billing";
-import LabelBuilder from "./LabelBuilder";
+import LabelStudio from "./LabelStudio";
+import RefillTracker from "./RefillTracker";
 
 const NAV_ITEMS = [
   { page: "dashboard", label: "Dashboard" },
@@ -20,6 +22,7 @@ const NAV_ITEMS = [
   { page: "stock-movement-v1", label: "Stock Movement V1" },
   { page: "stocktaking", label: "Stocktaking" },
   { page: "billing", label: "Billing" },
+  { page: "refill", label: "Refill Tracker" },
   { page: "labels", label: "Labels" },
 ];
 
@@ -60,8 +63,10 @@ export default function App() {
         return <Stocktaking />;
       case "billing":
         return <Billing />;
+      case "refill":
+        return <RefillTracker />;
       case "labels":
-        return <LabelBuilder />;
+        return <LabelStudio />;
       default:
         return <SinglePharmacyDashboard />;
     }
@@ -70,7 +75,7 @@ export default function App() {
   return (
     <div style={layout}>
       <aside style={sidebar}>
-        <div>
+        <div style={sidebarSections}>
           <div style={brandCard}>
             <h2 style={brandTitle}>FalconMed</h2>
             <p style={brandSub}>Single Pharmacy Professional System v1</p>
@@ -79,7 +84,12 @@ export default function App() {
           <div style={userCard}>
             <div style={userLabel}>Active User</div>
             <div style={userEmail}>{user.email || "Signed in"}</div>
-            <button type="button" style={signOutButton} onClick={signOut}>
+            <button
+              type="button"
+              style={signOutButton}
+              className="sidebar-signout-button"
+              onClick={signOut}
+            >
               Sign out
             </button>
           </div>
@@ -90,6 +100,11 @@ export default function App() {
                 key={item.page}
                 type="button"
                 style={page === item.page ? activeNavButton : navButton}
+                className={
+                  page === item.page
+                    ? "sidebar-nav-button sidebar-nav-button-active"
+                    : "sidebar-nav-button"
+                }
                 onClick={() => setPage(item.page)}
               >
                 {item.label}
@@ -110,114 +125,110 @@ const layout = {
   display: "flex",
   minHeight: "100vh",
   background: "#f3f6fb",
-  fontFamily: "'Segoe UI', Arial, sans-serif",
+  fontFamily: "'Plus Jakarta Sans', 'Segoe UI', sans-serif",
 };
 
 const sidebar = {
   width: "280px",
   minWidth: "280px",
-  background: "#0f172a",
+  background: "linear-gradient(180deg, #162c44 0%, #19334f 100%)",
   color: "#f8fafc",
-  borderRight: "1px solid #1e293b",
-  padding: "18px",
+  borderRight: "1px solid #2d465f",
+  padding: "17px 15px 14px",
   boxSizing: "border-box",
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
-  gap: "16px",
+  gap: "14px",
+};
+
+const sidebarSections = {
+  display: "grid",
+  gap: "12px",
 };
 
 const brandCard = {
-  border: "1px solid #1e293b",
+  border: "1px solid rgba(170, 199, 229, 0.16)",
   borderRadius: "12px",
-  background: "#111827",
-  padding: "12px",
-  marginBottom: "10px",
+  background: "rgba(14, 35, 60, 0.2)",
+  padding: "12px 13px",
 };
 
 const brandTitle = {
   margin: 0,
-  fontSize: "22px",
-  lineHeight: 1.2,
+  fontSize: "23px",
+  fontWeight: 750,
 };
 
 const brandSub = {
-  marginTop: "6px",
+  marginTop: "5px",
   marginBottom: 0,
-  color: "#cbd5e1",
-  fontSize: "12px",
+  color: "#b9cde2",
+  fontSize: "11px",
 };
 
 const userCard = {
-  border: "1px solid #334155",
+  border: "1px solid rgba(170, 199, 229, 0.14)",
   borderRadius: "12px",
-  background: "#0b1220",
-  padding: "12px",
+  background: "rgba(14, 35, 60, 0.17)",
+  padding: "12px 13px",
 };
 
 const userLabel = {
-  fontSize: "11px",
-  color: "#94a3b8",
-  textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  fontWeight: 700,
+  fontSize: "10px",
+  color: "#95aac0",
 };
 
 const userEmail = {
-  marginTop: "6px",
+  marginTop: "7px",
   fontSize: "13px",
-  color: "#e2e8f0",
-  wordBreak: "break-word",
 };
 
 const signOutButton = {
-  marginTop: "12px",
+  marginTop: "11px",
   width: "100%",
-  borderRadius: "8px",
-  border: "1px solid #475569",
-  background: "#1e293b",
+  borderRadius: "9px",
+  border: "1px solid #476784",
+  background: "#325674",
   color: "#f8fafc",
-  padding: "8px 10px",
+  padding: "7px 10px",
   cursor: "pointer",
-  fontWeight: 600,
 };
 
 const navWrap = {
-  marginTop: "12px",
+  marginTop: "2px",
   display: "grid",
-  gap: "8px",
+  gap: "6px",
 };
 
 const navButton = {
-  border: "1px solid transparent",
-  borderRadius: "8px",
-  background: "transparent",
-  color: "#dbeafe",
-  padding: "10px 12px",
+  border: "1px solid rgba(170, 199, 229, 0.1)",
+  borderRadius: "9px",
+  background: "rgba(14, 35, 60, 0.1)",
+  color: "#cfe1f4",
+  padding: "8px 10px",
   textAlign: "left",
-  fontSize: "14px",
-  fontWeight: 600,
+  fontSize: "12.5px",
   cursor: "pointer",
 };
 
 const activeNavButton = {
   ...navButton,
-  border: "1px solid #60a5fa",
-  background: "#1d4ed8",
-  color: "#eff6ff",
+  border: "1px solid #8cb4d5",
+  background: "linear-gradient(135deg, #35668f 0%, #3f729d 100%)",
+  color: "#f6fbff",
 };
 
 const sidebarFooter = {
-  color: "#94a3b8",
-  fontSize: "12px",
+  color: "#c1d2e4",
+  fontSize: "11px",
   textAlign: "center",
-  paddingTop: "8px",
 };
 
 const main = {
   flex: 1,
   minWidth: 0,
-  padding: "18px",
+  padding: "24px",
 };
 
 const sessionShell = {
@@ -225,28 +236,21 @@ const sessionShell = {
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  padding: "24px",
-  background: "#f3f6fb",
 };
 
 const sessionCard = {
   width: "min(560px, 100%)",
   background: "#ffffff",
-  border: "1px solid #dbe2ea",
-  borderRadius: "14px",
-  boxShadow: "0 16px 36px rgba(15, 23, 42, 0.08)",
-  padding: "24px",
+  border: "1px solid #d9e3f0",
+  borderRadius: "16px",
+  padding: "28px",
 };
 
 const sessionTitle = {
   margin: 0,
   fontSize: "28px",
-  color: "#0f172a",
 };
 
 const sessionText = {
   marginTop: "10px",
-  marginBottom: 0,
-  color: "#64748b",
-  fontSize: "15px",
 };

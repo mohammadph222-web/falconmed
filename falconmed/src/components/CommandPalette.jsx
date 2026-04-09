@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getDrugDisplayName, loadDrugMaster } from "../utils/drugMaster";
+import { getDrugDisplayName, loadDrugMaster } from "../utils/drugMasterLoader";
 
 function normalizeText(value) {
   return String(value || "").trim().toLowerCase();

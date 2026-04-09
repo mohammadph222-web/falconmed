@@ -44,7 +44,9 @@ export default function InventoryOverviewPage() {
     setSelectedPharmacyId(selected);
     writeWorkspacePharmacyId(selected);
 
-    const filtered = (inventoryRows || []).filter((row) => String(row?.pharmacy_id || "").trim() === selected);
+    const filtered = (inventoryRows || []).filter(
+      (row) => String(row?.pharmacy_id || "").trim() === selected
+    );
     setRows(filtered);
     setLoading(false);
   };
@@ -120,7 +122,11 @@ export default function InventoryOverviewPage() {
           style={searchInput}
           placeholder="Search by drug, batch, barcode, expiry"
         />
-        <select value={expiryFilter} onChange={(event) => setExpiryFilter(event.target.value)} style={selectInput}>
+        <select
+          value={expiryFilter}
+          onChange={(event) => setExpiryFilter(event.target.value)}
+          style={selectInput}
+        >
           <option value="all">All expiry states</option>
           <option value="with-expiry">With expiry date</option>
           <option value="without-expiry">Without expiry date</option>
@@ -128,9 +134,18 @@ export default function InventoryOverviewPage() {
       </div>
 
       <div style={summaryGrid}>
-        <div style={summaryCard}><div style={summaryLabel}>Filtered Lines</div><div style={summaryValue}>{formatQty(summary.lines)}</div></div>
-        <div style={summaryCard}><div style={summaryLabel}>Total Qty</div><div style={summaryValue}>{formatQty(summary.totalQty)}</div></div>
-        <div style={summaryCard}><div style={summaryLabel}>Total Stock Value</div><div style={summaryValue}>{formatAed(summary.totalValue)}</div></div>
+        <div style={summaryCard}>
+          <div style={summaryLabel}>Filtered Lines</div>
+          <div style={summaryValue}>{formatQty(summary.lines)}</div>
+        </div>
+        <div style={summaryCard}>
+          <div style={summaryLabel}>Total Qty</div>
+          <div style={summaryValue}>{formatQty(summary.totalQty)}</div>
+        </div>
+        <div style={summaryCard}>
+          <div style={summaryLabel}>Total Stock Value</div>
+          <div style={summaryValue}>{formatAed(summary.totalValue)}</div>
+        </div>
       </div>
 
       <div style={tableWrap}>
@@ -143,13 +158,18 @@ export default function InventoryOverviewPage() {
               <th style={th}>Expiry</th>
               <th style={th}>Barcode</th>
               <th style={th}>Unit Cost</th>
+              <th style={th}>Status</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td style={emptyCell} colSpan={6}>Loading inventory...</td></tr>
+              <tr>
+                <td style={emptyCell} colSpan={7}>Loading inventory...</td>
+              </tr>
             ) : viewRows.length === 0 ? (
-              <tr><td style={emptyCell} colSpan={6}>No inventory rows found.</td></tr>
+              <tr>
+                <td style={emptyCell} colSpan={7}>No inventory rows found.</td>
+              </tr>
             ) : (
               viewRows.map((row) => (
                 <tr key={row.id}>
@@ -159,6 +179,13 @@ export default function InventoryOverviewPage() {
                   <td style={td}>{row.expiry_date || "-"}</td>
                   <td style={td}>{row.barcode || "-"}</td>
                   <td style={td}>{formatAed(row.unit_cost || 0)}</td>
+                  <td style={td}>
+                    {Number(row.quantity || 0) <= 0
+                      ? "OUT"
+                      : Number(row.quantity || 0) <= 10
+                      ? "LOW"
+                      : "OK"}
+                  </td>
                 </tr>
               ))
             )}
@@ -170,38 +197,116 @@ export default function InventoryOverviewPage() {
 }
 
 const pageWrap = { display: "grid", gap: "14px" };
+
 const heroCard = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: "12px",
-  background: "linear-gradient(120deg, #111827 0%, #1d4ed8 55%, #0284c7 100%)",
+  background: "linear-gradient(120deg, #0f223f 0%, #1e40af 56%, #2563eb 100%)",
   color: "#f8fafc",
-  borderRadius: "14px",
-  padding: "16px",
+  borderRadius: "16px",
+  padding: "18px",
+  border: "1px solid #1e3a8a",
+  boxShadow: "0 16px 30px rgba(30, 64, 175, 0.18)",
 };
+
 const heroTitle = { margin: 0, fontSize: "24px" };
+
 const heroSub = { marginTop: "6px", marginBottom: 0, opacity: 0.9 };
-const filterBar = { display: "grid", gridTemplateColumns: "1fr 220px", gap: "10px" };
+
+const filterBar = {
+  display: "grid",
+  gridTemplateColumns: "1fr 220px",
+  gap: "12px",
+};
+
 const searchInput = {
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px",
+  border: "1px solid #d4dfef",
+  borderRadius: "12px",
+  padding: "11px 12px",
   fontSize: "13px",
+  background: "#ffffff",
+  boxShadow: "0 2px 6px rgba(15, 23, 42, 0.03)",
 };
+
 const selectInput = {
-  border: "1px solid #cbd5e1",
-  borderRadius: "10px",
-  padding: "10px",
+  border: "1px solid #d4dfef",
+  borderRadius: "12px",
+  padding: "11px 12px",
   fontSize: "13px",
+  background: "#ffffff",
+  boxShadow: "0 2px 6px rgba(15, 23, 42, 0.03)",
 };
-const summaryGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" };
-const summaryCard = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "12px" };
-const summaryLabel = { fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 700 };
-const summaryValue = { marginTop: "8px", fontSize: "22px", fontWeight: 800, color: "#0f172a", fontVariantNumeric: "tabular-nums" };
-const tableWrap = { overflowX: "auto", background: "#fff", border: "1px solid #e2e8f0", borderRadius: "12px" };
-const table = { width: "100%", borderCollapse: "collapse" };
-const th = { textAlign: "left", borderBottom: "1px solid #cbd5e1", padding: "10px", fontSize: "12px", color: "#334155" };
-const td = { borderBottom: "1px solid #e2e8f0", padding: "10px", fontSize: "12px", color: "#0f172a" };
-const tdStrong = { ...td, fontWeight: 700 };
-const emptyCell = { ...td, textAlign: "center", color: "#64748b" };
+
+const summaryGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "10px",
+};
+
+const summaryCard = {
+  background: "#fff",
+  border: "1px solid #dbe7f5",
+  borderRadius: "12px",
+  padding: "14px",
+  boxShadow: "0 10px 20px rgba(15, 23, 42, 0.04)",
+};
+
+const summaryLabel = {
+  fontSize: "11px",
+  color: "#64748b",
+  textTransform: "uppercase",
+  fontWeight: 700,
+};
+
+const summaryValue = {
+  marginTop: "8px",
+  fontSize: "22px",
+  fontWeight: 800,
+  color: "#0f172a",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const tableWrap = {
+  overflowX: "auto",
+  background: "#fff",
+  border: "1px solid #dbe7f5",
+  borderRadius: "14px",
+  boxShadow: "0 14px 28px rgba(15, 23, 42, 0.05)",
+};
+
+const table = {
+  width: "100%",
+  borderCollapse: "collapse",
+};
+
+const th = {
+  textAlign: "left",
+  borderBottom: "1px solid #dbe7f5",
+  padding: "12px 10px",
+  fontSize: "11px",
+  color: "#334155",
+  textTransform: "uppercase",
+  letterSpacing: "0.05em",
+  fontWeight: 700,
+  background: "#f8fbff",
+};
+
+const td = {
+  borderBottom: "1px solid #edf2fa",
+  padding: "11px 10px",
+  fontSize: "12px",
+  color: "#0f172a",
+};
+
+const tdStrong = {
+  ...td,
+  fontWeight: 700,
+};
+
+const emptyCell = {
+  ...td,
+  textAlign: "center",
+  color: "#64748b",
+};

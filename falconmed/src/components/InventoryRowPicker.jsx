@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchInventoryRowsByPharmacy } from "../lib/stockMovementService";
 
+const QUERY_DEBOUNCE_MS = 180;
+const MAX_VISIBLE_ROWS = 250;
+
 function text(value) {
   return String(value || "").trim();
 }
@@ -19,12 +22,23 @@ export default function InventoryRowPicker({
   disabled = false,
 }) {
   const [query, setQuery] = useState("");
-  const [rows, setRows] = useState([]);
+  const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(query);
+    }, QUERY_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [query]);
 
   useEffect(() => {
     if (!pharmacyId) {
-      setRows([]);
+      setAllRows([]);
       return;
     }
 
@@ -33,13 +47,13 @@ export default function InventoryRowPicker({
     const run = async () => {
       setLoading(true);
       try {
-        const data = await fetchInventoryRowsByPharmacy(pharmacyId, query, 250);
+        const data = await fetchInventoryRowsByPharmacy(pharmacyId, "", 1000);
         if (!canceled) {
-          setRows(data || []);
+          setAllRows(data || []);
         }
       } catch {
         if (!canceled) {
-          setRows([]);
+          setAllRows([]);
         }
       } finally {
         if (!canceled) {
@@ -53,13 +67,35 @@ export default function InventoryRowPicker({
     return () => {
       canceled = true;
     };
-  }, [pharmacyId, query]);
+  }, [pharmacyId]);
+
+  const rows = useMemo(() => {
+    const q = text(debouncedQuery).toLowerCase();
+    if (!q) return allRows.slice(0, MAX_VISIBLE_ROWS);
+
+    return allRows
+      .filter((row) => {
+        const haystack = [
+          text(row?.drug_name),
+          text(row?.batch_no),
+          text(row?.barcode),
+          text(row?.expiry_date),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(q);
+      })
+      .slice(0, MAX_VISIBLE_ROWS);
+  }, [allRows, debouncedQuery]);
 
   const helper = useMemo(() => {
     if (!pharmacyId) return "Select source pharmacy first.";
     if (loading) return "Loading inventory rows...";
+    if (allRows.length > MAX_VISIBLE_ROWS && rows.length === MAX_VISIBLE_ROWS) {
+      return `${rows.length} matching inventory rows (showing first ${MAX_VISIBLE_ROWS})`;
+    }
     return `${rows.length} matching inventory row${rows.length === 1 ? "" : "s"}`;
-  }, [loading, pharmacyId, rows.length]);
+  }, [allRows.length, loading, pharmacyId, rows.length]);
 
   return (
     <div style={wrap}>

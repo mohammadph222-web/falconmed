@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabaseClient";
-import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "../../utils/drugMaster";
+import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "../../utils/drugMasterLoader";
 
 function toNumber(value) {
   const parsed = Number(value);

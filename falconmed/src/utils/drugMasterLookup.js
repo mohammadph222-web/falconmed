@@ -1,174 +1,117 @@
-import { getDrugDisplayName, getDrugUnitPrice } from "./drugMaster";
+import Papa from "papaparse";
 
-function normalizeDrugCode(value) {
-  return String(value || "").trim().toUpperCase();
+function normalizeText(value) {
+  return String(value || "").trim();
 }
 
-function normalizeLookupValue(value) {
-  return String(value || "").trim().toUpperCase();
+function normalizeKey(value) {
+  return normalizeText(value).toLowerCase();
 }
 
-function parseCsvLine(line) {
-  const cells = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    const next = line[i + 1];
-
-    if (ch === '"') {
-      if (inQuotes && next === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-
-    if (ch === "," && !inQuotes) {
-      cells.push(current.trim());
-      current = "";
-      continue;
-    }
-
-    current += ch;
-  }
-
-  cells.push(current.trim());
-  return cells;
-}
-
-function normalizeHeader(value) {
-  return String(value || "")
-    .replace(/\ufeff/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function resolveBarcode(drug) {
-  return String(
-    drug?.barcode || drug?.barcode_no || drug?.bar_code || drug?.ean || ""
-  ).trim();
+function candidateKeys(drug) {
+  return [
+    drug?.barcode,
+    drug?.drug_code,
+    drug?.drug_name,
+    drug?.brand_name,
+    drug?.generic_name,
+    drug?.display_name,
+  ]
+    .map((value) => normalizeKey(value))
+    .filter(Boolean);
 }
 
 export function buildDrugCodeMap(drugs = []) {
   const map = new Map();
 
-  (drugs || []).forEach((drug) => {
-    const code = normalizeDrugCode(drug?.drug_code);
-    const barcode = normalizeLookupValue(resolveBarcode(drug));
-
-    if (code && !map.has(code)) {
-      map.set(code, drug);
+  for (const drug of Array.isArray(drugs) ? drugs : []) {
+    for (const key of candidateKeys(drug)) {
+      if (!map.has(key)) {
+        map.set(key, drug);
+      }
     }
-
-    if (barcode && !map.has(barcode)) {
-      map.set(barcode, drug);
-    }
-  });
+  }
 
   return map;
 }
 
-export function findDrugByCode(drugCode, codeMap) {
-  const code = normalizeLookupValue(drugCode);
-  if (!code) return null;
-  return codeMap?.get(code) || null;
+function findInArrayByIdentifier(identifier, drugs = []) {
+  const target = normalizeKey(identifier);
+  if (!target) return null;
+
+  for (const drug of Array.isArray(drugs) ? drugs : []) {
+    const keys = candidateKeys(drug);
+    if (keys.includes(target)) {
+      return drug;
+    }
+  }
+
+  return null;
+}
+
+export function findDrugByCode(code, drugCodeMap, drugs = []) {
+  const key = normalizeKey(code);
+  if (!key) return null;
+
+  if (drugCodeMap?.has(key)) {
+    return drugCodeMap.get(key) || null;
+  }
+
+  return findInArrayByIdentifier(key, drugs);
 }
 
 export function findDrugByDrugCode(drugCode, drugs = []) {
-  const normalizedCode = normalizeDrugCode(drugCode);
-  if (!normalizedCode) {
-    return null;
+  const key = normalizeKey(drugCode);
+  if (!key) return null;
+
+  for (const drug of Array.isArray(drugs) ? drugs : []) {
+    if (normalizeKey(drug?.drug_code) === key) {
+      return drug;
+    }
   }
 
-  return (
-    (drugs || []).find(
-      (drug) => normalizeDrugCode(drug?.drug_code) === normalizedCode
-    ) || null
-  );
+  return null;
 }
 
-export function findDrugByIdentifier(identifier, codeMap, drugs = []) {
-  const exactMatch = findDrugByCode(identifier, codeMap);
-  if (exactMatch) {
-    return exactMatch;
-  }
-
-  const normalizedIdentifier = String(identifier || "").trim().toLowerCase();
-  if (!normalizedIdentifier) {
-    return null;
-  }
-
-  return (
-    (drugs || []).find((drug) => {
-      const candidates = [
-        drug?.drug_name,
-        drug?.brand_name,
-        drug?.generic_name,
-        getDrugDisplayName(drug),
-      ];
-
-      return candidates.some(
-        (value) => String(value || "").trim().toLowerCase() === normalizedIdentifier
-      );
-    }) || null
-  );
+export function findDrugByIdentifier(identifier, drugCodeMap, drugs = []) {
+  return findDrugByCode(identifier, drugCodeMap, drugs);
 }
 
-export function getMasterAutofill(drug, fallbackCode = "") {
-  if (!drug) {
-    return {
-      drug_code: normalizeDrugCode(fallbackCode),
-      drug_name: "",
-      brand_name: "",
-      generic_name: "",
-      barcode: "",
-      unit: "",
-      unit_cost: "",
-      sales_price: "",
-    };
-  }
+export function getMasterAutofill(drug, lookupValue = "") {
+  const resolvedDrugName =
+    normalizeText(drug?.drug_name) ||
+    normalizeText(drug?.brand_name) ||
+    normalizeText(drug?.generic_name) ||
+    normalizeText(lookupValue);
 
-  const unitCost = getDrugUnitPrice(drug, "pharmacy");
-  const salesPrice = getDrugUnitPrice(drug, "public");
-  const brand = String(drug.brand_name || "").trim();
-  const generic = String(drug.generic_name || "").trim();
+  const pharmacyUnit = Number(drug?.pharmacy_unit_price ?? drug?.unit_price_pharmacy ?? 0);
+  const publicUnit = Number(drug?.public_unit_price ?? drug?.unit_price_public ?? 0);
 
   return {
-    drug_code: normalizeDrugCode(drug.drug_code || fallbackCode),
-    drug_name: String(drug.drug_name || "").trim() || getDrugDisplayName(drug),
-    brand_name: brand,
-    generic_name: generic,
-    barcode: resolveBarcode(drug),
-    unit: String(drug.unit || drug.pricing_unit || drug.base_unit || "").trim(),
-    unit_cost: unitCost != null ? String(unitCost) : "",
-    sales_price: salesPrice != null ? String(salesPrice) : "",
+    drug_name: resolvedDrugName,
+    brand_name: normalizeText(drug?.brand_name),
+    generic_name: normalizeText(drug?.generic_name),
+    barcode: normalizeText(drug?.barcode),
+    unit: normalizeText(drug?.base_unit || drug?.unit || "Unit"),
+    unit_cost: Number.isFinite(pharmacyUnit) ? pharmacyUnit : 0,
+    sales_price: Number.isFinite(publicUnit) ? publicUnit : 0,
   };
 }
 
-export function parseCsvText(csvText = "") {
-  const lines = String(csvText || "")
-    .split(/\r?\n/)
-    .filter((line) => line.trim() !== "");
+export function parseCsvText(text) {
+  const parsed = Papa.parse(String(text || ""), {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (header) => normalizeKey(header),
+  });
 
-  if (lines.length < 2) {
-    return { rows: [], headers: [] };
-  }
-
-  const headers = parseCsvLine(lines[0]).map(normalizeHeader);
-
-  const rows = lines.slice(1).map((line) => {
-    const cols = parseCsvLine(line);
-    const row = {};
-    headers.forEach((header, index) => {
-      row[header] = cols[index] ?? "";
-    });
-    return row;
+  const headers = (parsed.meta?.fields || []).map((header) => normalizeKey(header));
+  const rows = (parsed.data || []).map((row) => {
+    const normalized = {};
+    for (const key of headers) {
+      normalized[key] = normalizeText(row?.[key]);
+    }
+    return normalized;
   });
 
   return { rows, headers };

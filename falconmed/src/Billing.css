@@ -1,12 +1,12 @@
 :root {
-  --billing-bg: #eef2f7;
+  --billing-bg: #f4f8fd;
   --billing-card: #ffffff;
-  --billing-border: #e8edf5;
+  --billing-border: #dce7f5;
   --billing-text: #0f172a;
   --billing-muted: #64748b;
-  --billing-primary: #1e40af;
+  --billing-primary: #1d4ed8;
   --billing-danger: #dc2626;
-  --billing-shadow: 0 2px 14px rgba(15, 23, 42, 0.06);
+  --billing-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
 }
 
 .billing-page {
@@ -22,9 +22,9 @@
   justify-content: space-between;
   gap: 16px;
   background: white;
-  border-radius: 20px;
+  border-radius: 18px;
   padding: 22px 28px;
-  box-shadow: 0 2px 16px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
   margin-bottom: 22px;
   border: 1px solid #e8edf5;
   border-left: 5px solid #1e40af;
@@ -79,7 +79,7 @@
 .billing-control-card {
   background: var(--billing-card);
   border: 1px solid var(--billing-border);
-  border-radius: 18px;
+  border-radius: 16px;
   padding: 24px;
   box-shadow: var(--billing-shadow);
 }
@@ -140,7 +140,7 @@
   background: #fff;
   color: var(--billing-text);
   font-size: 14px;
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: inherit;
 }
 
 .billing-page input:focus,
@@ -201,7 +201,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-family: 'Segoe UI', Arial, sans-serif;
+  font-family: inherit;
   font-size: 14px;
   box-shadow: none;
   transition: background 0.14s ease, border-color 0.14s ease;
@@ -275,7 +275,7 @@
 
 .billing-print-area {
   background: var(--billing-card);
-  border-radius: 18px;
+  border-radius: 16px;
   border: 1px solid var(--billing-border);
   box-shadow: var(--billing-shadow);
 }
@@ -467,14 +467,14 @@
 .billing-table th,
 .billing-table td {
   padding: 12px 14px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #edf2fa;
   text-align: left;
   vertical-align: middle;
   font-size: 14px;
 }
 
 .billing-table th {
-  background: #f8fafc;
+  background: #f8fbff;
   color: #64748b;
   font-size: 11px;
   font-weight: 700;
@@ -486,7 +486,11 @@
 }
 
 .billing-table tbody tr:nth-child(even) {
-  background: #f9fafb;
+  background: #fbfdff;
+}
+
+.billing-table tbody tr:hover {
+  background: #f3f7ff;
 }
 
 .billing-table tbody td:first-child {
@@ -612,20 +616,20 @@
 .billing-primary-btn {
   background: var(--billing-primary);
   color: #fff;
-  box-shadow: 0 2px 8px rgba(30, 64, 175, 0.25);
+  box-shadow: 0 10px 20px rgba(29, 78, 216, 0.25);
 }
 
 .billing-secondary-btn,
 .back-button {
   background: white;
   color: #0f172a;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #d4dfef;
 }
 
 .billing-clear-btn {
-  background: #f1f5f9;
+  background: #f8fbff;
   color: #334155;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #d4dfef;
 }
 
 .billing-danger-btn {

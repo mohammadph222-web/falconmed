@@ -1,14 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
-import { supabase } from "../lib/supabaseClient";
+import {
+  getDrugDisplayName,
+  loadDrugMaster,
+  searchDrugMaster,
+} from "../utils/drugMasterLoader";
+
+const QUERY_DEBOUNCE_MS = 180;
+const MAX_VISIBLE_RESULTS = 20;
 
 function normalize(value) {
   return String(value || "").trim();
 }
 
-function getDisplayName(drug) {
-  const primary = normalize(drug?.drug_name || drug?.brand_name || drug?.generic_name);
-  const strength = normalize(drug?.strength);
-  return [primary, strength].filter(Boolean).join(" ");
+function normalizeSearchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
 }
 
 export default function DrugMasterPicker({
@@ -19,70 +27,64 @@ export default function DrugMasterPicker({
   disabled = false,
 }) {
   const [query, setQuery] = useState(() => normalize(value?.drug_name || value?.display_name));
-  const [results, setResults] = useState([]);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [allDrugs, setAllDrugs] = useState([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    let canceled = false;
+
+    setLoading(true);
+
+    loadDrugMaster()
+      .then((rows) => {
+        if (!canceled) {
+          setAllDrugs(rows || []);
+        }
+      })
+      .catch(() => {
+        if (!canceled) {
+          setAllDrugs([]);
+        }
+      })
+      .finally(() => {
+        if (!canceled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      canceled = true;
+    };
+  }, []);
 
   useEffect(() => {
     setQuery(normalize(value?.drug_name || value?.display_name));
   }, [value?.drug_name, value?.display_name]);
 
   useEffect(() => {
-    let canceled = false;
-
-    const run = async () => {
-      const q = normalize(query);
-      if (!q || q.length < 2 || disabled || !supabase) {
-        setResults([]);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const like = `%${q}%`;
-        const { data, error } = await supabase
-          .from("drug_master")
-          .select("id, drug_name, brand_name, generic_name, drug_code, barcode, strength, dosage_form, unit, unit_cost, unit_price_pharmacy, unit_price_public, public_price, pharmacy_price")
-          .or(`drug_name.ilike.${like},brand_name.ilike.${like},generic_name.ilike.${like},barcode.ilike.${like},drug_code.ilike.${like}`)
-          .order("drug_name", { ascending: true })
-          .limit(100);
-
-        if (error) {
-          throw error;
-        }
-
-        if (canceled) return;
-
-        const deduped = [];
-        const seen = new Set();
-        for (const row of data || []) {
-          const key = normalize(row?.drug_code) || `${normalize(row?.drug_name)}::${normalize(row?.barcode)}`;
-          if (!key || seen.has(key)) continue;
-          seen.add(key);
-          deduped.push({
-            ...row,
-            display_name: getDisplayName(row),
-          });
-        }
-
-        setResults(deduped);
-      } catch {
-        if (!canceled) setResults([]);
-      } finally {
-        if (!canceled) setLoading(false);
-      }
-    };
-
-    void run();
+    const timer = window.setTimeout(() => {
+      setDebouncedQuery(normalizeSearchText(query));
+    }, QUERY_DEBOUNCE_MS);
 
     return () => {
-      canceled = true;
+      window.clearTimeout(timer);
     };
-  }, [query, disabled]);
+  }, [query]);
+
+  const normalizedQuery = useMemo(() => normalizeSearchText(debouncedQuery), [debouncedQuery]);
+
+  const results = useMemo(() => {
+    if (disabled) return [];
+    const q = normalizedQuery;
+    if (!q || q.length < 2) return [];
+    return searchDrugMaster(allDrugs, q, MAX_VISIBLE_RESULTS).slice(0, MAX_VISIBLE_RESULTS);
+  }, [allDrugs, disabled, normalizedQuery]);
 
   const helper = useMemo(() => {
     if (disabled) return "Enable Receive workflow to search drug master.";
     if (!query || query.trim().length < 2) return "Type at least 2 characters to search by name or barcode.";
-    if (loading) return "Searching drug master...";
+    if (loading) return "Loading drug master...";
     return `${results.length} result${results.length === 1 ? "" : "s"}`;
   }, [disabled, loading, query, results.length]);
 
@@ -111,9 +113,9 @@ export default function DrugMasterPicker({
                 style={resultButton}
                 onClick={() => onSelect?.(drug)}
               >
-                <div style={resultTitle}>{drug.display_name || normalize(drug?.drug_name) || "Unnamed drug"}</div>
+                <div style={resultTitle}>{drug.display_name || getDrugDisplayName(drug) || "Unnamed drug"}</div>
                 <div style={resultMeta}>
-                  Code: {normalize(drug?.drug_code) || "-"} | Barcode: {normalize(drug?.barcode) || "-"}
+                  Code: {normalize(drug?.drug_code) || "-"} | Pack: {normalize(drug?.package_size_raw || drug?.package_size) || "-"}
                 </div>
               </button>
             ))

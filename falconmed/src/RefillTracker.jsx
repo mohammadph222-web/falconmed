@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "./lib/supabaseClient";
-import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMaster";
+import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMasterLoader";
 import "./App.css";
 
 const STORAGE_KEY = 'falconmed_refills';
@@ -354,9 +354,9 @@ function RefillTracker({ onBack }) {
     display: 'flex',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: '28px',
-    paddingBottom: '20px',
-    borderBottom: '1px solid #f1f5f9',
+    marginBottom: '30px',
+    paddingBottom: '22px',
+    borderBottom: '1px solid #e2ebf7',
   };
 
   const pageSub = {
@@ -373,8 +373,8 @@ function RefillTracker({ onBack }) {
   };
 
   const backBtn = {
-    background: '#f1f5f9',
-    border: 'none',
+    background: '#f8fbff',
+    border: '1px solid #d4dfef',
     borderRadius: '10px',
     padding: '9px 16px',
     fontSize: '13px',
@@ -386,7 +386,7 @@ function RefillTracker({ onBack }) {
 
   const exportBtn = {
     background: 'white',
-    border: '1.5px solid #e2e8f0',
+    border: '1px solid #d4dfef',
     borderRadius: '10px',
     padding: '9px 16px',
     fontSize: '13px',
@@ -405,10 +405,10 @@ function RefillTracker({ onBack }) {
 
   const kpiCard = (accentColor) => ({
     background: 'white',
-    borderRadius: '18px',
+    borderRadius: '16px',
     padding: '22px 20px 18px',
-    border: '1px solid #e8edf5',
-    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    border: '1px solid #dbe7f5',
+    boxShadow: '0 12px 24px rgba(15,23,42,0.06)',
     borderTop: `4px solid ${accentColor}`,
   });
 
@@ -438,10 +438,10 @@ function RefillTracker({ onBack }) {
 
   const formCard = {
     background: 'white',
-    borderRadius: '18px',
+    borderRadius: '16px',
     padding: '26px',
-    border: '1px solid #e8edf5',
-    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    border: '1px solid #dbe7f5',
+    boxShadow: '0 14px 28px rgba(15,23,42,0.06)',
     marginBottom: '24px',
   };
 
@@ -477,7 +477,7 @@ function RefillTracker({ onBack }) {
 
   const inputStyle = {
     padding: '9px 12px',
-    border: '1.5px solid #e2e8f0',
+    border: '1px solid #d4dfef',
     borderRadius: '10px',
     fontSize: '14px',
     fontFamily: "'Segoe UI', Arial, sans-serif",
@@ -486,10 +486,11 @@ function RefillTracker({ onBack }) {
     outline: 'none',
     width: '100%',
     boxSizing: 'border-box',
+    boxShadow: '0 2px 6px rgba(15,23,42,0.03)',
   };
 
   const primaryBtn = {
-    background: '#1e40af',
+    background: 'linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)',
     color: 'white',
     border: 'none',
     borderRadius: '12px',
@@ -498,15 +499,15 @@ function RefillTracker({ onBack }) {
     fontWeight: 700,
     cursor: 'pointer',
     fontFamily: "'Segoe UI', Arial, sans-serif",
-    boxShadow: '0 2px 10px rgba(30,64,175,0.25)',
+    boxShadow: '0 10px 20px rgba(37,99,235,0.25)',
     marginTop: '4px',
   };
 
   const tableCard = {
     background: 'white',
-    borderRadius: '18px',
-    border: '1px solid #e8edf5',
-    boxShadow: '0 2px 14px rgba(15,23,42,0.06)',
+    borderRadius: '16px',
+    border: '1px solid #dbe7f5',
+    boxShadow: '0 16px 30px rgba(15,23,42,0.07)',
     overflow: 'hidden',
   };
 
@@ -515,7 +516,7 @@ function RefillTracker({ onBack }) {
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: '20px 26px 16px',
-    borderBottom: '1px solid #f1f5f9',
+    borderBottom: '1px solid #e7eef9',
     flexWrap: 'wrap',
     gap: '12px',
   };
@@ -530,7 +531,7 @@ function RefillTracker({ onBack }) {
 
   const thStyle = {
     padding: '10px 14px',
-    background: '#f8fafc',
+    background: '#f8fbff',
     fontWeight: 700,
     color: '#64748b',
     fontSize: '11px',
@@ -540,19 +541,19 @@ function RefillTracker({ onBack }) {
     top: 0,
     textAlign: 'left',
     whiteSpace: 'nowrap',
-    borderBottom: '1px solid #f1f5f9',
+    borderBottom: '1px solid #e7eef9',
   };
 
   const tdStyle = {
     padding: '12px 14px',
     fontSize: '13px',
     color: '#334155',
-    borderBottom: '1px solid #f8fafc',
+    borderBottom: '1px solid #edf2fa',
     verticalAlign: 'middle',
   };
 
   const markCompleteBtn = {
-    background: '#dbeafe',
+    background: '#e8f1ff',
     color: '#1e40af',
     border: 'none',
     borderRadius: '8px',
@@ -565,7 +566,7 @@ function RefillTracker({ onBack }) {
   };
 
   const deleteBtn = {
-    background: '#fee2e2',
+    background: '#fff1f2',
     color: '#b91c1c',
     border: 'none',
     borderRadius: '8px',
@@ -579,7 +580,7 @@ function RefillTracker({ onBack }) {
   const emptyState = {
     padding: '40px 20px',
     textAlign: 'center',
-    background: '#f8fafc',
+    background: '#f8fbff',
   };
 
   // ─── JSX return ─────────────────────────────────────────────────────────

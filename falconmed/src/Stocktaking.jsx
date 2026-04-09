@@ -498,10 +498,10 @@ export default function Stocktaking() {
       <div
         style={{
           background: "#fff",
-          border: "1px solid #dbe3ee",
+          border: "1px solid #dbe7f5",
           borderRadius: 24,
-          padding: 28,
-          boxShadow: "0 2px 8px rgba(15,23,42,0.03)",
+          padding: 30,
+          boxShadow: "0 18px 34px rgba(15,23,42,0.07)",
         }}
       >
         <div style={{ textAlign: "center", marginBottom: 12 }}>
@@ -523,7 +523,7 @@ export default function Stocktaking() {
         <button
           onClick={() => setShowCreateModal(true)}
           style={{
-            background: "#2563eb",
+            background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)",
             color: "#fff",
             border: "none",
             borderRadius: 12,
@@ -531,6 +531,7 @@ export default function Stocktaking() {
             fontWeight: 700,
             cursor: "pointer",
             marginBottom: 18,
+            boxShadow: "0 10px 20px rgba(37,99,235,0.25)",
           }}
         >
           Start New Session
@@ -576,10 +577,11 @@ export default function Stocktaking() {
           <div
             style={{
               background: "#fff",
-              border: "1px solid #dbe3ee",
+              border: "1px solid #dbe7f5",
               borderRadius: 20,
               padding: 22,
               minHeight: 420,
+              boxShadow: "0 12px 24px rgba(15,23,42,0.05)",
             }}
           >
             <h2 style={{ marginTop: 0, color: "#0f172a" }}>Sessions</h2>
@@ -607,11 +609,12 @@ export default function Stocktaking() {
                       onClick={() => setSelectedSessionId(session.id)}
                       style={{
                         textAlign: "left",
-                        border: active ? "2px solid #2563eb" : "1px solid #dbe3ee",
+                        border: active ? "2px solid #2563eb" : "1px solid #dbe7f5",
                         background: active ? "#eff6ff" : "#fff",
-                        borderRadius: 16,
+                        borderRadius: 14,
                         padding: 14,
                         cursor: "pointer",
+                        boxShadow: active ? "0 8px 16px rgba(37,99,235,0.16)" : "none",
                       }}
                     >
                       <div style={{ fontWeight: 800, color: "#0f172a", marginBottom: 6 }}>
@@ -644,10 +647,11 @@ export default function Stocktaking() {
           <div
             style={{
               background: "#fff",
-              border: "1px solid #dbe3ee",
+              border: "1px solid #dbe7f5",
               borderRadius: 20,
               padding: 22,
               minHeight: 420,
+              boxShadow: "0 12px 24px rgba(15,23,42,0.05)",
             }}
           >
             <h2 style={{ marginTop: 0, color: "#0f172a" }}>Session Workspace</h2>
@@ -714,7 +718,7 @@ export default function Stocktaking() {
 
                 <div
                   style={{
-                    border: "1px solid #dbe3ee",
+                    border: "1px solid #dbe7f5",
                     borderRadius: 18,
                     padding: 16,
                     marginBottom: 18,
@@ -741,9 +745,10 @@ export default function Stocktaking() {
                       maxWidth: 420,
                       padding: "12px 14px",
                       borderRadius: 12,
-                      border: "1px solid #cbd5e1",
+                      border: "1px solid #d4dfef",
                       outline: "none",
                       fontSize: 15,
+                      boxShadow: "0 2px 6px rgba(15,23,42,0.03)",
                     }}
                   />
 
@@ -780,7 +785,8 @@ export default function Stocktaking() {
                     <table
                       style={{
                         width: "100%",
-                        borderCollapse: "collapse",
+                        borderCollapse: "separate",
+                        borderSpacing: 0,
                         fontSize: 14,
                       }}
                     >
@@ -797,7 +803,7 @@ export default function Stocktaking() {
                       </thead>
                       <tbody>
                         {sessionItems.map((item) => (
-                          <tr key={item.id} style={{ borderBottom: "1px solid #e2e8f0" }}>
+                          <tr key={item.id} style={{ borderBottom: "1px solid #edf2fa", background: "#ffffff" }}>
                             <td style={tdStyle}>{item.drug_name}</td>
                             <td style={tdStyle}>{item.barcode || "-"}</td>
                             <td style={tdStyle}>{item.system_qty}</td>
@@ -812,7 +818,7 @@ export default function Stocktaking() {
                                   width: 90,
                                   padding: "8px 10px",
                                   borderRadius: 10,
-                                  border: "1px solid #cbd5e1",
+                                  border: "1px solid #d4dfef",
                                 }}
                               />
                             </td>
@@ -909,13 +915,14 @@ function MetricCard({ label, value, valueColor = "#0f172a" }) {
     <div
       style={{
         background: "#fff",
-        border: "1px solid #dbe3ee",
+        border: "1px solid #dbe7f5",
         borderRadius: 18,
         padding: 18,
         minHeight: 110,
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
+        boxShadow: "0 10px 22px rgba(15,23,42,0.05)",
       }}
     >
       <div
@@ -947,8 +954,12 @@ function MetricCard({ label, value, valueColor = "#0f172a" }) {
 const thStyle = {
   textAlign: "left",
   padding: "12px 10px",
-  borderBottom: "1px solid #e2e8f0",
+  borderBottom: "1px solid #dbe7f5",
   fontWeight: 800,
+  fontSize: 11,
+  textTransform: "uppercase",
+  letterSpacing: "0.05em",
+  background: "#f8fbff",
 };
 
 const tdStyle = {
@@ -961,10 +972,11 @@ const inputStyle = {
   width: "100%",
   padding: "12px 14px",
   borderRadius: 12,
-  border: "1px solid #cbd5e1",
+  border: "1px solid #d4dfef",
   marginBottom: 14,
   fontSize: 15,
   boxSizing: "border-box",
+  boxShadow: "0 2px 6px rgba(15,23,42,0.03)",
 };
 
 const labelStyle = {
@@ -975,19 +987,20 @@ const labelStyle = {
 };
 
 const primaryBtnStyle = {
-  background: "#2563eb",
+  background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)",
   color: "#fff",
   border: "none",
   borderRadius: 12,
   padding: "12px 18px",
   fontWeight: 700,
   cursor: "pointer",
+  boxShadow: "0 10px 20px rgba(37,99,235,0.25)",
 };
 
 const secondaryBtnStyle = {
   background: "#fff",
   color: "#0f172a",
-  border: "1px solid #cbd5e1",
+  border: "1px solid #d4dfef",
   borderRadius: 12,
   padding: "12px 18px",
   fontWeight: 700,
@@ -1007,7 +1020,7 @@ const dangerBtnStyle = {
 const modalOverlayStyle = {
   position: "fixed",
   inset: 0,
-  background: "rgba(15,23,42,0.35)",
+  background: "rgba(15,23,42,0.42)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
@@ -1020,6 +1033,7 @@ const modalCardStyle = {
   maxWidth: 620,
   background: "#fff",
   borderRadius: 24,
+  border: "1px solid #dbe7f5",
   padding: 26,
-  boxShadow: "0 20px 50px rgba(15,23,42,0.20)",
+  boxShadow: "0 30px 54px rgba(15,23,42,0.22)",
 };

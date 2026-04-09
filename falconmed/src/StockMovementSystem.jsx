@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
 import { emitInventoryUpdated } from "./utils/inventoryEvents";
 
@@ -17,7 +17,10 @@ function readStockMovementDraft() {
 
 function writeStockMovementDraft(value) {
   try {
-    window.sessionStorage.setItem(STOCK_MOVEMENT_DRAFT_STORAGE_KEY, JSON.stringify(value));
+    window.sessionStorage.setItem(
+      STOCK_MOVEMENT_DRAFT_STORAGE_KEY,
+      JSON.stringify(value)
+    );
   } catch {
     // Ignore storage failures.
   }
@@ -78,6 +81,36 @@ function formatDate(value) {
   return d.toLocaleDateString();
 }
 
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function buildDrugDisplayLabel(drug) {
+  const brandName = normalizeText(drug?.brand_name);
+  const strength = normalizeText(drug?.strength);
+  const dosageForm = normalizeText(drug?.dosage_form);
+  return [brandName, strength, dosageForm].filter(Boolean).join(" ").trim();
+}
+
+function buildDrugSearchIndex(drug) {
+  return [
+    normalizeText(drug?.brand_name),
+    normalizeText(drug?.strength),
+    normalizeText(drug?.dosage_form),
+    normalizeText(drug?.drug_code),
+    normalizeText(drug?.package_size),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function formatPriceDisplay(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `AED ${number.toFixed(2)}`;
+}
+
 export default function StockMovementSystem() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +120,10 @@ export default function StockMovementSystem() {
   const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
   const [drugOptions, setDrugOptions] = useState([]);
   const [pharmacyOptions, setPharmacyOptions] = useState([]);
+  const [showDrugDropdown, setShowDrugDropdown] = useState(false);
+  const [selectedDrugOption, setSelectedDrugOption] = useState(null);
+  const [isSelectingDrug, setIsSelectingDrug] = useState(false);
+  const drugInputRef = useRef(null);
 
   const pharmacyMap = useMemo(() => {
     const map = new Map();
@@ -108,14 +145,20 @@ export default function StockMovementSystem() {
   };
 
   const isTransferType =
-    formData.movement_type === "Transfer Out" || formData.movement_type === "Transfer In";
+    formData.movement_type === "Transfer Out" ||
+    formData.movement_type === "Transfer In";
 
   const summary = useMemo(() => {
     const total = rows.length;
-    const transferOuts = rows.filter((r) => r.movement_type === "Transfer Out").length;
-    const transferIns = rows.filter((r) => r.movement_type === "Transfer In").length;
+    const transferOuts = rows.filter(
+      (r) => r.movement_type === "Transfer Out"
+    ).length;
+    const transferIns = rows.filter(
+      (r) => r.movement_type === "Transfer In"
+    ).length;
     const adjustments = rows.filter(
-      (r) => r.movement_type === "Adjustment+" || r.movement_type === "Adjustment-"
+      (r) =>
+        r.movement_type === "Adjustment+" || r.movement_type === "Adjustment-"
     ).length;
 
     return { total, transferOuts, transferIns, adjustments };
@@ -138,6 +181,10 @@ export default function StockMovementSystem() {
       ...persisted.formData,
     }));
 
+    if (persisted?.selectedDrugOption) {
+      setSelectedDrugOption(persisted.selectedDrugOption);
+    }
+
     const restored = Object.keys(initialForm).some((key) => {
       const value = String(persisted.formData[key] || "").trim();
       return value !== String(initialForm[key] || "").trim();
@@ -149,8 +196,8 @@ export default function StockMovementSystem() {
   }, []);
 
   useEffect(() => {
-    writeStockMovementDraft({ formData });
-  }, [formData]);
+    writeStockMovementDraft({ formData, selectedDrugOption });
+  }, [formData, selectedDrugOption]);
 
   useEffect(() => {
     if (!hasUnsavedChanges) return undefined;
@@ -161,7 +208,8 @@ export default function StockMovementSystem() {
     };
 
     window.addEventListener("beforeunload", beforeUnloadHandler);
-    return () => window.removeEventListener("beforeunload", beforeUnloadHandler);
+    return () =>
+      window.removeEventListener("beforeunload", beforeUnloadHandler);
   }, [hasUnsavedChanges]);
 
   useEffect(() => {
@@ -219,7 +267,9 @@ export default function StockMovementSystem() {
       while (true) {
         const { data, error } = await supabase
           .from("drug_master")
-          .select("drug_name")
+          .select(
+            "brand_name, strength, dosage_form, drug_code, package_size, price_to_pharmacy, price_to_public"
+          )
           .range(pageFrom, pageFrom + PAGE_SIZE - 1);
 
         if (error) throw error;
@@ -231,8 +281,35 @@ export default function StockMovementSystem() {
         if (pageFrom >= 200000) break;
       }
 
-      const distinct = [...new Set(allRows.map((r) => String(r?.drug_name ?? "").trim()).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b));
+      const byKey = new Map();
+      for (const row of allRows) {
+        const displayLabel = buildDrugDisplayLabel(row);
+        if (!displayLabel) continue;
+
+        const drugCode = normalizeText(row?.drug_code);
+        const option = {
+          displayLabel,
+          display_name: displayLabel,
+          brand_name: normalizeText(row?.brand_name),
+          strength: normalizeText(row?.strength),
+          dosage_form: normalizeText(row?.dosage_form),
+          drug_code: drugCode,
+          package_size: normalizeText(row?.package_size),
+          price_to_pharmacy: row?.price_to_pharmacy,
+          price_to_public: row?.price_to_public,
+          searchIndex: buildDrugSearchIndex(row),
+        };
+
+        const key = `${option.displayLabel}::${drugCode}`;
+        if (!byKey.has(key)) {
+          byKey.set(key, option);
+        }
+      }
+
+      const distinct = Array.from(byKey.values()).sort((a, b) =>
+        a.displayLabel.localeCompare(b.displayLabel)
+      );
+
       setDrugOptions(distinct);
     } catch {
       setDrugOptions([]);
@@ -261,13 +338,27 @@ export default function StockMovementSystem() {
 
   const filteredDrugOptions = useMemo(() => {
     const query = formData.drug_name.trim().toLowerCase();
-    if (!query) return drugOptions;
-    return drugOptions.filter((name) => name.toLowerCase().includes(query));
+    if (!query) return drugOptions.slice(0, 20);
+    return drugOptions
+      .filter((option) => option.searchIndex.includes(query))
+      .slice(0, 20);
   }, [drugOptions, formData.drug_name]);
 
-  const applyInventoryUpdate = async (pharmacyId, pharmacyName, drugName, qty, op, batchNo, expiryDate) => {
+  const applyInventoryUpdate = async (
+    pharmacyId,
+    pharmacyName,
+    drugName,
+    qty,
+    op,
+    batchNo,
+    expiryDate
+  ) => {
     if (!pharmacyId) {
-      throw new Error(`Pharmacy "${pharmacyName || "Unknown Pharmacy"}" was not found. Inventory sync cannot continue.`);
+      throw new Error(
+        `Pharmacy "${
+          pharmacyName || "Unknown Pharmacy"
+        }" was not found. Inventory sync cannot continue.`
+      );
     }
 
     const { data: invRows, error: fetchError } = await supabase
@@ -277,27 +368,35 @@ export default function StockMovementSystem() {
       .eq("drug_name", drugName)
       .limit(1);
 
-    if (fetchError) throw new Error(`Inventory lookup failed: ${fetchError.message}`);
+    if (fetchError)
+      throw new Error(`Inventory lookup failed: ${fetchError.message}`);
 
     const existing = invRows?.[0] ?? null;
 
     if (op === "subtract") {
       if (!existing) {
         throw new Error(
-          `No inventory record found for "${drugName}" at "${pharmacyName || "Unknown Pharmacy"}". Cannot reduce stock that does not exist.`
+          `No inventory record found for "${
+            drugName
+          }" at "${
+            pharmacyName || "Unknown Pharmacy"
+          }". Cannot reduce stock that does not exist.`
         );
       }
       const currentQty = Number(existing.quantity ?? 0);
       if (currentQty - qty < 0) {
         throw new Error(
-          `Insufficient stock: "${drugName}" at "${pharmacyName || "Unknown Pharmacy"}" has ${currentQty} unit(s). Cannot subtract ${qty}.`
+          `Insufficient stock: "${drugName}" at "${
+            pharmacyName || "Unknown Pharmacy"
+          }" has ${currentQty} unit(s). Cannot subtract ${qty}.`
         );
       }
       const { error: updateError } = await supabase
         .from("pharmacy_inventory")
         .update({ quantity: currentQty - qty })
         .eq("id", existing.id);
-      if (updateError) throw new Error(`Inventory update failed: ${updateError.message}`);
+      if (updateError)
+        throw new Error(`Inventory update failed: ${updateError.message}`);
     } else {
       if (existing) {
         const currentQty = Number(existing.quantity ?? 0);
@@ -305,7 +404,8 @@ export default function StockMovementSystem() {
           .from("pharmacy_inventory")
           .update({ quantity: currentQty + qty })
           .eq("id", existing.id);
-        if (updateError) throw new Error(`Inventory update failed: ${updateError.message}`);
+        if (updateError)
+          throw new Error(`Inventory update failed: ${updateError.message}`);
       } else {
         const newRow = {
           pharmacy_id: pharmacyId,
@@ -318,7 +418,8 @@ export default function StockMovementSystem() {
         const { error: insertError } = await supabase
           .from("pharmacy_inventory")
           .insert([newRow]);
-        if (insertError) throw new Error(`Inventory insert failed: ${insertError.message}`);
+        if (insertError)
+          throw new Error(`Inventory insert failed: ${insertError.message}`);
       }
     }
   };
@@ -330,21 +431,84 @@ export default function StockMovementSystem() {
       const next = { ...prev, [name]: value };
 
       if (name === "movement_type") {
-        const transfer = value === "Transfer Out" || value === "Transfer In";
-        if (transfer && next.from_pharmacy && next.from_pharmacy === next.to_pharmacy) {
+        const transfer =
+          value === "Transfer Out" || value === "Transfer In";
+        if (
+          transfer &&
+          next.from_pharmacy &&
+          next.from_pharmacy === next.to_pharmacy
+        ) {
           next.to_pharmacy = "";
         }
       }
 
-      if (name === "from_pharmacy" && isTransferType && value && value === prev.to_pharmacy) {
+      if (
+        name === "from_pharmacy" &&
+        isTransferType &&
+        value &&
+        value === prev.to_pharmacy
+      ) {
         next.to_pharmacy = "";
       }
 
-      if (name === "to_pharmacy" && isTransferType && value && value === prev.from_pharmacy) {
+      if (
+        name === "to_pharmacy" &&
+        isTransferType &&
+        value &&
+        value === prev.from_pharmacy
+      ) {
         next.from_pharmacy = "";
       }
 
       return next;
+    });
+  };
+
+  const handleDrugInputChange = (event) => {
+    const value = event.target.value;
+
+    setFormData((prev) => ({
+      ...prev,
+      drug_name: value,
+    }));
+
+    setSelectedDrugOption((prev) => {
+      if (!prev) return null;
+      return prev.display_name === value ? prev : null;
+    });
+
+    setShowDrugDropdown(true);
+  };
+
+  const handleDrugInputBlur = () => {
+    window.setTimeout(() => {
+      setIsSelectingDrug(false);
+      setShowDrugDropdown(false);
+    }, 120);
+  };
+
+  const selectDrugName = (drugOption) => {
+    const resolvedLabel =
+      buildDrugDisplayLabel(drugOption) ||
+      normalizeText(drugOption?.display_name) ||
+      normalizeText(drugOption?.brand_name);
+
+    const normalizedOption = {
+      ...drugOption,
+      display_name: resolvedLabel,
+    };
+
+    setFormData((prev) => ({
+      ...prev,
+      drug_name: resolvedLabel,
+    }));
+
+    setSelectedDrugOption(normalizedOption);
+    setShowDrugDropdown(false);
+    setIsSelectingDrug(false);
+
+    window.requestAnimationFrame(() => {
+      drugInputRef.current?.blur();
     });
   };
 
@@ -359,7 +523,10 @@ export default function StockMovementSystem() {
     }
 
     if (!Number.isFinite(qty) || qty <= 0) {
-      setFeedback({ type: "error", text: "Quantity must be greater than zero." });
+      setFeedback({
+        type: "error",
+        text: "Quantity must be greater than zero.",
+      });
       return;
     }
 
@@ -401,7 +568,6 @@ export default function StockMovementSystem() {
       const expiryDate = formData.expiry_date || null;
       const movType = formData.movement_type;
 
-      // Pre-validate subtract operations before inserting the movement
       let preCheckPharmacy = null;
       if (movType === "Issue" || movType === "Transfer Out") {
         preCheckPharmacy = from;
@@ -478,7 +644,8 @@ export default function StockMovementSystem() {
 
       if (movementInsert.error) {
         const msg = String(movementInsert.error.message || "").toLowerCase();
-        const createdByMissing = msg.includes("created_by") && msg.includes("column");
+        const createdByMissing =
+          msg.includes("created_by") && msg.includes("column");
 
         if (createdByMissing) {
           const { created_by, ...fallbackPayload } = payload;
@@ -493,37 +660,99 @@ export default function StockMovementSystem() {
       const { data, error } = movementInsert;
       if (error) throw error;
 
-      // Update pharmacy_inventory after successful movement insert
       try {
         switch (movType) {
           case "Issue":
-            if (from) await applyInventoryUpdate(from, fromName, drug, qty, "subtract", batchNo, expiryDate);
+            if (from)
+              await applyInventoryUpdate(
+                from,
+                fromName,
+                drug,
+                qty,
+                "subtract",
+                batchNo,
+                expiryDate
+              );
             break;
           case "Receive":
-            if (to) await applyInventoryUpdate(to, toName, drug, qty, "add", batchNo, expiryDate);
+            if (to)
+              await applyInventoryUpdate(
+                to,
+                toName,
+                drug,
+                qty,
+                "add",
+                batchNo,
+                expiryDate
+              );
             break;
           case "Transfer Out":
-            if (from) await applyInventoryUpdate(from, fromName, drug, qty, "subtract", batchNo, expiryDate);
+            if (from)
+              await applyInventoryUpdate(
+                from,
+                fromName,
+                drug,
+                qty,
+                "subtract",
+                batchNo,
+                expiryDate
+              );
             break;
           case "Transfer In":
-            if (to) await applyInventoryUpdate(to, toName, drug, qty, "add", batchNo, expiryDate);
+            if (to)
+              await applyInventoryUpdate(
+                to,
+                toName,
+                drug,
+                qty,
+                "add",
+                batchNo,
+                expiryDate
+              );
             break;
           case "Adjustment+": {
             const p = to || from;
             const pName = p ? getPharmacyNameById(p) : null;
-            if (p) await applyInventoryUpdate(p, pName, drug, qty, "add", batchNo, expiryDate);
+            if (p)
+              await applyInventoryUpdate(
+                p,
+                pName,
+                drug,
+                qty,
+                "add",
+                batchNo,
+                expiryDate
+              );
             break;
           }
           case "Adjustment-": {
             const p = from || to;
             const pName = p ? getPharmacyNameById(p) : null;
-            if (p) await applyInventoryUpdate(p, pName, drug, qty, "subtract", batchNo, expiryDate);
+            if (p)
+              await applyInventoryUpdate(
+                p,
+                pName,
+                drug,
+                qty,
+                "subtract",
+                batchNo,
+                expiryDate
+              );
             break;
           }
           case "Return": {
             const p = to || from;
             const pName = p ? getPharmacyNameById(p) : null;
-            if (p) await applyInventoryUpdate(p, pName, drug, qty, "add", batchNo, expiryDate);
+            if (p)
+              await applyInventoryUpdate(
+                p,
+                pName,
+                drug,
+                qty,
+                "add",
+                batchNo,
+                expiryDate
+              );
             break;
           }
           default:
@@ -532,6 +761,7 @@ export default function StockMovementSystem() {
       } catch (invErr) {
         setRows((prev) => [data, ...prev]);
         setFormData(initialForm);
+        setSelectedDrugOption(null);
         setFeedback({
           type: "error",
           text: `Movement logged, but inventory update failed: ${invErr.message}`,
@@ -542,8 +772,13 @@ export default function StockMovementSystem() {
 
       setRows((prev) => [data, ...prev]);
       setFormData(initialForm);
+      setSelectedDrugOption(null);
+      setShowDrugDropdown(false);
       clearStockMovementDraft();
-      setFeedback({ type: "success", text: "Stock movement added and inventory updated successfully." });
+      setFeedback({
+        type: "success",
+        text: "Stock movement added and inventory updated successfully.",
+      });
       emitInventoryUpdated(to || from || "");
     } catch (err) {
       setFeedback({
@@ -563,25 +798,27 @@ export default function StockMovementSystem() {
           border: "1px solid #fecaca",
         }
       : feedback.type === "success"
-        ? {
-            background: "#eff6ff",
-            color: "#1d4ed8",
-            border: "1px solid #bfdbfe",
-          }
-        : feedback.type === "warning"
-          ? {
-              background: "#fff7ed",
-              color: "#9a3412",
-              border: "1px solid #fed7aa",
-            }
-          : {};
+      ? {
+          background: "#eff6ff",
+          color: "#1d4ed8",
+          border: "1px solid #bfdbfe",
+        }
+      : feedback.type === "warning"
+      ? {
+          background: "#fff7ed",
+          color: "#9a3412",
+          border: "1px solid #fed7aa",
+        }
+      : {};
 
   return (
     <div style={pageWrap}>
       <div style={headerCard}>
         <div style={eyebrow}>Operations</div>
         <h2 style={title}>Stock Movement System</h2>
-        <p style={subtitle}>Record, track, and review pharmacy stock movement activity.</p>
+        <p style={subtitle}>
+          Record, track, and review pharmacy stock movement activity.
+        </p>
       </div>
 
       <div style={kpiGrid}>
@@ -603,7 +840,10 @@ export default function StockMovementSystem() {
         </div>
       </div>
 
-      {feedback.text ? <div style={{ ...feedbackBox, ...feedbackStyle }}>{feedback.text}</div> : null}
+      {feedback.text ? (
+        <div style={{ ...feedbackBox, ...feedbackStyle }}>{feedback.text}</div>
+      ) : null}
+
       {restoredDraftMessage ? (
         <div
           style={{
@@ -637,23 +877,84 @@ export default function StockMovementSystem() {
               </select>
             </div>
 
-            <div style={fieldGroup}>
+            <div style={{ ...fieldGroup, position: "relative" }}>
               <label style={fieldLabel}>Drug Name</label>
               <input
+                ref={drugInputRef}
                 name="drug_name"
                 value={formData.drug_name}
-                onChange={onChange}
+                onChange={handleDrugInputChange}
+                onFocus={() => setShowDrugDropdown(true)}
+                onBlur={handleDrugInputBlur}
                 style={inputStyle}
                 required
-                list="stock-movement-drug-options"
-                placeholder={drugOptions.length === 0 ? "No drug options available" : "Search and select drug"}
+                placeholder={
+                  drugOptions.length === 0
+                    ? "No drug options available"
+                    : "Search and select drug"
+                }
                 autoComplete="off"
               />
-              <datalist id="stock-movement-drug-options">
-                {filteredDrugOptions.map((name) => (
-                  <option key={name} value={name} />
-                ))}
-              </datalist>
+
+              {showDrugDropdown && formData.drug_name.trim() ? (
+                <div style={drugDropdown}>
+                  {filteredDrugOptions.length > 0 ? (
+                    filteredDrugOptions.map((option) => (
+                      <div
+                        key={`${option.displayLabel}::${option.drug_code}`}
+                        style={drugDropdownItem}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          setIsSelectingDrug(true);
+                          selectDrugName(option);
+                        }}
+                      >
+                        <div style={drugDropdownTitle}>{option.display_name}</div>
+                        <div style={drugDropdownMeta}>
+                          <span>Code: {option.drug_code || "-"}</span>
+                          <span>Pack: {option.package_size || "-"}</span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={drugDropdownEmpty}>No matching drugs found</div>
+                  )}
+                </div>
+              ) : null}
+
+              {selectedDrugOption ? (
+                <div style={selectedDrugCard}>
+                  <div style={selectedDrugTitle}>
+                    {selectedDrugOption.display_name}
+                  </div>
+                  <div style={selectedDrugMetaGrid}>
+                    <div>
+                      <div style={selectedDrugMetaLabel}>Drug Code</div>
+                      <div style={selectedDrugMetaValue}>
+                        {selectedDrugOption.drug_code || "-"}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={selectedDrugMetaLabel}>Package Size</div>
+                      <div style={selectedDrugMetaValue}>
+                        {selectedDrugOption.package_size || "-"}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={selectedDrugMetaLabel}>Price to Pharmacy</div>
+                      <div style={selectedDrugMetaValue}>
+                        {formatPriceDisplay(selectedDrugOption.price_to_pharmacy)}
+                      </div>
+                    </div>
+                    <div>
+                      <div style={selectedDrugMetaLabel}>Price to Public</div>
+                      <div style={selectedDrugMetaValue}>
+                        {formatPriceDisplay(selectedDrugOption.price_to_public)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div style={fieldGroup}>
@@ -677,9 +978,18 @@ export default function StockMovementSystem() {
                 onChange={onChange}
                 style={inputStyle}
               >
-                <option value="">Select from pharmacy{isTransferType ? "" : " (optional)"}</option>
+                <option value="">
+                  Select from pharmacy{isTransferType ? "" : " (optional)"}
+                </option>
                 {pharmacyOptions
-                  .filter((option) => !(isTransferType && formData.to_pharmacy && option.id === formData.to_pharmacy))
+                  .filter(
+                    (option) =>
+                      !(
+                        isTransferType &&
+                        formData.to_pharmacy &&
+                        option.id === formData.to_pharmacy
+                      )
+                  )
                   .map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.name || "Unknown Pharmacy"}
@@ -696,9 +1006,18 @@ export default function StockMovementSystem() {
                 onChange={onChange}
                 style={inputStyle}
               >
-                <option value="">Select to pharmacy{isTransferType ? "" : " (optional)"}</option>
+                <option value="">
+                  Select to pharmacy{isTransferType ? "" : " (optional)"}
+                </option>
                 {pharmacyOptions
-                  .filter((option) => !(isTransferType && formData.from_pharmacy && option.id === formData.from_pharmacy))
+                  .filter(
+                    (option) =>
+                      !(
+                        isTransferType &&
+                        formData.from_pharmacy &&
+                        option.id === formData.from_pharmacy
+                      )
+                  )
                   .map((option) => (
                     <option key={option.id} value={option.id}>
                       {option.name || "Unknown Pharmacy"}
@@ -933,6 +1252,93 @@ const textAreaStyle = {
   ...inputStyle,
   resize: "vertical",
   minHeight: "90px",
+};
+
+const drugDropdown = {
+  position: "absolute",
+  top: "calc(100% + 4px)",
+  left: 0,
+  right: 0,
+  background: "#ffffff",
+  border: "1px solid #e2e8f0",
+  borderRadius: "10px",
+  boxShadow: "0 10px 24px rgba(15,23,42,0.10)",
+  maxHeight: "240px",
+  overflowY: "auto",
+  zIndex: 50,
+};
+
+const drugDropdownItem = {
+  padding: "10px 12px",
+  cursor: "pointer",
+  borderBottom: "1px solid #f1f5f9",
+  background: "#ffffff",
+};
+
+const drugDropdownTitle = {
+  fontSize: "14px",
+  color: "#0f172a",
+  fontWeight: 700,
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+  lineHeight: 1.45,
+};
+
+const drugDropdownMeta = {
+  marginTop: "4px",
+  display: "flex",
+  gap: "12px",
+  flexWrap: "wrap",
+  fontSize: "12px",
+  color: "#64748b",
+};
+
+const drugDropdownEmpty = {
+  padding: "10px 12px",
+  fontSize: "13px",
+  color: "#64748b",
+  background: "#ffffff",
+};
+
+const selectedDrugCard = {
+  marginTop: "10px",
+  border: "1px solid #dbe7f5",
+  borderRadius: "10px",
+  padding: "10px 12px",
+  background: "#f8fbff",
+};
+
+const selectedDrugTitle = {
+  fontSize: "14px",
+  fontWeight: 700,
+  color: "#0f172a",
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
+  lineHeight: 1.45,
+};
+
+const selectedDrugMetaGrid = {
+  marginTop: "8px",
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: "8px 12px",
+};
+
+const selectedDrugMetaLabel = {
+  fontSize: "10px",
+  color: "#64748b",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+};
+
+const selectedDrugMetaValue = {
+  marginTop: "2px",
+  fontSize: "13px",
+  color: "#0f172a",
+  fontWeight: 600,
+  whiteSpace: "normal",
+  overflowWrap: "anywhere",
 };
 
 const primaryBtn = {

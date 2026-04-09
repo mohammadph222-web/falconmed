@@ -1,611 +1,346 @@
 import { useEffect, useMemo, useState } from "react";
-import { getDrugDisplayName, loadDrugMaster } from "./utils/drugMaster";
+import {
+  getDrugDisplayName,
+  loadDrugMaster,
+  searchDrugMaster,
+} from "./utils/drugMasterLoader";
 
-function formatCoverageValue(value) {
-  const text = String(value ?? "").trim();
-  if (!text || text === "-") return "No";
-  return text;
-}
-
-function parseNumber(value) {
-  const text = String(value ?? "").trim();
-  if (!text || text === "-") return null;
-  const normalized = text.replace(/[^0-9.-]/g, "");
-  if (!normalized) return null;
-  const num = Number(normalized);
-  return Number.isFinite(num) ? num : null;
-}
-
-function formatPrice(value) {
-  const num = parseNumber(value);
-  if (num === null) return "-";
-  return num.toFixed(2);
+function toMoney(value) {
+  const n = Number(value || 0);
+  return Number.isFinite(n) ? n.toFixed(2) : "0.00";
 }
 
 export default function DrugSearch() {
-  const [allDrugs, setAllDrugs] = useState([]);
+  const [drugs, setDrugs] = useState([]);
+  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedDrug, setSelectedDrug] = useState(null);
-
-  const [search, setSearch] = useState("");
-  const [brandFilter, setBrandFilter] = useState("");
-  const [genericFilter, setGenericFilter] = useState("");
-  const [strengthFilter, setStrengthFilter] = useState("");
-  const [dosageFilter, setDosageFilter] = useState("");
-  const [rxFilter, setRxFilter] = useState("");
-  const [uppFilter, setUppFilter] = useState("");
-  const [thiqaFilter, setThiqaFilter] = useState("");
-  const [basicFilter, setBasicFilter] = useState("");
 
   useEffect(() => {
-    const run = async () => {
-      try {
-        const rows = await loadDrugMaster();
-        setAllDrugs(rows || []);
-      } catch {
-        setAllDrugs([]);
-      } finally {
-        setLoading(false);
-      }
-    };
+    let mounted = true;
 
-    void run();
+    loadDrugMaster()
+      .then((rows) => {
+        if (mounted) setDrugs(rows || []);
+      })
+      .catch((error) => {
+        console.error("Failed to load drug master:", error);
+        if (mounted) setDrugs([]);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const filteredDrugs = useMemo(() => {
-    const q = search.toLowerCase().trim();
+  const results = useMemo(() => {
+    return searchDrugMaster(drugs, query, 50);
+  }, [drugs, query]);
 
-    return allDrugs.filter((drug) => {
-      const searchMatch =
-        !q ||
-        drug.drug_name?.toLowerCase().includes(q) ||
-        drug.brand_name?.toLowerCase().includes(q) ||
-        drug.generic_name?.toLowerCase().includes(q) ||
-        drug.drug_code?.toLowerCase().includes(q) ||
-        drug.strength?.toLowerCase().includes(q) ||
-        drug.dosage_form?.toLowerCase().includes(q) ||
-        drug.barcode?.toLowerCase().includes(q);
-
-      const brandMatch =
-        !brandFilter || drug.brand_name?.toLowerCase().includes(brandFilter.toLowerCase());
-
-      const genericMatch =
-        !genericFilter || drug.generic_name?.toLowerCase().includes(genericFilter.toLowerCase());
-
-      const strengthMatch =
-        !strengthFilter || drug.strength?.toLowerCase().includes(strengthFilter.toLowerCase());
-
-      const dosageMatch =
-        !dosageFilter ||
-        drug.dosage_form?.toLowerCase().includes(dosageFilter.toLowerCase());
-
-      const rxMatch =
-        !rxFilter || drug.dispense_mode?.toLowerCase().includes(rxFilter.toLowerCase());
-
-      const uppMatch =
-        !uppFilter || drug.upp_scope?.toLowerCase().includes(uppFilter.toLowerCase());
-
-      const thiqaMatch =
-        !thiqaFilter || drug.included_thiqa_abm?.toLowerCase().includes(thiqaFilter.toLowerCase());
-
-      const basicMatch =
-        !basicFilter ||
-        drug.included_basic?.toLowerCase().includes(basicFilter.toLowerCase());
-
-      return (
-        searchMatch &&
-        brandMatch &&
-        genericMatch &&
-        strengthMatch &&
-        dosageMatch &&
-        rxMatch &&
-        uppMatch &&
-        thiqaMatch &&
-        basicMatch
-      );
-    });
-  }, [
-    allDrugs,
-    search,
-    brandFilter,
-    genericFilter,
-    strengthFilter,
-    dosageFilter,
-    rxFilter,
-    uppFilter,
-    thiqaFilter,
-    basicFilter,
-  ]);
-
-  const displayedDrugs = filteredDrugs;
+  const totalDrugs = drugs.length;
+  const resultsLabel = `${results.length} results`;
 
   return (
-    <div>
-      <h1 style={pageTitle}>Drug Search</h1>
-
-      <div style={topCard}>
-        <div style={searchLabel}>Search</div>
-        <input
-          type="text"
-          placeholder="Search by brand / generic / drug code / strength / dosage form / barcode"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={searchInput}
-        />
-        <p style={helperText}>
-          Search by brand name, generic name, or drug code. Supports partial matches.
+    <div style={page}>
+      <section style={heroCard}>
+        <h1 style={title}>Drug Search</h1>
+        <p style={subtitle}>
+          FalconMed Drug Master - Search by brand, generic, strength, or dosage form
         </p>
-      </div>
+      </section>
 
-      <div style={filtersGrid}>
-        <div>
-          <label style={filterLabel}>Brand</label>
-          <input
-            type="text"
-            placeholder="Filter by brand"
-            value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
-            style={filterInput}
-          />
+      <section style={panelCard}>
+        <div style={panelHeaderRow}>
+          <h2 style={panelTitle}>Search</h2>
+          <span style={resultCount}>{resultsLabel}</span>
         </div>
 
-        <div>
-          <label style={filterLabel}>Generic</label>
-          <input
-            type="text"
-            placeholder="Filter by generic"
-            value={genericFilter}
-            onChange={(e) => setGenericFilter(e.target.value)}
-            style={filterInput}
-          />
+        <div style={searchGrid}>
+          <label style={fieldGroup}>
+            <span style={fieldLabel}>Drug Query</span>
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Type drug name, generic, strength, or form..."
+              style={searchInput}
+            />
+          </label>
         </div>
+      </section>
 
-        <div>
-          <label style={filterLabel}>Strength</label>
-          <input
-            type="text"
-            placeholder="Filter by strength"
-            value={strengthFilter}
-            onChange={(e) => setStrengthFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
+      <section style={summaryGrid}>
+        <article style={summaryCard}>
+          <span style={summaryLabel}>Total catalog items</span>
+          <strong style={summaryValue}>{totalDrugs}</strong>
+        </article>
+        <article style={summaryCard}>
+          <span style={summaryLabel}>Current matches</span>
+          <strong style={summaryValue}>{results.length}</strong>
+        </article>
+      </section>
 
-        <div>
-          <label style={filterLabel}>Dosage Form</label>
-          <input
-            type="text"
-            placeholder="Filter by dosage form"
-            value={dosageFilter}
-            onChange={(e) => setDosageFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
+      {loading ? <div style={stateText}>Loading drug master...</div> : null}
 
-        <div>
-          <label style={filterLabel}>Rx / OTC</label>
-          <input
-            type="text"
-            placeholder="Filter by Rx/OTC"
-            value={rxFilter}
-            onChange={(e) => setRxFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
+      {!loading && results.length === 0 ? (
+        <div style={stateText}>No matching medicines found.</div>
+      ) : null}
 
-        <div>
-          <label style={filterLabel}>UPP Scope</label>
-          <input
-            type="text"
-            placeholder="Filter by UPP scope"
-            value={uppFilter}
-            onChange={(e) => setUppFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
-
-        <div>
-          <label style={filterLabel}>Thiqa/ABM Coverage</label>
-          <input
-            type="text"
-            placeholder="Filter by Thiqa/ABM"
-            value={thiqaFilter}
-            onChange={(e) => setThiqaFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
-
-        <div>
-          <label style={filterLabel}>Basic Coverage</label>
-          <input
-            type="text"
-            placeholder="Filter by Basic Coverage"
-            value={basicFilter}
-            onChange={(e) => setBasicFilter(e.target.value)}
-            style={filterInput}
-          />
-        </div>
-      </div>
-
-      <div style={statsBar}>
-        {loading ? (
-          <span>Loading drugs...</span>
-        ) : (
-          <span>
-            <strong>Total loaded drugs:</strong> {allDrugs.length.toLocaleString()} |{" "}
-            <strong>Filtered results:</strong> {filteredDrugs.length.toLocaleString()}{" "}
-            (showing {displayedDrugs.length})
-          </span>
-        )}
-      </div>
-
-      <div style={tableCard}>
-        <h2 style={tableTitle}>Drugs</h2>
-
-        <div style={tableWrap}>
-          <table style={table}>
-            <thead>
-              <tr>
-                <th style={th}>BRAND</th>
-                <th style={th}>GENERIC</th>
-                <th style={th}>STRENGTH</th>
-                <th style={th}>DOSAGE FORM</th>
-                <th style={th}>RX/OTC</th>
-                <th style={th}>PUBLIC PRICE</th>
-                <th style={th}>ACTION</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayedDrugs.map((drug, index) => (
-                <tr key={index}>
-                  <td style={td}>{drug.brand_name || drug.drug_name || "-"}</td>
-                  <td style={td}>{drug.generic_name || "-"}</td>
-                  <td style={td}>{drug.strength || "-"}</td>
-                  <td style={td}>{drug.dosage_form || "-"}</td>
-                  <td style={td}>{drug.dispense_mode || "-"}</td>
-                  <td style={td}>{drug.public_price || drug.price_to_public || "-"}</td>
-                  <td style={td}>
-                    <button style={smallBtn} onClick={() => setSelectedDrug(drug)}>
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
-
-              {!loading && displayedDrugs.length === 0 && (
-                <tr>
-                  <td style={emptyCell} colSpan="7">
-                    No matching drugs found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {selectedDrug ? (
-        <div style={modalOverlay} onClick={() => setSelectedDrug(null)}>
-          <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-            <div style={modalHeader}>
-              <h3 style={modalTitle}>Drug Details</h3>
-              <button style={closeBtn} onClick={() => setSelectedDrug(null)}>
-                Close
-              </button>
-            </div>
-
-            <div style={detailsGrid}>
-              <div style={detailItem}>
-                <div style={detailLabel}>Brand</div>
-                <div style={detailValue}>{selectedDrug.brand_name || selectedDrug.drug_name || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Generic</div>
-                <div style={detailValue}>{selectedDrug.generic_name || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Display Name</div>
-                <div style={detailValue}>{getDrugDisplayName(selectedDrug) || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Strength</div>
-                <div style={detailValue}>{selectedDrug.strength || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Dosage Form</div>
-                <div style={detailValue}>{selectedDrug.dosage_form || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Drug Code</div>
-                <div style={detailValue}>{selectedDrug.drug_code || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Barcode</div>
-                <div style={detailValue}>{selectedDrug.barcode || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Rx / OTC</div>
-                <div style={detailValue}>{selectedDrug.dispense_mode || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Public Price</div>
-                <div style={detailValue}>{selectedDrug.public_price || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Package Size</div>
-                <div style={detailValue}>{selectedDrug.package_size || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Package Units</div>
-                <div style={detailValue}>{selectedDrug.pack_size || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Package Price to Pharmacy</div>
-                <div style={detailValue}>
-                  {selectedDrug.price_to_pharmacy || selectedDrug.pharmacy_price || "-"}
-                </div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Package Price to Public</div>
-                <div style={detailValue}>{selectedDrug.price_to_public || selectedDrug.public_price || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Unit Price to Pharmacy</div>
-                <div style={detailValue}>
-                  {selectedDrug.unit_price_to_pharmacy || selectedDrug.unit_price_pharmacy || "-"}
-                </div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Unit Price to Public</div>
-                <div style={detailValue}>{selectedDrug.unit_price_to_public || selectedDrug.unit_price_public || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Calculated Unit Price to Pharmacy</div>
-                <div style={detailValue}>
-                  {formatPrice(selectedDrug.unit_price_to_pharmacy || selectedDrug.unit_price_pharmacy)}
-                </div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Calculated Unit Price to Public</div>
-                <div style={detailValue}>
-                  {formatPrice(selectedDrug.unit_price_to_public || selectedDrug.unit_price_public)}
-                </div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>UPP Scope</div>
-                <div style={detailValue}>{selectedDrug.upp_scope || "-"}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Thiqa/ABM Coverage</div>
-                <div style={detailValue}>{formatCoverageValue(selectedDrug.included_thiqa_abm)}</div>
-              </div>
-
-              <div style={detailItem}>
-                <div style={detailLabel}>Basic Coverage</div>
-                <div style={detailValue}>{formatCoverageValue(selectedDrug.included_basic)}</div>
-              </div>
-            </div>
+      {!loading && results.length > 0 ? (
+        <section style={panelCard}>
+          <div style={panelHeaderRow}>
+            <h2 style={panelTitle}>Results</h2>
+            <span style={resultCount}>{resultsLabel}</span>
           </div>
-        </div>
+
+          <div style={tableWrap}>
+            <table style={table}>
+              <thead>
+                <tr>
+                  <th style={th}>Drug Name</th>
+                  <th style={th}>Form</th>
+                  <th style={th}>Package</th>
+                  <th style={th}>Pack Size</th>
+                  <th style={th}>Public Pack Price</th>
+                  <th style={th}>Pharmacy Pack Price</th>
+                  <th style={th}>Public Unit Price</th>
+                  <th style={th}>Pharmacy Unit Price</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {results.map((drug) => (
+                  <tr key={drug.id} style={tr}>
+                    <td style={tdDrug}>
+                      <div style={drugName}>{getDrugDisplayName(drug)}</div>
+                      <div style={drugMeta}>{drug.drug_code || "-"}</div>
+                    </td>
+
+                    <td style={td}>{drug.dosage_form || "-"}</td>
+
+                    <td style={td}>{drug.package_size_raw || "-"}</td>
+
+                    <td style={td}>{drug.normalized_pack_size}</td>
+
+                    <td style={td}>AED {toMoney(drug.public_pack_price)}</td>
+
+                    <td style={td}>AED {toMoney(drug.pharmacy_pack_price)}</td>
+
+                    <td style={td}>AED {toMoney(drug.public_unit_price)}</td>
+
+                    <td style={td}>AED {toMoney(drug.pharmacy_unit_price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       ) : null}
     </div>
   );
 }
 
-const pageTitle = {
-  fontSize: "28px",
+const tokens = {
+  bg: "#f3f6fb",
+  card: "#ffffff",
+  border: "#e6ecf4",
+  borderSoft: "#eef3f8",
+  text: "#0f172a",
+  textMuted: "#4b5563",
+  textSubtle: "#6b7280",
+  primary: "#2563eb",
+};
+
+const page = {
+  minHeight: "100%",
+  padding: "28px",
+  display: "grid",
+  gap: "18px",
+  background: tokens.bg,
+};
+
+const heroCard = {
+  background: tokens.card,
+  border: `1px solid ${tokens.border}`,
+  borderRadius: "14px",
+  padding: "20px 22px",
+};
+
+const title = {
+  margin: 0,
+  fontSize: "30px",
+  lineHeight: 1.2,
+  letterSpacing: "-0.02em",
+  color: tokens.text,
   fontWeight: 700,
-  marginTop: 0,
-  marginBottom: "18px",
-  color: "#0f172a",
 };
 
-const topCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e5eaf1",
-  marginBottom: "18px",
-};
-
-const searchLabel = {
-  textAlign: "left",
+const subtitle = {
+  margin: "10px 0 0",
+  color: tokens.textMuted,
   fontSize: "14px",
-  marginBottom: "8px",
-  color: "#0f172a",
+  lineHeight: 1.55,
+};
+
+const panelCard = {
+  background: tokens.card,
+  border: `1px solid ${tokens.border}`,
+  borderRadius: "14px",
+  padding: "18px 18px 14px",
+  display: "grid",
+  gap: "14px",
+};
+
+const panelHeaderRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "12px",
+};
+
+const panelTitle = {
+  margin: 0,
+  fontSize: "17px",
+  color: tokens.text,
+  fontWeight: 650,
+};
+
+const searchGrid = {
+  display: "grid",
+  gridTemplateColumns: "minmax(240px, 1fr)",
+  gap: "14px",
+};
+
+const fieldGroup = {
+  display: "grid",
+  gap: "8px",
+};
+
+const fieldLabel = {
+  fontSize: "12px",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  color: tokens.textSubtle,
   fontWeight: 600,
 };
 
 const searchInput = {
   width: "100%",
-  padding: "11px 14px",
-  fontSize: "15px",
-  borderRadius: "10px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
+  border: `1px solid ${tokens.border}`,
+  borderRadius: "11px",
+  padding: "12px 14px",
+  fontSize: "14px",
+  color: tokens.text,
+  outline: "none",
+  background: "#ffffff",
 };
 
-const helperText = {
-  marginTop: "10px",
-  marginBottom: 0,
-  textAlign: "left",
-  color: "#475569",
-  fontSize: "13px",
-};
-
-const filtersGrid = {
+const summaryGrid = {
   display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
   gap: "12px",
-  marginBottom: "14px",
 };
 
-const filterLabel = {
-  display: "block",
-  marginBottom: "6px",
-  fontSize: "13px",
-  color: "#334155",
+const summaryCard = {
+  background: tokens.card,
+  border: `1px solid ${tokens.border}`,
+  borderRadius: "12px",
+  padding: "14px 16px",
+  display: "grid",
+  gap: "7px",
+};
+
+const summaryLabel = {
+  fontSize: "12px",
+  color: tokens.textSubtle,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
   fontWeight: 600,
 };
 
-const filterInput = {
-  width: "100%",
-  padding: "10px 12px",
+const summaryValue = {
+  fontSize: "22px",
+  lineHeight: 1.2,
+  color: tokens.text,
+};
+
+const resultCount = {
+  fontSize: "12px",
+  color: tokens.primary,
+  fontWeight: 600,
+  background: "#eff6ff",
+  border: "1px solid #dbeafe",
+  borderRadius: "999px",
+  padding: "5px 10px",
+};
+
+const stateText = {
+  color: tokens.textMuted,
   fontSize: "14px",
-  borderRadius: "9px",
-  border: "1px solid #cbd5e1",
-  boxSizing: "border-box",
-};
-
-const statsBar = {
-  marginBottom: "14px",
-  color: "#334155",
-  fontSize: "14px",
-};
-
-const tableCard = {
-  background: "white",
-  borderRadius: "16px",
-  padding: "18px",
-  boxShadow: "0 2px 10px rgba(15, 23, 42, 0.05)",
-  border: "1px solid #e5eaf1",
-};
-
-const tableTitle = {
-  marginTop: 0,
-  marginBottom: "12px",
-  textAlign: "left",
-  color: "#0f172a",
-  fontSize: "18px",
+  padding: "2px 2px",
 };
 
 const tableWrap = {
+  border: `1px solid ${tokens.borderSoft}`,
+  borderRadius: "12px",
   overflowX: "auto",
+  background: "#ffffff",
 };
 
 const table = {
   width: "100%",
-  borderCollapse: "collapse",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+  minWidth: "1200px",
 };
 
 const th = {
+  padding: "13px 14px",
   textAlign: "left",
-  padding: "10px 12px",
-  borderBottom: "1px solid #e2e8f0",
-  color: "#334155",
-  fontSize: "13px",
+  borderBottom: `1px solid ${tokens.border}`,
+  fontSize: "12px",
+  color: tokens.textSubtle,
+  background: "#f9fbfe",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  fontWeight: 650,
+  whiteSpace: "nowrap",
+};
+
+const tr = {
+  background: "#ffffff",
 };
 
 const td = {
-  padding: "10px 12px",
-  borderBottom: "1px solid #f1f5f9",
-  color: "#0f172a",
+  padding: "14px",
+  borderBottom: `1px solid ${tokens.borderSoft}`,
   fontSize: "13px",
+  color: tokens.text,
+  lineHeight: 1.45,
+  verticalAlign: "top",
 };
 
-const smallBtn = {
-  padding: "7px 10px",
-  background: "#2563eb",
-  color: "white",
-  border: "none",
-  borderRadius: "7px",
-  cursor: "pointer",
-  fontSize: "12px",
-  fontWeight: 600,
+const tdDrug = {
+  padding: "14px",
+  borderBottom: `1px solid ${tokens.borderSoft}`,
+  fontSize: "13px",
+  color: tokens.text,
+  minWidth: "340px",
+  maxWidth: "440px",
+  lineHeight: 1.45,
+  verticalAlign: "top",
 };
 
-const emptyCell = {
-  padding: "24px",
-  textAlign: "center",
-  color: "#64748b",
-};
-
-const modalOverlay = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(15, 23, 42, 0.5)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "20px",
-  zIndex: 2000,
-};
-
-const modalCard = {
-  width: "100%",
-  maxWidth: "780px",
-  maxHeight: "85vh",
-  overflowY: "auto",
-  background: "white",
-  borderRadius: "16px",
-  padding: "20px",
-  boxShadow: "0 16px 40px rgba(15, 23, 42, 0.24)",
-};
-
-const modalHeader = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: "14px",
-};
-
-const modalTitle = {
-  margin: 0,
-  color: "#0f172a",
-  fontSize: "20px",
-};
-
-const closeBtn = {
-  border: "1px solid #cbd5e1",
-  background: "#f8fafc",
-  color: "#0f172a",
-  borderRadius: "8px",
-  padding: "8px 12px",
-  cursor: "pointer",
-  fontWeight: 600,
-};
-
-const detailsGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "10px",
-};
-
-const detailItem = {
-  border: "1px solid #e2e8f0",
-  borderRadius: "10px",
-  padding: "10px",
-  background: "#f8fafc",
-};
-
-const detailLabel = {
-  fontSize: "12px",
-  color: "#64748b",
-  marginBottom: "6px",
-  fontWeight: 700,
-};
-
-const detailValue = {
+const drugName = {
+  fontWeight: 650,
   fontSize: "14px",
-  color: "#0f172a",
+  whiteSpace: "normal",
   wordBreak: "break-word",
+};
+
+const drugMeta = {
+  marginTop: "5px",
+  color: tokens.textSubtle,
+  fontSize: "12px",
 };

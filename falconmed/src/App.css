@@ -1,7 +1,7 @@
 body {
   margin: 0;
-  font-family: "Inter", system-ui, sans-serif;
-  background: #f6f8fb;
+  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  background: linear-gradient(180deg, #f6fbff 0%, #edf5fc 100%);
   min-height: 100vh;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -50,10 +50,10 @@ body {
 
 .card {
   background: #ffffff;
-  border-radius: 14px;
-  padding: 18px;
-  border: 1px solid #e5eaf2;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06);
+  border-radius: 18px;
+  padding: 20px;
+  border: 1px solid #d7e3f1;
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.07);
   transition: transform 0.18s ease, box-shadow 0.18s ease;
   text-align: left;
   margin-bottom: 22px;
@@ -80,22 +80,22 @@ body {
 /* buttons */
 
 button {
-  background: #1f3c88;
+  background: linear-gradient(135deg, #0f4c81 0%, #166091 100%);
   color: white;
   border: none;
   padding: 10px 18px;
   border-radius: 10px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
   cursor: pointer;
   transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 10px 20px rgba(15, 76, 129, 0.24);
 }
 
 button:hover {
   transform: translateY(-1px);
-  background: #183272;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  background: linear-gradient(135deg, #0d406c 0%, #15527c 100%);
+  box-shadow: 0 12px 22px rgba(15, 76, 129, 0.28);
 }
 
 button:active {
@@ -112,10 +112,10 @@ button:active {
   border-collapse: separate;
   border-spacing: 0;
   background: #ffffff;
-  border: 1px solid #e5eaf2;
+  border: 1px solid #d7e3f1;
   border-radius: 16px;
   overflow: hidden;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
 }
 
 .results-table thead th,
@@ -125,13 +125,13 @@ button:active {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: #f2f5fb;
-  color: #1f3c88;
+  background: #f4f9ff;
+  color: #0f4c81;
   font-size: 0.76rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  border-bottom: 1px solid #dbe3ee;
+  border-bottom: 1px solid #d7e3f1;
   padding: 0.9rem 1rem;
 }
 
@@ -174,9 +174,9 @@ button:active {
 .results-panel,
 .details-panel {
   background: #ffffff;
-  border: 1px solid #e5eaf2;
+  border: 1px solid #d7e3f1;
   border-radius: 16px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.07);
 }
 
 /* form polish */
@@ -187,7 +187,7 @@ textarea {
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
-  border: 1px solid #d7deeb;
+  border: 1px solid #cfdeef;
   background: #ffffff;
   color: #1a1a1a;
   font-size: 0.9rem;
@@ -206,9 +206,9 @@ input:focus,
 select:focus,
 textarea:focus {
   outline: none;
-  border-color: #1f3c88;
+  border-color: #166091;
   background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(31, 60, 136, 0.16);
+  box-shadow: 0 0 0 3px rgba(22, 96, 145, 0.14);
 }
 
 select {

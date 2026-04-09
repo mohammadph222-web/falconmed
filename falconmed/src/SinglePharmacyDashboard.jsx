@@ -150,16 +150,18 @@ export default function SinglePharmacyDashboard() {
   return (
     <div style={pageWrap}>
       <div style={heroCard}>
-        <div>
+        <div style={heroContent}>
           <h1 style={heroTitle}>Single Pharmacy Dashboard</h1>
           <p style={heroSub}>Operational control for one pharmacy at a time.</p>
         </div>
-        <WorkspacePharmacySelector
-          options={pharmacies}
-          value={selectedPharmacyId}
-          onChange={onSelectPharmacy}
-          label="Active Pharmacy"
-        />
+        <div style={selectorWrap}>
+          <WorkspacePharmacySelector
+            options={pharmacies}
+            value={selectedPharmacyId}
+            onChange={onSelectPharmacy}
+            label="Active Pharmacy"
+          />
+        </div>
       </div>
 
       {error ? <div style={errorBox}>{error}</div> : null}
@@ -179,11 +181,14 @@ export default function SinglePharmacyDashboard() {
           ) : recentMovements.length === 0 ? (
             <div style={empty}>No recent movement found for the selected pharmacy.</div>
           ) : (
-            <div style={listWrap}>
+            <div style={listWrap} className="movements-feed">
               {recentMovements.map((item) => (
-                <div key={item.id} style={listItem}>
-                  <strong>{item.movement_type || "Movement"}</strong>
-                  <span>{item.drug_name || "-"} | Qty {formatQty(item.quantity || 0)}</span>
+                <div key={item.id} style={listItem} className="movements-feed-item">
+                  <div style={movementHead}>
+                    <strong style={movementType}>{item.movement_type || "Movement"}</strong>
+                    <span style={movementQty}>Qty {formatQty(item.quantity || 0)}</span>
+                  </div>
+                  <span style={movementDrug}>{item.drug_name || "-"}</span>
                 </div>
               ))}
             </div>
@@ -193,10 +198,10 @@ export default function SinglePharmacyDashboard() {
         <div style={panel}>
           <h3 style={panelTitle}>Quick Actions</h3>
           <div style={quickGrid}>
-            <div style={quickCard}>Receive stock with batch and expiry details</div>
-            <div style={quickCard}>Dispense from existing inventory rows</div>
-            <div style={quickCard}>Review low stock lines and near expiry lines</div>
-            <div style={quickCard}>Open Inventory Overview for full table operations</div>
+            <div style={quickCard} className="quick-action-item"><span style={quickText}>Receive stock with batch and expiry details</span><span style={quickMeta}>-&gt;</span></div>
+            <div style={quickCard} className="quick-action-item"><span style={quickText}>Dispense from existing inventory rows</span><span style={quickMeta}>-&gt;</span></div>
+            <div style={quickCard} className="quick-action-item"><span style={quickText}>Review low stock lines and near expiry lines</span><span style={quickMeta}>-&gt;</span></div>
+            <div style={quickCard} className="quick-action-item"><span style={quickText}>Open Inventory Overview for full table operations</span><span style={quickMeta}>-&gt;</span></div>
           </div>
         </div>
       </div>
@@ -204,52 +209,188 @@ export default function SinglePharmacyDashboard() {
   );
 }
 
-const pageWrap = { display: "grid", gap: "16px" };
+const tokens = {
+  bg: "#f3f6fb",
+  card: "#ffffff",
+  border: "#e2e8f0",
+  borderSoft: "#edf2f7",
+  text: "#0f172a",
+  muted: "#475569",
+  subtle: "#64748b",
+  primary: "#2563eb",
+};
+
+const pageWrap = {
+  display: "grid",
+  gap: "18px",
+  padding: "2px 2px 10px",
+  background: tokens.bg,
+  borderRadius: "14px",
+};
 const heroCard = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "flex-start",
+  alignItems: "center",
   gap: "14px",
-  background: "linear-gradient(135deg, #0b1326 0%, #1d4ed8 55%, #0ea5e9 100%)",
-  color: "#f8fafc",
-  borderRadius: "16px",
-  padding: "18px",
+  flexWrap: "wrap",
+  background: tokens.card,
+  color: tokens.text,
+  borderRadius: "14px",
+  padding: "16px 18px",
+  border: `1px solid ${tokens.border}`,
+  boxShadow: "0 4px 12px rgba(15, 23, 42, 0.035)",
 };
-const heroTitle = { margin: 0, fontSize: "24px" };
-const heroSub = { marginTop: "6px", marginBottom: 0, opacity: 0.9 };
-const errorBox = {
+const heroContent = { minWidth: "250px", flex: "1 1 320px" };
+const selectorWrap = {
+  minWidth: "220px",
+  maxWidth: "300px",
+  flex: "0 1 280px",
+  padding: "10px 11px",
   borderRadius: "10px",
-  padding: "10px 12px",
+  border: `1px solid ${tokens.borderSoft}`,
+  background: "#fbfdff",
+};
+const heroTitle = {
+  margin: 0,
+  fontSize: "30px",
+  lineHeight: 1.2,
+  letterSpacing: "-0.02em",
+  color: tokens.text,
+  fontWeight: 760,
+};
+const heroSub = {
+  marginTop: "6px",
+  marginBottom: 0,
+  color: tokens.muted,
+  fontSize: "14px",
+  lineHeight: 1.45,
+  maxWidth: "620px",
+};
+const errorBox = {
+  borderRadius: "12px",
+  padding: "11px 13px",
   background: "#fef2f2",
   border: "1px solid #fecaca",
   color: "#991b1b",
-  boxShadow: "inset 4px 0 0 #dc2626",
+  boxShadow: "inset 3px 0 0 #dc2626",
 };
-const kpiGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" };
-const kpiCard = { background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "14px" };
-const kpiLabel = { fontSize: "11px", color: "#64748b", textTransform: "uppercase", fontWeight: 700 };
-const kpiValue = { marginTop: "8px", fontSize: "24px", fontWeight: 800, color: "#0f172a", fontVariantNumeric: "tabular-nums" };
-const contentGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "12px" };
-const panel = { background: "#fff", borderRadius: "12px", border: "1px solid #e2e8f0", padding: "14px" };
-const panelTitle = { marginTop: 0, marginBottom: "10px", color: "#0f172a" };
-const listWrap = { display: "grid", gap: "8px" };
+const kpiGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: "12px",
+};
+const kpiCard = {
+  background: tokens.card,
+  borderRadius: "12px",
+  border: "1px solid #edf3fa",
+  borderTop: "2px solid #dbeafe",
+  padding: "16px 18px",
+  boxShadow: "0 4px 10px rgba(15, 23, 42, 0.025)",
+};
+const kpiLabel = {
+  fontSize: "9px",
+  color: "#94a3b8",
+  textTransform: "uppercase",
+  fontWeight: 700,
+  letterSpacing: "0.09em",
+};
+const kpiValue = {
+  marginTop: "11px",
+  fontSize: "36px",
+  fontWeight: 750,
+  color: tokens.text,
+  fontVariantNumeric: "tabular-nums",
+  letterSpacing: "-0.025em",
+  lineHeight: 1.1,
+};
+const contentGrid = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+  gap: "12px",
+};
+const panel = {
+  background: tokens.card,
+  borderRadius: "12px",
+  border: `1px solid ${tokens.borderSoft}`,
+  padding: "16px",
+  boxShadow: "0 5px 12px rgba(15, 23, 42, 0.03)",
+};
+const panelTitle = {
+  marginTop: 0,
+  marginBottom: "12px",
+  color: tokens.text,
+  fontSize: "17px",
+  fontWeight: 700,
+  letterSpacing: "-0.01em",
+};
+const listWrap = { display: "grid", gap: "10px" };
 const listItem = {
   display: "grid",
-  gap: "3px",
-  border: "1px solid #e2e8f0",
+  gap: "8px",
+  border: "1px solid #eef3f8",
   borderRadius: "10px",
-  padding: "9px 10px",
+  padding: "13px 14px",
   fontSize: "13px",
-  color: "#334155",
+  color: tokens.muted,
+  background: "#fcfeff",
+  transition: "border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease",
 };
-const quickGrid = { display: "grid", gap: "8px" };
+const movementHead = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "12px",
+  alignItems: "center",
+};
+const movementType = {
+  color: tokens.subtle,
+  fontSize: "10px",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.07em",
+};
+const movementQty = {
+  fontSize: "11px",
+  color: "#1e40af",
+  background: "#f5f9ff",
+  border: "1px solid #e6eefc",
+  borderRadius: "999px",
+  padding: "4px 10px",
+  fontWeight: 600,
+  whiteSpace: "nowrap",
+  lineHeight: 1,
+};
+const movementDrug = {
+  color: tokens.text,
+  lineHeight: 1.42,
+  fontWeight: 600,
+  fontSize: "14px",
+  wordBreak: "break-word",
+};
+const quickGrid = { display: "grid", gap: "12px" };
 const quickCard = {
-  border: "1px solid #bfdbfe",
+  border: "1px solid #edf2f8",
   borderRadius: "10px",
-  padding: "10px",
-  background: "#eff6ff",
-  color: "#1e3a8a",
+  padding: "13px 14px",
+  background: "linear-gradient(180deg, #ffffff 0%, #fcfeff 100%)",
+  color: tokens.text,
   fontWeight: 600,
   fontSize: "13px",
+  lineHeight: 1.45,
+  display: "grid",
+  gridTemplateColumns: "1fr auto",
+  alignItems: "center",
+  gap: "10px",
+  boxShadow: "0 1px 4px rgba(15, 23, 42, 0.02)",
+  transition: "border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease",
 };
-const empty = { color: "#64748b", fontSize: "13px" };
+const quickText = {
+  color: tokens.text,
+};
+const quickMeta = {
+  fontSize: "12px",
+  color: "#1d4ed8",
+  letterSpacing: "0.02em",
+  fontWeight: 700,
+  lineHeight: 1,
+};
+const empty = { color: tokens.subtle, fontSize: "13px" };

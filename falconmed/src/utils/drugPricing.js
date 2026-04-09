@@ -1,62 +1,45 @@
-import { loadDrugMaster, parseDrugPrice } from "./drugMaster";
+import { loadDrugMaster } from "./drugMasterLoader";
 
-let pricingCache = new Map();
-let cacheReady = false;
-let cachePromise = null;
-
-function normalize(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[.,;:()\[\]{}]+/g, " ")
-    .replace(/[+/\\]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+function normalizeText(value) {
+  return String(value || "").trim();
 }
 
-function toPositiveNumber(value) {
-  const parsed = parseDrugPrice(value);
-  return parsed != null && parsed > 0 ? parsed : null;
+function normalizeName(value) {
+  return normalizeText(value).toLowerCase();
 }
 
-function derivePricing(drug) {
-  const pharmacyUnitPrice =
-    toPositiveNumber(drug?.unit_price_pharmacy) ||
-    toPositiveNumber(drug?.unit_price_to_pharmacy) ||
-    toPositiveNumber(drug?.pharmacy_price) ||
-    toPositiveNumber(drug?.price_to_pharmacy) ||
-    toPositiveNumber(drug?.unit_cost);
-
-  const publicUnitPrice =
-    toPositiveNumber(drug?.unit_price_public) ||
-    toPositiveNumber(drug?.unit_price_to_public) ||
-    toPositiveNumber(drug?.public_price) ||
-    toPositiveNumber(drug?.price_to_public);
-
-  if (pharmacyUnitPrice == null && publicUnitPrice == null) {
-    return null;
-  }
-
-  return { pharmacyUnitPrice, publicUnitPrice };
+function toNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function buildPricingMap(drugs) {
+let cachedPriceMap = new Map();
+let hasInitialized = false;
+
+function buildPriceMapFromRows(rows = []) {
   const map = new Map();
 
-  for (const drug of drugs || []) {
-    const pricing = derivePricing(drug);
-    if (!pricing) continue;
+  for (const drug of Array.isArray(rows) ? rows : []) {
+    const pharmacyUnitPrice = toNumber(
+      drug?.pharmacy_unit_price ?? drug?.unit_price_pharmacy,
+      0
+    );
+
+    if (pharmacyUnitPrice <= 0) continue;
 
     const keys = [
-      normalize(drug?.drug_name),
-      normalize(drug?.brand_name),
-      normalize(drug?.generic_name),
-      normalize([drug?.drug_name, drug?.strength].filter(Boolean).join(" ")),
-      normalize([drug?.brand_name, drug?.strength].filter(Boolean).join(" ")),
-    ].filter(Boolean);
+      drug?.drug_name,
+      drug?.brand_name,
+      drug?.generic_name,
+      drug?.drug_code,
+      drug?.display_name,
+    ]
+      .map((value) => normalizeName(value))
+      .filter(Boolean);
 
     for (const key of keys) {
       if (!map.has(key)) {
-        map.set(key, pricing);
+        map.set(key, pharmacyUnitPrice);
       }
     }
   }
@@ -64,43 +47,32 @@ function buildPricingMap(drugs) {
   return map;
 }
 
-async function ensureCacheLoaded() {
-  if (cacheReady) return;
-  if (!cachePromise) {
-    cachePromise = (async () => {
-      try {
-        const drugs = await loadDrugMaster();
-        pricingCache = buildPricingMap(drugs || []);
-      } catch {
-        pricingCache = new Map();
-      } finally {
-        cacheReady = true;
-      }
-    })();
-  }
+function warmCacheIfNeeded() {
+  if (hasInitialized) return;
+  hasInitialized = true;
 
-  await cachePromise;
+  loadDrugMaster()
+    .then((rows) => {
+      cachedPriceMap = buildPriceMapFromRows(rows || []);
+    })
+    .catch(() => {
+      cachedPriceMap = new Map();
+    });
 }
 
-// Kept synchronous for compatibility with existing callers in hidden modules.
 export function buildDrugPriceMap() {
-  if (!cacheReady) {
-    void ensureCacheLoaded();
-  }
-  return pricingCache;
-}
-
-export function resolveDrugPricing(drugName) {
-  if (!cacheReady) {
-    void ensureCacheLoaded();
-  }
-
-  const key = normalize(drugName);
-  if (!key) return null;
-
-  return pricingCache.get(key) || null;
+  warmCacheIfNeeded();
+  return cachedPriceMap;
 }
 
 export function resolvePharmacyUnitPrice(drugName) {
-  return resolveDrugPricing(drugName)?.pharmacyUnitPrice ?? null;
+  warmCacheIfNeeded();
+  const key = normalizeName(drugName);
+  if (!key) return null;
+
+  if (cachedPriceMap.has(key)) {
+    return cachedPriceMap.get(key);
+  }
+
+  return null;
 }
