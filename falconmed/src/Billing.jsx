@@ -5,6 +5,7 @@ import {
   loadDrugMaster,
   searchDrugMaster,
 } from "./utils/drugMasterLoader";
+import { ActionButton, PageHeader } from "./ui";
 
 const INITIAL_PHARMACY = {
   name: "FalconMed Pharmacy",
@@ -447,17 +448,17 @@ function Billing({ onBack }) {
   return (
     <div className="billing-page">
       <div className="billing-header-card">
-        <div>
-          <h1 className="billing-page-title">Billing</h1>
-          <p className="billing-page-sub">
-            Create invoices and quotations for patient transactions.
-          </p>
-        </div>
-        {onBack && (
-          <button onClick={onBack} className="back-button">
-            ← Back
-          </button>
-        )}
+        <PageHeader
+          title="Billing"
+          subtitle="Create invoices and quotations for patient transactions."
+          actions={
+            onBack ? (
+              <ActionButton type="button" variant="secondary" className="back-button" onClick={onBack}>
+                ← Back
+              </ActionButton>
+            ) : null
+          }
+        />
       </div>
 
       {restoreMessage && (
@@ -689,13 +690,14 @@ function Billing({ onBack }) {
             <h3 className="billing-section-title">Items Table</h3>
 
             <div className="billing-table-actions no-print">
-              <button
+              <ActionButton
                 type="button"
+                variant="secondary"
                 className="billing-secondary-btn"
                 onClick={addManualItem}
               >
                 Add Item
-              </button>
+              </ActionButton>
             </div>
 
             <div className="billing-table-wrap">
@@ -875,27 +877,30 @@ function Billing({ onBack }) {
       </div>
 
       <div className="billing-bottom-actions no-print">
-        <button
+        <ActionButton
           type="button"
+          variant="secondary"
           className="billing-secondary-btn"
           onClick={addManualItem}
         >
           Add Item
-        </button>
-        <button
+        </ActionButton>
+        <ActionButton
           type="button"
+          variant="ghost"
           className="billing-clear-btn"
           onClick={handleClear}
         >
           Clear
-        </button>
-        <button
+        </ActionButton>
+        <ActionButton
           type="button"
+          variant="primary"
           className="billing-primary-btn"
           onClick={handlePrint}
         >
           Print
-        </button>
+        </ActionButton>
       </div>
 
       <div className="billing-future-ready no-print">

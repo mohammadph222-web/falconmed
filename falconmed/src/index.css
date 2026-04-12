@@ -1,35 +1,83 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+﻿@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
 
+/* ═══════════════════════════════════════════════════════
+   FALCONMED DESIGN TOKENS
+═══════════════════════════════════════════════════════ */
 :root {
-  --primary: #0f4c81;
-  --primary-strong: #0b3f6b;
-  --background: #f3f8fc;
-  --background-soft: #eef5fb;
-  --card: #ffffff;
-  --text: #0f172a;
-  --muted: #5b6b80;
-  --border: #d7e3f1;
-  --shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
+  /* Brand */
+  --primary:        #2563eb;
+  --primary-dark:   #1d4ed8;
+  --primary-light:  #eff6ff;
+  --primary-ring:   rgba(37, 99, 235, 0.18);
+
+  /* Surfaces */
+  --bg:             #f8fafc;
+  --surface:        #ffffff;
+
+  /* Text */
+  --text:           #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+
+  /* Borders */
+  --border:         #e2e8f0;
+  --border-strong:  #cbd5e1;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md:  0 4px 12px rgba(0, 0, 0, 0.07), 0 2px 4px rgba(0, 0, 0, 0.04);
+  --shadow-lg:  0 10px 28px rgba(0, 0, 0, 0.08), 0 4px 8px rgba(0, 0, 0, 0.04);
+  --shadow-xl:  0 18px 38px rgba(15, 23, 42, 0.09), 0 6px 14px rgba(15, 23, 42, 0.06);
+
+  /* Sidebar */
+  --sidebar-bg:          #0f172a;
+  --sidebar-border:      #1e293b;
+  --sidebar-text:        #cbd5e1;
+  --sidebar-muted:       #64748b;
+  --sidebar-hover:       rgba(255, 255, 255, 0.06);
+  --sidebar-active-bg:   #2563eb;
+  --sidebar-active-text: #ffffff;
+
+  /* Radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  /* Spacing rhythm */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  /* — legacy aliases kept so existing pages that reference these still compile — */
+  --background:      var(--bg);
+  --background-soft: #f1f5f9;
+  --card:            var(--surface);
+  --muted:           var(--text-secondary);
+  --shadow:          var(--shadow-md);
 }
 
-* {
+/* ═══════════════════════════════════════════════════════
+   RESET & BASE
+═══════════════════════════════════════════════════════ */
+*, *::before, *::after {
   box-sizing: border-box;
 }
 
-html,
-body,
-#root {
+html, body, #root {
   margin: 0;
   min-height: 100vh;
   width: 100%;
 }
 
 body {
-  font-family: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-  background:
-    radial-gradient(circle at 8% -12%, #dbeeff 0%, transparent 46%),
-    radial-gradient(circle at 92% -10%, #e6f4ff 0%, transparent 44%),
-    linear-gradient(180deg, var(--background) 0%, var(--background-soft) 100%);
+  font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
   color: var(--text);
   line-height: 1.6;
   font-synthesis: none;
@@ -38,103 +86,285 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
+#root {
+  isolation: isolate;
+}
+
+h1, h2, h3, h4, h5, h6 {
   color: var(--text);
   margin: 0;
+  line-height: 1.3;
 }
 
 p {
   margin: 0;
-  color: var(--muted);
+  color: var(--text-secondary);
 }
 
-.ui-hover-lift {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+/* ═══════════════════════════════════════════════════════
+   PAGE LAYOUT HELPERS
+═══════════════════════════════════════════════════════ */
+.page {
+  max-width: 1100px;
+  padding: var(--space-2) 0 var(--space-8);
 }
 
-.ui-hover-lift:hover {
-  transform: translateY(-3px);
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.07);
+.page h2 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  margin-bottom: var(--space-5);
 }
 
-.movements-feed-item:hover {
+/* ═══════════════════════════════════════════════════════
+   CARD
+═══════════════════════════════════════════════════════ */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+  margin-bottom: var(--space-5);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.card:hover {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-1px);
-  border-color: #dbe7f6;
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.045);
 }
 
-.quick-action-item:hover {
-  transform: translateY(-1px);
-  border-color: #dce7f6;
-  background: linear-gradient(180deg, #ffffff 0%, #f6faff 100%);
-  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.04);
+.card h2 {
+  font-size: 18px;
+  font-weight: 800;
+  margin-bottom: var(--space-3);
 }
 
-.stock-ledger-row:hover td {
-  background: #f9fbfe;
+.card h3 {
+  font-size: 15px;
+  font-weight: 800;
+  margin-bottom: 4px;
 }
 
-.sidebar-signout-button:hover {
-  background: #395d7d !important;
-  border-color: #547593 !important;
-  transform: none !important;
-  box-shadow: none !important;
+.card p {
+  color: var(--text-muted);
+  font-size: 13.5px;
+  margin-bottom: 14px;
 }
 
-.sidebar-nav-button:hover {
-  background: rgba(20, 48, 75, 0.28) !important;
-  border-color: rgba(170, 199, 229, 0.22) !important;
-  transform: translateY(-1px) !important;
-  box-shadow: 0 2px 6px rgba(8, 23, 41, 0.12) !important;
-}
-
-.sidebar-nav-button-active:hover {
-  background: linear-gradient(135deg, #3a6e98 0%, #4478a4 100%) !important;
-  border-color: #99bddb !important;
-}
-
-.sidebar-nav-button:focus-visible,
-.sidebar-signout-button:focus-visible {
-  outline: 2px solid #8fb8db;
-  outline-offset: 2px;
-}
-
+/* ═══════════════════════════════════════════════════════
+   BUTTONS
+═══════════════════════════════════════════════════════ */
 button {
   border-radius: 10px;
-  font-weight: 600;
-  padding: 10px 18px;
+  font-weight: 700;
+  padding: 10px 16px;
   font-family: inherit;
-  letter-spacing: 0.01em;
+  font-size: 14px;
+  letter-spacing: 0.005em;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.12s ease;
 }
 
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(0);
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+/* ═══════════════════════════════════════════════════════
+   FORM CONTROLS
+═══════════════════════════════════════════════════════ */
 input,
 select,
 textarea {
   font-family: inherit;
+  font-size: 14px;
+  color: var(--text);
+  border-radius: 10px;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
 }
 
-select {
-  max-height: 280px;
-  overflow-y: auto;
+input::placeholder,
+textarea::placeholder {
+  color: #94a3b8;
 }
 
-@keyframes skeleton-pulse {
-  0% {
-    background-position: 200% 0;
-  }
-
-  100% {
-    background-position: -200% 0;
-  }
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #c2cfdf;
 }
 
-.skeleton-shimmer {
-  background: linear-gradient(90deg, #e9eef5 25%, #f8fafc 50%, #e9eef5 75%);
-  background-size: 200% 100%;
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+/* ═══════════════════════════════════════════════════════
+   TABLES
+═══════════════════════════════════════════════════════ */
+.results-table,
+.shortages-table,
+.expiries-table,
+.refills-table,
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.results-table thead th,
+.shortages-table thead th,
+.expiries-table thead th,
+.refills-table thead th,
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f8fafc;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid var(--border);
+  padding: 11px 13px;
+}
+
+.results-table tbody td,
+.shortages-table tbody td,
+.expiries-table tbody td,
+.refills-table tbody td,
+.table tbody td {
+  padding: 12px 13px;
+  border-bottom: 1px solid #f1f5f9;
+  color: var(--text);
+  font-size: 13.5px;
+  vertical-align: middle;
+}
+
+.results-table tbody tr:last-child td,
+.shortages-table tbody tr:last-child td,
+.expiries-table tbody tr:last-child td,
+.refills-table tbody tr:last-child td,
+.table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.results-table tbody tr:hover td,
+.shortages-table tbody tr:hover td,
+.expiries-table tbody tr:hover td,
+.refills-table tbody tr:hover td,
+.table tbody tr:hover td {
+  background: #f8fbff;
+}
+
+/* ═══════════════════════════════════════════════════════
+   UTILITY HOVER / INTERACTION CLASSES
+   (used by SinglePharmacyDashboard and others)
+═══════════════════════════════════════════════════════ */
+.ui-hover-lift {
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.ui-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.movements-feed-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
+}
+
+.quick-action-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-strong);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  box-shadow: var(--shadow-md);
+}
+
+.stock-ledger-row:hover td {
+  background: #f8fafc;
+}
+
+.fm-table-row {
+  transition: background-color 0.14s ease;
+}
+
+.fm-table-row:hover {
+  background: #f8fbff !important;
+}
+
+.fm-action-btn {
+  transition: transform 0.14s ease, box-shadow 0.14s ease, filter 0.14s ease;
+}
+
+.fm-action-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.02);
+}
+
+.fm-action-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+/* ═══════════════════════════════════════════════════════
+   SIDEBAR INTERACTIVE STATES
+   (used via className in App.jsx)
+═══════════════════════════════════════════════════════ */
+.sidebar-signout-button:hover {
+  background: #1e3a5f !important;
+  border-color: #2d5480 !important;
+}
+
+.sidebar-nav-button {
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease !important;
+}
+
+.sidebar-nav-button:hover {
+  background: var(--sidebar-hover) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  transform: translateX(1px);
+}
+
+.sidebar-nav-button-active:hover {
+  background: #1d4ed8 !important;
+  border-color: #3b82f6 !important;
+}
+
+.sidebar-nav-button:focus-visible,
+.sidebar-signout-button:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }

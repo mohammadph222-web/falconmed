@@ -1,22 +1,39 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import InsightCard from "./components/InsightCard";
 import { supabase } from "./lib/supabaseClient";
 import { getDrugDisplayName, loadDrugMaster, searchDrugMaster } from "./utils/drugMasterLoader";
 import { loadPharmaciesWithFallback } from "./utils/pharmacyData";
+import { MetricCard, PageHeader, StatusPill } from "./ui";
 
-// Read/write to pharmacy_inventory — items where quantity is at or below this threshold.
-const SHORTAGE_TABLE = "pharmacy_inventory";
+const INVENTORY_TABLE = "pharmacy_inventory";
 const SHORTAGE_THRESHOLD = 10;
+
+function toNumber(value) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function normalize(value) {
+  return String(value || "").trim();
+}
 
 const mapDbToUi = (row) => ({
   id: row.id,
   pharmacyId: String(row.pharmacy_id ?? ""),
   drugName: row.drug_name || row.drug || "",
+  drugCode: row.drug_code || "",
   batchNo: row.batch_no || row.batch || "",
-  quantity: Number(row.quantity ?? 0),
+  quantity: toNumber(row.quantity),
   expiryDate: row.expiry_date || "",
-  unitCost: Number(row.unit_cost || 0),
+  createdAt: row.created_at || "",
 });
+
+function getShortageStatus(qty) {
+  if (qty <= 0) return "Out of Stock";
+  if (qty <= 5) return "Critical";
+  if (qty <= 10) return "Low Stock";
+  return "Healthy";
+}
 
 function buildUniquePharmacies(rows = []) {
   const map = new Map();
@@ -36,8 +53,59 @@ function buildUniquePharmacies(rows = []) {
   );
 }
 
+function aggregateInventoryRows(rows, pharmacyNameMap) {
+  const grouped = new Map();
+
+  for (const row of rows) {
+    const pharmacyId = normalize(row.pharmacyId);
+    const drugName = normalize(row.drugName);
+    const batchNo = normalize(row.batchNo);
+    const key = `${pharmacyId}__${drugName.toLowerCase()}__${batchNo.toLowerCase() || "no-batch"}`;
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        groupKey: key,
+        pharmacyId,
+        pharmacyName: pharmacyNameMap.get(pharmacyId) || "Unknown Pharmacy",
+        drugName,
+        drugCode: normalize(row.drugCode),
+        batchNo,
+        expiryDate: row.expiryDate || "",
+        quantity: 0,
+        sourceRowIds: [],
+        sourceRows: [],
+      });
+    }
+
+    const current = grouped.get(key);
+    current.quantity += toNumber(row.quantity);
+    current.sourceRowIds.push(row.id);
+    current.sourceRows.push(row);
+
+    if (!current.expiryDate && row.expiryDate) {
+      current.expiryDate = row.expiryDate;
+    } else if (current.expiryDate && row.expiryDate) {
+      const existingTs = new Date(current.expiryDate).getTime();
+      const nextTs = new Date(row.expiryDate).getTime();
+      if (Number.isFinite(existingTs) && Number.isFinite(nextTs) && nextTs < existingTs) {
+        current.expiryDate = row.expiryDate;
+      }
+    }
+
+    if (!current.drugCode && normalize(row.drugCode)) {
+      current.drugCode = normalize(row.drugCode);
+    }
+  }
+
+  return Array.from(grouped.values()).map((item) => ({
+    ...item,
+    quantity: Number(item.quantity.toFixed(2)),
+    status: getShortageStatus(item.quantity),
+  }));
+}
+
 export default function ShortageTracker() {
-  const [items, setItems] = useState([]);
+  const [inventoryRows, setInventoryRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
 
@@ -47,6 +115,11 @@ export default function ShortageTracker() {
   const [allDrugs, setAllDrugs] = useState([]);
   const [drugSearch, setDrugSearch] = useState("");
   const [showDrugDropdown, setShowDrugDropdown] = useState(false);
+  const [showManualForm, setShowManualForm] = useState(false);
+
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [pharmacyFilter, setPharmacyFilter] = useState("all");
+  const [searchText, setSearchText] = useState("");
 
   const [form, setForm] = useState({
     drugName: "",
@@ -58,6 +131,31 @@ export default function ShortageTracker() {
 
   const handleChange = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const loadInventory = async () => {
+    setLoading(true);
+    setMessage("");
+
+    try {
+      const { data, error } = await supabase
+        .from(INVENTORY_TABLE)
+        .select("*")
+        .order("quantity", { ascending: true });
+
+      if (error) {
+        setInventoryRows([]);
+        setMessage("Failed to load shortage records.");
+        return;
+      }
+
+      setInventoryRows((data || []).map(mapDbToUi));
+    } catch {
+      setInventoryRows([]);
+      setMessage("Failed to load shortage records.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -90,6 +188,10 @@ export default function ShortageTracker() {
     };
   }, []);
 
+  useEffect(() => {
+    void loadInventory();
+  }, []);
+
   const filteredDrugs = useMemo(
     () => (showDrugDropdown ? searchDrugMaster(allDrugs, drugSearch, 25) : []),
     [allDrugs, drugSearch, showDrugDropdown]
@@ -97,42 +199,148 @@ export default function ShortageTracker() {
 
   const handleDrugSelect = (drug) => {
     const displayName = getDrugDisplayName(drug);
-
     setForm((prev) => ({ ...prev, drugName: displayName }));
     setDrugSearch(displayName);
     setShowDrugDropdown(false);
   };
 
-  useEffect(() => {
-    const loadItems = async () => {
-      setLoading(true);
-      setMessage("");
+  const groupedRows = useMemo(
+    () => aggregateInventoryRows(inventoryRows, pharmacyNameMap),
+    [inventoryRows, pharmacyNameMap]
+  );
 
-      try {
-        const { data, error } = await supabase
-          .from(SHORTAGE_TABLE)
-          .select("*")
-          .lte("quantity", SHORTAGE_THRESHOLD)
-          .order("quantity", { ascending: true });
+  const shortageRows = useMemo(
+    () => groupedRows.filter((row) => row.status !== "Healthy"),
+    [groupedRows]
+  );
 
-        if (error) {
-          setItems([]);
-          setMessage("Failed to load shortage records.");
-          return;
-        }
+  const filteredRows = useMemo(() => {
+    const q = normalize(searchText).toLowerCase();
 
-        const mapped = (data || []).map(mapDbToUi);
-        setItems(mapped);
-      } catch (err) {
-        setItems([]);
-        setMessage("Failed to load shortage records.");
-      } finally {
-        setLoading(false);
-      }
+    const byStatus = shortageRows.filter((row) => {
+      if (statusFilter === "all") return true;
+      return row.status.toLowerCase() === statusFilter;
+    });
+
+    const byPharmacy = byStatus.filter((row) => {
+      if (pharmacyFilter === "all") return true;
+      return String(row.pharmacyId) === String(pharmacyFilter);
+    });
+
+    if (!q) return byPharmacy;
+
+    return byPharmacy.filter((row) => {
+      const haystack = [
+        row.drugName,
+        row.drugCode,
+        row.pharmacyName,
+        row.batchNo,
+      ]
+        .map((v) => normalize(v).toLowerCase())
+        .join(" ");
+
+      return haystack.includes(q);
+    });
+  }, [shortageRows, statusFilter, pharmacyFilter, searchText]);
+
+  const totals = useMemo(() => {
+    const outOfStock = shortageRows.filter((x) => x.status === "Out of Stock").length;
+    const critical = shortageRows.filter((x) => x.status === "Critical").length;
+    const lowStock = shortageRows.filter((x) => x.status === "Low Stock").length;
+    return { outOfStock, critical, lowStock, total: shortageRows.length };
+  }, [shortageRows]);
+
+  const shortageInsight = useMemo(() => {
+    if (loading || shortageRows.length === 0) return null;
+
+    if (totals.outOfStock > 0) {
+      return {
+        icon: "⚠",
+        tone: "warning",
+        title: "Smart Insight: Out-of-Stock Alert",
+        message: `${totals.outOfStock} item${totals.outOfStock === 1 ? " is" : "s are"} completely out of stock. Immediate procurement is required.`,
+      };
+    }
+
+    if (totals.critical > 0) {
+      return {
+        icon: "⚠",
+        tone: "warning",
+        title: "Smart Insight: Critical Shortage",
+        message: `${totals.critical} critical item${totals.critical === 1 ? " needs" : "s need"} urgent replenishment within the next cycle.`,
+      };
+    }
+
+    return {
+      icon: "ℹ",
+      tone: "info",
+      title: "Smart Insight: Monitor Low Stock",
+      message: `${totals.lowStock} low-stock item${totals.lowStock === 1 ? " is" : "s are"} currently in monitoring range (6-10 units).`,
     };
+  }, [loading, shortageRows, totals]);
 
-    void loadItems();
-  }, []);
+  const getStatusStyle = (status) => {
+    if (status === "Out of Stock") return badgeOutOfStock;
+    if (status === "Critical") return badgeCritical;
+    return badgeLowStock;
+  };
+
+  const getSuggestedQty = (row) => {
+    const gapToThreshold = Math.max(SHORTAGE_THRESHOLD - toNumber(row.quantity), 1);
+    if (row.status === "Out of Stock") return Math.max(gapToThreshold, 10);
+    if (row.status === "Critical") return Math.max(gapToThreshold, 6);
+    return Math.max(gapToThreshold, 3);
+  };
+
+  const createPurchaseRequest = async (row) => {
+    try {
+      const payload = {
+        drug_name: row.drugName,
+        suggested_qty: getSuggestedQty(row),
+        priority: row.status === "Out of Stock" ? "high" : row.status === "Critical" ? "high" : "medium",
+        reason: `Shortage monitor: ${row.status} at ${row.pharmacyName}${row.batchNo ? ` (Batch ${row.batchNo})` : ""}`,
+        status: "pending",
+      };
+
+      const { error } = await supabase.from("purchase_requests").insert([payload]);
+
+      if (error) {
+        setMessage("Failed to create purchase request.");
+        return;
+      }
+
+      setMessage(`Purchase request created for ${row.drugName}.`);
+    } catch {
+      setMessage("Failed to create purchase request.");
+    }
+  };
+
+  const handleRestock = async (row) => {
+    if (!row || row.sourceRowIds.length !== 1) {
+      setMessage("This shortage is grouped from multiple inventory rows. Use Create Request for safe handling.");
+      return;
+    }
+
+    const raw = window.prompt("Enter new stock quantity for this item:", String(row.quantity));
+    if (raw === null) return;
+
+    const newQty = Number(raw);
+    if (!Number.isFinite(newQty) || newQty < 0) return;
+
+    const sourceId = row.sourceRowIds[0];
+    const { error } = await supabase
+      .from(INVENTORY_TABLE)
+      .update({ quantity: newQty })
+      .eq("id", sourceId);
+
+    if (error) {
+      setMessage("Failed to update stock quantity.");
+      return;
+    }
+
+    await loadInventory();
+    setMessage("Stock quantity updated successfully.");
+  };
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -156,7 +364,7 @@ export default function ShortageTracker() {
       };
 
       let insertResult = await supabase
-        .from(SHORTAGE_TABLE)
+        .from(INVENTORY_TABLE)
         .insert(payload)
         .select("*")
         .single();
@@ -167,28 +375,21 @@ export default function ShortageTracker() {
         if (createdByMissing) {
           const { created_by, ...fallbackPayload } = payload;
           insertResult = await supabase
-            .from(SHORTAGE_TABLE)
+            .from(INVENTORY_TABLE)
             .insert(fallbackPayload)
             .select("*")
             .single();
         }
       }
 
-      const { error } = insertResult;
-      if (error) {
+      if (insertResult.error) {
         setMessage("Failed to record shortage item.");
         return;
       }
 
-      // Refresh low-stock list
-      const { data: refreshed } = await supabase
-        .from(SHORTAGE_TABLE)
-        .select("*")
-        .lte("quantity", SHORTAGE_THRESHOLD)
-        .order("quantity", { ascending: true });
-      setItems((refreshed || []).map(mapDbToUi));
+      await loadInventory();
       setMessage("Shortage item recorded successfully.");
-    } catch (err) {
+    } catch {
       setMessage("Failed to record shortage item.");
       return;
     }
@@ -197,220 +398,73 @@ export default function ShortageTracker() {
     setDrugSearch("");
   };
 
-  const handleRestock = async (id) => {
-    const raw = window.prompt("Enter new stock quantity for this item:", "0");
-    if (raw === null) return;
-    const newQty = Number(raw);
-    if (!Number.isFinite(newQty) || newQty < 0) return;
-
-    const { error } = await supabase
-      .from(SHORTAGE_TABLE)
-      .update({ quantity: newQty })
-      .eq("id", id);
-
-    if (error) {
-      setMessage("Failed to update stock quantity.");
-      return;
-    }
-
-    // Refresh list (restocked items above threshold disappear from the shortage view)
-    const { data: refreshed } = await supabase
-      .from(SHORTAGE_TABLE)
-      .select("*")
-      .lte("quantity", SHORTAGE_THRESHOLD)
-      .order("quantity", { ascending: true });
-    setItems((refreshed || []).map(mapDbToUi));
-  };
-
-  const totals = useMemo(() => {
-    const outOfStock = items.filter((x) => x.quantity === 0).length;
-    const critical = items.filter((x) => x.quantity > 0 && x.quantity <= 5).length;
-    const lowStock = items.filter((x) => x.quantity > 5 && x.quantity <= SHORTAGE_THRESHOLD).length;
-    return { outOfStock, critical, lowStock, total: items.length };
-  }, [items]);
-
-  const shortageInsight = useMemo(() => {
-    if (loading || items.length === 0) return null;
-
-    const outOfStockItems = items.filter((item) => item.quantity === 0);
-    if (outOfStockItems.length === 0) return null;
-
-    const mostUrgent = outOfStockItems[0];
-
-    return {
-      icon: "⚠",
-      tone: "warning",
-      title: "Smart Insight: Stock Depletion Alert",
-      message: `${outOfStockItems.length} item${outOfStockItems.length === 1 ? "" : "s"} completely out of stock. Urgent restocking required — starting with ${mostUrgent?.drugName || "unknown drug"}.`,
-    };
-  }, [items, loading]);
-
-  const getStatusStyle = (qty) => {
-    if (qty === 0) return badgeOutOfStock;
-    if (qty <= 5) return badgeCritical;
-    return badgeLowStock;
-  };
-
-  const getStatusLabel = (qty) => {
-    if (qty === 0) return "Out of Stock";
-    if (qty <= 5) return "Critical";
-    return "Low Stock";
-  };
-
   return (
     <div>
-      {/* Page header */}
       <div style={pageHeaderRow}>
-        <div>
-          <h1 style={pageTitle}>Shortage Tracker</h1>
-          <p style={pageSub}>Monitor low-stock and out-of-stock drugs across all pharmacies (from pharmacy_inventory).</p>
-        </div>
+        <PageHeader
+          title="Shortage Tracker"
+          subtitle="Smart shortage monitoring from pharmacy inventory with deduplicated operational view."
+          style={{ marginTop: 0, marginBottom: 0 }}
+        />
       </div>
 
-      {/* KPI strip */}
       <div style={cardsGrid}>
-        <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
-          <div style={statLabel}>Out of Stock</div>
-          <div style={statValue}>{totals.outOfStock}</div>
-          <div style={statHint}>Zero units available</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
-          <div style={statLabel}>Critical (1–5)</div>
-          <div style={statValue}>{totals.critical}</div>
-          <div style={statHint}>Urgent restock needed</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
-          <div style={statLabel}>Low Stock (6–10)</div>
-          <div style={statValue}>{totals.lowStock}</div>
-          <div style={statHint}>Monitor closely</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #8b5cf6" }}>
-          <div style={statLabel}>Total Shortage Items</div>
-          <div style={statValue}>{totals.total}</div>
-          <div style={statHint}>From pharmacy_inventory</div>
-        </div>
+        <MetricCard
+          className="ui-hover-lift"
+          accent="danger"
+          icon="OUT"
+          label="Out of Stock"
+          value={totals.outOfStock}
+          helper="Qty <= 0"
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="warning"
+          icon="CRIT"
+          label="Critical (1-5)"
+          value={totals.critical}
+          helper="Urgent restock needed"
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="info"
+          icon="LOW"
+          label="Low Stock (6-10)"
+          value={totals.lowStock}
+          helper="Monitor closely"
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="neutral"
+          icon="TOTAL"
+          label="Total Shortage Items"
+          value={totals.total}
+          helper="Deduplicated monitor rows"
+        />
       </div>
 
-      {/* Add form */}
-      <div style={formCard}>
-        <h2 style={sectionTitle}>Add Shortage Request</h2>
-
-        {message && (
-          <div
-            style={
-              message.toLowerCase().includes("success")
-                ? messageBoxSuccess
-                : message.toLowerCase().includes("fail") ||
-                    message.toLowerCase().includes("error")
-                  ? messageBoxError
-                  : messageBox
-            }
-          >
-            {message}
-          </div>
-        )}
-
-        <form onSubmit={handleAdd} style={formGrid}>
-          <div style={drugSearchContainer}>
-            <div style={fieldLabel}>Search Drug</div>
-            <input
-              style={input}
-              placeholder="Search by brand, generic, strength…"
-              value={drugSearch}
-              onChange={(e) => {
-                setDrugSearch(e.target.value);
-                handleChange("drugName", e.target.value);
-              }}
-              onFocus={() => setShowDrugDropdown(true)}
-            />
-            {showDrugDropdown && filteredDrugs.length > 0 && (
-              <div style={drugDropdown}>
-                {filteredDrugs.map((drug, idx) => (
-                  <div
-                    key={idx}
-                    style={drugOption}
-                    onClick={() => handleDrugSelect(drug)}
-                  >
-                    {drug.brand_name ? `${drug.brand_name}` : drug.generic_name}
-                    {drug.strength && ` (${drug.strength})`}
-                  </div>
-                ))}
-              </div>
-            )}
-            {drugSearch && filteredDrugs.length === 0 && showDrugDropdown && (
-              <div style={drugDropdownEmpty}>No matching drugs found</div>
-            )}
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Drug Name *</div>
-            <input
-              style={input}
-              placeholder="Drug name"
-              value={form.drugName}
-              onChange={(e) => handleChange("drugName", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Pharmacy *</div>
-            <select
-              style={input}
-              value={form.pharmacyId}
-              onChange={(e) => handleChange("pharmacyId", e.target.value)}
-              required
-            >
-              <option value="">-- Select Pharmacy --</option>
-              {pharmacies.map((p) => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Current Stock Qty</div>
-            <input
-              style={input}
-              type="number"
-              placeholder="e.g. 0"
-              value={form.quantity}
-              onChange={(e) => handleChange("quantity", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Batch No.</div>
-            <input
-              style={input}
-              placeholder="e.g. BATCH-10001"
-              value={form.batchNo}
-              onChange={(e) => handleChange("batchNo", e.target.value)}
-            />
-          </div>
-
-          <div>
-            <div style={fieldLabel}>Expiry Date</div>
-            <input
-              style={input}
-              type="date"
-              value={form.expiryDate}
-              onChange={(e) => handleChange("expiryDate", e.target.value)}
-            />
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <button type="submit" style={primaryBtn}>
-              Record Shortage Item
-            </button>
-          </div>
-        </form>
-      </div>
-
-      {/* Table */}
       <div style={tableCard}>
-        <h2 style={sectionTitle}>Low-Stock &amp; Out-of-Stock Items</h2>
+        <div style={tableHeaderRow}>
+          <h2 style={sectionTitleNoBorder}>Smart Shortage Monitor</h2>
+          <div style={filtersWrap}>
+            {[
+              { key: "all", label: "All" },
+              { key: "out of stock", label: "Out of Stock" },
+              { key: "critical", label: "Critical" },
+              { key: "low stock", label: "Low Stock" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                style={statusFilter === tab.key ? filterTabActive : filterTab}
+                className="fm-action-btn"
+                onClick={() => setStatusFilter(tab.key)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
 
         {shortageInsight && (
           <InsightCard
@@ -418,9 +472,30 @@ export default function ShortageTracker() {
             tone={shortageInsight.tone}
             title={shortageInsight.title}
             message={shortageInsight.message}
-            style={{ marginTop: -2 }}
+            style={{ marginBottom: 14 }}
           />
         )}
+
+        <div style={searchRow}>
+          <input
+            style={searchInput}
+            placeholder="Search by drug, code, pharmacy, or batch"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+          <select
+            style={pharmacySelect}
+            value={pharmacyFilter}
+            onChange={(e) => setPharmacyFilter(e.target.value)}
+          >
+            <option value="all">All Pharmacies</option>
+            {pharmacies.map((p) => (
+              <option key={p.id} value={String(p.id)}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div style={tableWrap}>
           <table style={table}>
@@ -439,49 +514,193 @@ export default function ShortageTracker() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan="7" style={emptyCell}>
-                    Loading shortage data…
-                  </td>
+                  <td colSpan="7" style={emptyCell}>Loading shortage data...</td>
                 </tr>
               )}
 
-              {items.map((item, idx) => (
+              {!loading && filteredRows.map((row, idx) => (
                 <tr
-                  key={item.id}
+                  key={row.groupKey}
+                  className="fm-table-row"
                   style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
                 >
-                  <td style={{ ...td, fontWeight: 700 }}>{item.drugName}</td>
-                  <td style={{ ...td, color: "#64748b" }}>
-                    {pharmacyNameMap.get(item.pharmacyId) || "Unknown Pharmacy"}
+                  <td style={{ ...td, fontWeight: 700 }}>
+                    <div>{row.drugName || "Unnamed Drug"}</div>
+                    {row.drugCode ? <div style={subMeta}>Code: {row.drugCode}</div> : null}
                   </td>
-                  <td style={td}>{item.quantity}</td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.batchNo || "-"}</td>
-                  <td style={{ ...td, color: "#64748b" }}>{item.expiryDate || "-"}</td>
+                  <td style={{ ...td, color: "#64748b" }}>{row.pharmacyName}</td>
+                  <td style={td}>{row.quantity}</td>
+                  <td style={{ ...td, color: "#64748b" }}>{row.batchNo || "-"}</td>
+                  <td style={{ ...td, color: "#64748b" }}>{row.expiryDate || "-"}</td>
                   <td style={td}>
-                    <span style={getStatusStyle(item.quantity)}>{getStatusLabel(item.quantity)}</span>
-                  </td>
-                  <td style={td}>
-                    <button
-                      style={smallBtnRestock}
-                      onClick={() => handleRestock(item.id)}
-                      type="button"
+                    <StatusPill
+                      variant={
+                        row.status === "Out of Stock"
+                          ? "danger"
+                          : row.status === "Critical"
+                          ? "warning"
+                          : "info"
+                      }
+                      style={getStatusStyle(row.status)}
                     >
-                      Restock
-                    </button>
+                      {row.status}
+                    </StatusPill>
+                  </td>
+                  <td style={td}>
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <button
+                        style={smallBtnRequest}
+                        className="fm-action-btn"
+                        onClick={() => createPurchaseRequest(row)}
+                        type="button"
+                      >
+                        Create Request
+                      </button>
+                      <button
+                        style={smallBtnRestock}
+                        className="fm-action-btn"
+                        onClick={() => handleRestock(row)}
+                        type="button"
+                      >
+                        Restock
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
 
-              {!loading && items.length === 0 && (
+              {!loading && filteredRows.length === 0 && (
                 <tr>
                   <td colSpan="7" style={emptyCell}>
-                    No low-stock items found. All drugs are above the threshold ({SHORTAGE_THRESHOLD} units).
+                    No shortage rows match current filters.
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div style={manualCard}>
+        <div style={manualHeader}>
+          <h2 style={sectionTitleNoBorder}>Manual Shortage Entry (Optional)</h2>
+          <button
+            type="button"
+            style={toggleBtn}
+            className="fm-action-btn"
+            onClick={() => setShowManualForm((v) => !v)}
+          >
+            {showManualForm ? "Hide" : "Show"}
+          </button>
+        </div>
+
+        {message && (
+          <div
+            style={
+              message.toLowerCase().includes("success")
+                ? messageBoxSuccess
+                : message.toLowerCase().includes("fail") || message.toLowerCase().includes("error")
+                ? messageBoxError
+                : messageBox
+            }
+          >
+            {message}
+          </div>
+        )}
+
+        {showManualForm && (
+          <form onSubmit={handleAdd} style={formGrid}>
+            <div style={drugSearchContainer}>
+              <div style={fieldLabel}>Search Drug</div>
+              <input
+                style={input}
+                placeholder="Search by brand, generic, strength..."
+                value={drugSearch}
+                onChange={(e) => {
+                  setDrugSearch(e.target.value);
+                  handleChange("drugName", e.target.value);
+                }}
+                onFocus={() => setShowDrugDropdown(true)}
+              />
+              {showDrugDropdown && filteredDrugs.length > 0 && (
+                <div style={drugDropdown}>
+                  {filteredDrugs.map((drug, idx) => (
+                    <div key={idx} style={drugOption} onClick={() => handleDrugSelect(drug)}>
+                      {getDrugDisplayName(drug)}
+                    </div>
+                  ))}
+                </div>
+              )}
+              {drugSearch && filteredDrugs.length === 0 && showDrugDropdown && (
+                <div style={drugDropdownEmpty}>No matching drugs found</div>
+              )}
+            </div>
+
+            <div>
+              <div style={fieldLabel}>Drug Name *</div>
+              <input
+                style={input}
+                placeholder="Drug name"
+                value={form.drugName}
+                onChange={(e) => handleChange("drugName", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <div style={fieldLabel}>Pharmacy *</div>
+              <select
+                style={input}
+                value={form.pharmacyId}
+                onChange={(e) => handleChange("pharmacyId", e.target.value)}
+                required
+              >
+                <option value="">-- Select Pharmacy --</option>
+                {pharmacies.map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div style={fieldLabel}>Current Stock Qty</div>
+              <input
+                style={input}
+                type="number"
+                placeholder="e.g. 0"
+                value={form.quantity}
+                onChange={(e) => handleChange("quantity", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <div style={fieldLabel}>Batch No.</div>
+              <input
+                style={input}
+                placeholder="e.g. BATCH-10001"
+                value={form.batchNo}
+                onChange={(e) => handleChange("batchNo", e.target.value)}
+              />
+            </div>
+
+            <div>
+              <div style={fieldLabel}>Expiry Date</div>
+              <input
+                style={input}
+                type="date"
+                value={form.expiryDate}
+                onChange={(e) => handleChange("expiryDate", e.target.value)}
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <button type="submit" style={primaryBtn} className="fm-action-btn">
+                Record Shortage Item
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -493,7 +712,7 @@ const pageHeaderRow = {
   justifyContent: "space-between",
   gap: "12px",
   marginBottom: "26px",
-  paddingBottom: "22px",
+  paddingBottom: "20px",
   borderBottom: "1px solid #e7eef9",
   flexWrap: "wrap",
 };
@@ -508,8 +727,8 @@ const pageTitle = {
 };
 
 const pageSub = {
-  margin: "6px 0 0",
-  fontSize: "14px",
+  margin: "7px 0 0",
+  fontSize: "14.2px",
   color: "#64748b",
   lineHeight: 1.6,
 };
@@ -517,30 +736,30 @@ const pageSub = {
 const cardsGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  gap: "16px",
-  marginBottom: "24px",
+  gap: "15px",
+  marginBottom: "22px",
 };
 
 const statCard = {
   background: "white",
   borderRadius: "14px",
-  padding: "20px 18px 16px",
+  padding: "19px 17px 15px",
   boxShadow: "0 12px 24px rgba(15,23,42,0.06)",
   border: "1px solid #dbe7f5",
   textAlign: "center",
 };
 
 const statLabel = {
-  fontSize: "10px",
-  color: "#94a3b8",
-  marginBottom: "10px",
+  fontSize: "10.5px",
+  color: "#7f91a8",
+  marginBottom: "8px",
   fontWeight: 700,
-  letterSpacing: "0.08em",
+  letterSpacing: "0.09em",
   textTransform: "uppercase",
 };
 
 const statValue = {
-  fontSize: "34px",
+  fontSize: "32px",
   fontWeight: 800,
   color: "#0f172a",
   letterSpacing: "-0.02em",
@@ -548,36 +767,221 @@ const statValue = {
 };
 
 const statHint = {
-  marginTop: "8px",
-  fontSize: "11px",
-  color: "#94a3b8",
-  lineHeight: 1.4,
+  marginTop: "7px",
+  fontSize: "11.5px",
+  color: "#71839a",
 };
 
-const formCard = {
+const tableCard = {
   background: "white",
   borderRadius: "14px",
-  padding: "24px 26px",
-  boxShadow: "0 14px 28px rgba(15,23,42,0.06)",
+  padding: "19px 19px 17px",
+  boxShadow: "0 12px 24px rgba(15,23,42,0.06)",
   border: "1px solid #dbe7f5",
-  marginBottom: "22px",
+  marginBottom: "18px",
 };
 
-const sectionTitle = {
+const tableHeaderRow = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "8px",
+  marginBottom: "8px",
+  flexWrap: "wrap",
+};
+
+const sectionTitleNoBorder = {
   marginTop: 0,
-  marginBottom: "16px",
+  marginBottom: 0,
   color: "#0f172a",
-  fontSize: "16px",
+  fontSize: "17px",
   fontWeight: 800,
   letterSpacing: "-0.01em",
-  paddingBottom: "12px",
-  borderBottom: "1px solid #f1f5f9",
+};
+
+const filtersWrap = {
+  display: "flex",
+  gap: "7px",
+  flexWrap: "wrap",
+};
+
+const filterTab = {
+  padding: "7px 12px",
+  borderRadius: "9px",
+  border: "1px solid #dbe7f5",
+  background: "#f7fbff",
+  color: "#334155",
+  cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 700,
+  boxShadow: "0 3px 8px rgba(15, 23, 42, 0.03)",
+};
+
+const filterTabActive = {
+  ...filterTab,
+  border: "1px solid #1d4ed8",
+  background: "#1d4ed8",
+  color: "#fff",
+};
+
+const searchRow = {
+  display: "grid",
+  gridTemplateColumns: "1fr minmax(200px, 280px)",
+  gap: "11px",
+  marginBottom: "12px",
+};
+
+const searchInput = {
+  width: "100%",
+  padding: "10px 13px",
+  borderRadius: "11px",
+  border: "1px solid #cad8ea",
+  fontSize: "14px",
+  color: "#0f172a",
+  background: "#fff",
+};
+
+const pharmacySelect = {
+  ...searchInput,
+  background: "#fff",
+};
+
+const tableWrap = {
+  overflowX: "auto",
+  borderRadius: "12px",
+  border: "1px solid #dbe7f5",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9)",
+};
+
+const table = {
+  width: "100%",
+  borderCollapse: "separate",
+  borderSpacing: 0,
+};
+
+const th = {
+  textAlign: "left",
+  padding: "11px 13px",
+  background: "#f8fbff",
+  borderBottom: "1px solid #dbe7f5",
+  color: "#64748b",
+  fontSize: "10.5px",
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+};
+
+const td = {
+  padding: "12px 13px",
+  borderBottom: "1px solid #edf2fa",
+  color: "#0f172a",
+  fontSize: "13.2px",
+  verticalAlign: "middle",
+};
+
+const subMeta = {
+  marginTop: "2px",
+  fontSize: "11px",
+  color: "#64748b",
+};
+
+const badgeBase = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: "999px",
+  fontSize: "11px",
+  fontWeight: 700,
+  letterSpacing: "0.04em",
+};
+
+const badgeOutOfStock = {
+  ...badgeBase,
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+};
+
+const badgeCritical = {
+  ...badgeBase,
+  background: "#fef3c7",
+  color: "#92400e",
+  border: "1px solid #fde68a",
+};
+
+const badgeLowStock = {
+  ...badgeBase,
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  border: "1px solid #bfdbfe",
+};
+
+const smallBtnRestock = {
+  padding: "6px 11px",
+  border: "1px solid #bbf7d0",
+  borderRadius: "9px",
+  cursor: "pointer",
+  fontSize: "11.5px",
+  fontWeight: 700,
+  background: "#dcfce7",
+  color: "#166534",
+  boxShadow: "0 4px 10px rgba(22, 101, 52, 0.1)",
+};
+
+const smallBtnRequest = {
+  padding: "6px 11px",
+  border: "1px solid #bfdbfe",
+  borderRadius: "9px",
+  cursor: "pointer",
+  fontSize: "11.5px",
+  fontWeight: 700,
+  background: "#eff6ff",
+  color: "#1d4ed8",
+  boxShadow: "0 4px 10px rgba(29, 78, 216, 0.12)",
+};
+
+const emptyCell = {
+  padding: "28px 20px",
+  textAlign: "center",
+  color: "#94a3b8",
+  fontSize: "14px",
+  background: "#f8fafc",
+};
+
+const manualCard = {
+  background: "white",
+  borderRadius: "14px",
+  padding: "18px 19px",
+  boxShadow: "0 12px 24px rgba(15,23,42,0.06)",
+  border: "1px solid #dbe7f5",
+};
+
+const manualHeader = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "8px",
+  marginBottom: "10px",
+  flexWrap: "wrap",
+};
+
+const toggleBtn = {
+  padding: "7px 12px",
+  borderRadius: "9px",
+  border: "1px solid #d4dfef",
+  background: "#f8fbff",
+  color: "#334155",
+  fontSize: "12px",
+  fontWeight: 700,
+  cursor: "pointer",
+  boxShadow: "0 4px 10px rgba(15, 23, 42, 0.04)",
 };
 
 const formGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-  gap: "14px",
+  gap: "13px",
 };
 
 const fieldLabel = {
@@ -590,7 +994,7 @@ const fieldLabel = {
 };
 
 const messageBox = {
-  marginBottom: "14px",
+  marginBottom: "12px",
   padding: "11px 14px",
   borderRadius: "10px",
   background: "#eff6ff",
@@ -619,15 +1023,13 @@ const messageBoxError = {
 
 const input = {
   width: "100%",
-  padding: "10px 12px",
+  padding: "10px 13px",
   fontSize: "14px",
-  borderRadius: "10px",
-  border: "1px solid #d4dfef",
+  borderRadius: "11px",
+  border: "1px solid #cad8ea",
   boxSizing: "border-box",
-  fontFamily: "'Segoe UI', Arial, sans-serif",
   color: "#0f172a",
   background: "#fff",
-  boxShadow: "0 2px 6px rgba(15, 23, 42, 0.03)",
 };
 
 const drugSearchContainer = {
@@ -669,108 +1071,14 @@ const drugDropdownEmpty = {
 };
 
 const primaryBtn = {
-  padding: "10px 22px",
+  padding: "10px 21px",
   background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)",
   color: "white",
   border: "none",
-  borderRadius: "10px",
+  borderRadius: "11px",
   cursor: "pointer",
   fontSize: "14px",
   fontWeight: 700,
   letterSpacing: "0.01em",
-  boxShadow: "0 10px 20px rgba(37,99,235,0.25)",
-};
-
-const tableCard = {
-  background: "white",
-  borderRadius: "14px",
-  padding: "24px 26px",
-  boxShadow: "0 16px 30px rgba(15,23,42,0.06)",
-  border: "1px solid #dbe7f5",
-};
-
-const tableWrap = {
-  overflowX: "auto",
-  borderRadius: "10px",
-  border: "1px solid #dbe7f5",
-};
-
-const table = {
-  width: "100%",
-  borderCollapse: "separate",
-  borderSpacing: 0,
-};
-
-const th = {
-  textAlign: "left",
-  padding: "11px 14px",
-  background: "#f8fbff",
-  borderBottom: "1px solid #dbe7f5",
-  color: "#64748b",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  position: "sticky",
-  top: 0,
-  whiteSpace: "nowrap",
-};
-
-const td = {
-  padding: "11px 14px",
-  borderBottom: "1px solid #edf2fa",
-  color: "#0f172a",
-  fontSize: "13px",
-  verticalAlign: "middle",
-};
-
-const badgeBase = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "4px 10px",
-  borderRadius: "999px",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-};
-
-const badgeOutOfStock = {
-  ...badgeBase,
-  background: "#fee2e2",
-  color: "#991b1b",
-  border: "1px solid #fecaca",
-};
-
-const badgeCritical = {
-  ...badgeBase,
-  background: "#fef3c7",
-  color: "#92400e",
-  border: "1px solid #fde68a",
-};
-
-const badgeLowStock = {
-  ...badgeBase,
-  background: "#dbeafe",
-  color: "#1d4ed8",
-  border: "1px solid #bfdbfe",
-};
-
-const smallBtnRestock = {
-  padding: "5px 12px",
-  border: "1px solid #bbf7d0",
-  borderRadius: "8px",
-  cursor: "pointer",
-  fontSize: "11px",
-  fontWeight: 700,
-  letterSpacing: "0.02em",
-  background: "#dcfce7",
-  color: "#166534",
-};
-
-const emptyCell = {
-  padding: "40px 20px",
-  textAlign: "center",
-  color: "#94a3b8",
-  fontSize: "14px",
-  background: "#f8fafc",
+  boxShadow: "0 10px 18px rgba(37,99,235,0.24)",
 };

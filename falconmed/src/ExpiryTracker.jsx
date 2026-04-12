@@ -8,6 +8,7 @@ import {
   searchDrugMaster,
 } from "./utils/drugMasterLoader";
 import { loadPharmaciesWithFallback } from "./utils/pharmacyData";
+import { ActionButton, MetricCard, PageHeader, StatusPill } from "./ui";
 
 const EXPIRY_TABLE = "pharmacy_inventory";
 
@@ -509,40 +510,55 @@ export default function ExpiryTracker() {
   return (
     <div>
       {/* Page header */}
-      <div style={pageHeaderRow}>
-        <div>
-          <h1 style={pageTitle}>Expiry Tracker</h1>
-          <p style={pageSub}>Monitor stock expiry risk and near-expiry inventory value.</p>
-        </div>
-        <button
-          type="button"
-          style={testBtn}
-          onClick={handleGenerateTestInventory}
-          disabled={generatingTestData || loading}
-          title="TEST ONLY"
-        >
-          {generatingTestData ? "Generating…" : "Generate Test Inventory"}
-        </button>
-      </div>
+      <PageHeader
+        title="Expiry Tracker"
+        subtitle="Monitor stock expiry risk and near-expiry inventory value."
+        style={pageHeaderRow}
+        actions={
+          <ActionButton
+            type="button"
+            variant="secondary"
+            className="fm-action-btn"
+            style={testBtn}
+            onClick={handleGenerateTestInventory}
+            disabled={generatingTestData || loading}
+            title="TEST ONLY"
+          >
+            {generatingTestData ? "Generating..." : "Generate Test Inventory"}
+          </ActionButton>
+        }
+      />
 
       {/* KPI strip */}
       <div style={cardsGrid}>
-        <div style={{ ...statCard, borderTop: "4px solid #3b82f6" }}>
-          <div style={statLabel}>Total Stock Value</div>
-          <div style={statValue}>{totals.totalValue.toLocaleString()} AED</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #f59e0b" }}>
-          <div style={statLabel}>Near Expiry Value</div>
-          <div style={statValue}>{totals.nearExpiryValue.toLocaleString()} AED</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #ef4444" }}>
-          <div style={statLabel}>High Risk Value</div>
-          <div style={statValue}>{totals.highRiskValue.toLocaleString()} AED</div>
-        </div>
-        <div style={{ ...statCard, borderTop: "4px solid #94a3b8" }}>
-          <div style={statLabel}>Expired Value</div>
-          <div style={statValue}>{totals.expiredValue.toLocaleString()} AED</div>
-        </div>
+        <MetricCard
+          className="ui-hover-lift"
+          accent="info"
+          icon="AED"
+          label="Total Stock Value"
+          value={`${totals.totalValue.toLocaleString()} AED`}
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="warning"
+          icon="NEAR"
+          label="Near Expiry Value"
+          value={`${totals.nearExpiryValue.toLocaleString()} AED`}
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="danger"
+          icon="RISK"
+          label="High Risk Value"
+          value={`${totals.highRiskValue.toLocaleString()} AED`}
+        />
+        <MetricCard
+          className="ui-hover-lift"
+          accent="neutral"
+          icon="EXP"
+          label="Expired Value"
+          value={`${totals.expiredValue.toLocaleString()} AED`}
+        />
       </div>
 
       {/* Add form */}
@@ -669,7 +685,7 @@ export default function ExpiryTracker() {
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>
-            <button type="submit" style={primaryBtn}>
+            <button type="submit" style={primaryBtn} className="fm-action-btn">
               Add Item
             </button>
           </div>
@@ -720,6 +736,7 @@ export default function ExpiryTracker() {
                 return (
                   <tr
                     key={item.id}
+                    className="fm-table-row"
                     style={{ background: idx % 2 === 0 ? "#ffffff" : "#f9fafb" }}
                   >
                     <td style={{ ...td, fontWeight: 700 }}>{item.drugName}</td>
@@ -732,7 +749,20 @@ export default function ExpiryTracker() {
                       {pharmacyMap.get(String(item.pharmacyId || "").trim())?.name || "Unknown Pharmacy"}
                     </td>
                     <td style={td}>
-                      <span style={getStatusStyle(status)}>{status}</span>
+                      <StatusPill
+                        variant={
+                          status === "OK"
+                            ? "success"
+                            : status === "Near Expiry"
+                            ? "warning"
+                            : status === "High Risk"
+                            ? "danger"
+                            : "neutral"
+                        }
+                        style={getStatusStyle(status)}
+                      >
+                        {status}
+                      </StatusPill>
                     </td>
                   </tr>
                 );

@@ -45,6 +45,7 @@ export default function DrugSearch() {
   return (
     <div style={page}>
       <section style={heroCard}>
+        <div style={heroEyebrow}>Catalog Intelligence</div>
         <h1 style={title}>Drug Search</h1>
         <p style={subtitle}>
           FalconMed Drug Master - Search by brand, generic, strength, or dosage form
@@ -81,10 +82,16 @@ export default function DrugSearch() {
         </article>
       </section>
 
-      {loading ? <div style={stateText}>Loading drug master...</div> : null}
+      {loading ? (
+        <section style={stateCard}>
+          <div style={stateText}>Loading drug master...</div>
+        </section>
+      ) : null}
 
       {!loading && results.length === 0 ? (
-        <div style={stateText}>No matching medicines found.</div>
+        <section style={stateCard}>
+          <div style={stateText}>No matching medicines found.</div>
+        </section>
       ) : null}
 
       {!loading && results.length > 0 ? (
@@ -154,22 +161,34 @@ const tokens = {
 
 const page = {
   minHeight: "100%",
-  padding: "28px",
+  padding: "30px",
   display: "grid",
-  gap: "18px",
+  gap: "20px",
   background: tokens.bg,
 };
 
 const heroCard = {
   background: tokens.card,
   border: `1px solid ${tokens.border}`,
-  borderRadius: "14px",
-  padding: "20px 22px",
+  borderRadius: "20px",
+  padding: "24px 24px",
+  boxShadow: "0 18px 34px rgba(15, 23, 42, 0.065)",
+  backgroundImage:
+    "radial-gradient(circle at 100% 0%, rgba(37, 99, 235, 0.08), transparent 44%)",
+};
+
+const heroEyebrow = {
+  marginBottom: "8px",
+  fontSize: "10.5px",
+  fontWeight: 800,
+  textTransform: "uppercase",
+  letterSpacing: "0.12em",
+  color: "#61728a",
 };
 
 const title = {
   margin: 0,
-  fontSize: "30px",
+  fontSize: "34px",
   lineHeight: 1.2,
   letterSpacing: "-0.02em",
   color: tokens.text,
@@ -177,19 +196,20 @@ const title = {
 };
 
 const subtitle = {
-  margin: "10px 0 0",
+  margin: "11px 0 0",
   color: tokens.textMuted,
   fontSize: "14px",
-  lineHeight: 1.55,
+  lineHeight: 1.62,
 };
 
 const panelCard = {
   background: tokens.card,
   border: `1px solid ${tokens.border}`,
-  borderRadius: "14px",
-  padding: "18px 18px 14px",
+  borderRadius: "18px",
+  padding: "20px 20px 16px",
   display: "grid",
   gap: "14px",
+  boxShadow: "0 14px 28px rgba(15, 23, 42, 0.055)",
 };
 
 const panelHeaderRow = {
@@ -201,9 +221,9 @@ const panelHeaderRow = {
 
 const panelTitle = {
   margin: 0,
-  fontSize: "17px",
+  fontSize: "18px",
   color: tokens.text,
-  fontWeight: 650,
+  fontWeight: 700,
 };
 
 const searchGrid = {
@@ -227,13 +247,14 @@ const fieldLabel = {
 
 const searchInput = {
   width: "100%",
-  border: `1px solid ${tokens.border}`,
-  borderRadius: "11px",
-  padding: "12px 14px",
+  border: `1px solid #d8e2f0`,
+  borderRadius: "12px",
+  padding: "13px 14px",
   fontSize: "14px",
   color: tokens.text,
   outline: "none",
-  background: "#ffffff",
+  background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
 };
 
 const summaryGrid = {
@@ -245,10 +266,19 @@ const summaryGrid = {
 const summaryCard = {
   background: tokens.card,
   border: `1px solid ${tokens.border}`,
-  borderRadius: "12px",
-  padding: "14px 16px",
+  borderRadius: "14px",
+  padding: "15px 16px",
   display: "grid",
   gap: "7px",
+  boxShadow: "0 10px 20px rgba(15, 23, 42, 0.045)",
+};
+
+const stateCard = {
+  border: `1px dashed #d8e2f0`,
+  borderRadius: "14px",
+  background: "linear-gradient(180deg, #ffffff 0%, #f9fcff 100%)",
+  padding: "16px 18px",
+  boxShadow: "0 8px 18px rgba(15, 23, 42, 0.035)",
 };
 
 const summaryLabel = {
@@ -283,9 +313,10 @@ const stateText = {
 
 const tableWrap = {
   border: `1px solid ${tokens.borderSoft}`,
-  borderRadius: "12px",
+  borderRadius: "14px",
   overflowX: "auto",
   background: "#ffffff",
+  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.9)",
 };
 
 const table = {

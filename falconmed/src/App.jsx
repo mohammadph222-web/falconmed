@@ -13,17 +13,37 @@ import Billing from "./Billing";
 import LabelStudio from "./LabelStudio";
 import RefillTracker from "./RefillTracker";
 
-const NAV_ITEMS = [
-  { page: "dashboard", label: "Dashboard" },
-  { page: "inventory-overview", label: "Inventory Overview" },
-  { page: "drugsearch", label: "Drug Search" },
-  { page: "expiry", label: "Expiry Tracker" },
-  { page: "shortage", label: "Shortage Tracker" },
-  { page: "stock-movement-v1", label: "Stock Movement V1" },
-  { page: "stocktaking", label: "Stocktaking" },
-  { page: "billing", label: "Billing" },
-  { page: "refill", label: "Refill Tracker" },
-  { page: "labels", label: "Labels" },
+const NAV_SECTIONS = [
+  {
+    title: "Overview",
+    items: [
+      { page: "dashboard", label: "Dashboard" },
+      { page: "inventory-overview", label: "Inventory Overview" },
+    ],
+  },
+  {
+    title: "Operations",
+    items: [
+      { page: "stock-movement-v1", label: "Stock Movement" },
+      { page: "stocktaking", label: "Stocktaking" },
+      { page: "billing", label: "Billing" },
+    ],
+  },
+  {
+    title: "Monitoring",
+    items: [
+      { page: "shortage", label: "Shortage Tracker" },
+      { page: "expiry", label: "Expiry Tracker" },
+      { page: "refill", label: "Refill Tracker" },
+    ],
+  },
+  {
+    title: "Tools",
+    items: [
+      { page: "drugsearch", label: "Drug Search" },
+      { page: "labels", label: "Labels" },
+    ],
+  },
 ];
 
 export default function App() {
@@ -78,7 +98,32 @@ export default function App() {
         <div style={sidebarSections}>
           <div style={brandCard}>
             <h2 style={brandTitle}>FalconMed</h2>
-            <p style={brandSub}>Single Pharmacy Professional System v1</p>
+            <p style={brandSub}>Single Pharmacy Professional System</p>
+          </div>
+
+          <div style={navWrap}>
+            {NAV_SECTIONS.map((section) => (
+              <div key={section.title} style={navGroup}>
+                <div style={sectionLabel}>{section.title}</div>
+                <div style={navGroupItems}>
+                  {section.items.map((item) => (
+                    <button
+                      key={item.page}
+                      type="button"
+                      style={page === item.page ? activeNavButton : navButton}
+                      className={
+                        page === item.page
+                          ? "sidebar-nav-button sidebar-nav-button-active"
+                          : "sidebar-nav-button"
+                      }
+                      onClick={() => setPage(item.page)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
 
           <div style={userCard}>
@@ -93,24 +138,6 @@ export default function App() {
               Sign out
             </button>
           </div>
-
-          <div style={navWrap}>
-            {NAV_ITEMS.map((item) => (
-              <button
-                key={item.page}
-                type="button"
-                style={page === item.page ? activeNavButton : navButton}
-                className={
-                  page === item.page
-                    ? "sidebar-nav-button sidebar-nav-button-active"
-                    : "sidebar-nav-button"
-                }
-                onClick={() => setPage(item.page)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
         </div>
 
         <div style={sidebarFooter}>FalconMed v1.0</div>
@@ -124,22 +151,22 @@ export default function App() {
 const layout = {
   display: "flex",
   minHeight: "100vh",
-  background: "#f3f6fb",
-  fontFamily: "'Plus Jakarta Sans', 'Segoe UI', sans-serif",
+  background: "#f8fafc",
+  fontFamily: "'Plus Jakarta Sans', 'Segoe UI', system-ui, sans-serif",
 };
 
 const sidebar = {
-  width: "280px",
-  minWidth: "280px",
-  background: "linear-gradient(180deg, #162c44 0%, #19334f 100%)",
-  color: "#f8fafc",
-  borderRight: "1px solid #2d465f",
-  padding: "17px 15px 14px",
+  width: "272px",
+  minWidth: "272px",
+  background: "#0f172a",
+  color: "#cbd5e1",
+  borderRight: "1px solid #1e293b",
+  padding: "16px 14px 14px",
   boxSizing: "border-box",
   display: "flex",
   flexDirection: "column",
   justifyContent: "space-between",
-  gap: "14px",
+  gap: "12px",
 };
 
 const sidebarSections = {
@@ -148,87 +175,130 @@ const sidebarSections = {
 };
 
 const brandCard = {
-  border: "1px solid rgba(170, 199, 229, 0.16)",
-  borderRadius: "12px",
-  background: "rgba(14, 35, 60, 0.2)",
-  padding: "12px 13px",
+  borderRadius: "14px",
+  background: "linear-gradient(180deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.03) 100%)",
+  border: "1px solid rgba(148, 163, 184, 0.24)",
+  padding: "13px 14px",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
 };
 
 const brandTitle = {
   margin: 0,
-  fontSize: "23px",
-  fontWeight: 750,
+  fontSize: "20px",
+  fontWeight: 800,
+  color: "#f1f5f9",
+  letterSpacing: "-0.02em",
 };
 
 const brandSub = {
-  marginTop: "5px",
+  marginTop: "4px",
   marginBottom: 0,
-  color: "#b9cde2",
+  color: "#94a3b8",
   fontSize: "11px",
+  lineHeight: 1.4,
 };
 
 const userCard = {
-  border: "1px solid rgba(170, 199, 229, 0.14)",
+  marginTop: "4px",
+  border: "1px solid rgba(148, 163, 184, 0.20)",
   borderRadius: "12px",
-  background: "rgba(14, 35, 60, 0.17)",
-  padding: "12px 13px",
+  background: "rgba(15, 23, 42, 0.28)",
+  padding: "11px 12px",
 };
 
 const userLabel = {
   fontSize: "10px",
-  color: "#95aac0",
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.08em",
+  color: "#94a3b8",
 };
 
 const userEmail = {
-  marginTop: "7px",
-  fontSize: "13px",
+  marginTop: "5px",
+  fontSize: "12px",
+  color: "#e2e8f0",
+  wordBreak: "break-all",
+  lineHeight: 1.45,
 };
 
 const signOutButton = {
-  marginTop: "11px",
+  marginTop: "8px",
   width: "100%",
   borderRadius: "9px",
-  border: "1px solid #476784",
-  background: "#325674",
-  color: "#f8fafc",
-  padding: "7px 10px",
+  border: "1px solid #334155",
+  background: "rgba(15, 23, 42, 0.35)",
+  color: "#cbd5e1",
+  padding: "8px 10px",
   cursor: "pointer",
+  fontSize: "12px",
+  fontWeight: 700,
+  boxShadow: "0 4px 10px rgba(2, 6, 23, 0.24)",
 };
 
 const navWrap = {
-  marginTop: "2px",
+  marginTop: "3px",
+  display: "grid",
+  gap: "13px",
+};
+
+const navGroup = {
+  display: "grid",
+  gap: "8px",
+};
+
+const sectionLabel = {
+  fontSize: "10px",
+  color: "#7c8da3",
+  textTransform: "uppercase",
+  letterSpacing: "0.1em",
+  fontWeight: 700,
+  padding: "0 3px",
+};
+
+const navGroupItems = {
   display: "grid",
   gap: "6px",
+  borderTop: "1px solid rgba(148, 163, 184, 0.12)",
+  paddingTop: "8px",
 };
 
 const navButton = {
-  border: "1px solid rgba(170, 199, 229, 0.1)",
-  borderRadius: "9px",
-  background: "rgba(14, 35, 60, 0.1)",
-  color: "#cfe1f4",
-  padding: "8px 10px",
+  border: "1px solid rgba(148, 163, 184, 0.10)",
+  borderRadius: "10px",
+  background: "transparent",
+  color: "#cbd5e1",
+  padding: "8px 11px",
   textAlign: "left",
-  fontSize: "12.5px",
+  fontSize: "12px",
+  fontWeight: 600,
   cursor: "pointer",
+  boxShadow: "none",
+  transition: "background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease",
 };
 
 const activeNavButton = {
   ...navButton,
-  border: "1px solid #8cb4d5",
-  background: "linear-gradient(135deg, #35668f 0%, #3f729d 100%)",
-  color: "#f6fbff",
+  border: "1px solid rgba(59, 130, 246, 0.65)",
+  background: "linear-gradient(180deg, rgba(37, 99, 235, 0.28) 0%, rgba(37, 99, 235, 0.16) 100%)",
+  color: "#ffffff",
+  fontWeight: 700,
+  boxShadow: "inset 3px 0 0 #3b82f6, 0 8px 14px rgba(15, 23, 42, 0.3)",
 };
 
 const sidebarFooter = {
-  color: "#c1d2e4",
-  fontSize: "11px",
+  color: "#74869d",
+  fontSize: "10.5px",
   textAlign: "center",
+  paddingTop: "10px",
+  borderTop: "1px solid rgba(148, 163, 184, 0.18)",
 };
 
 const main = {
   flex: 1,
   minWidth: 0,
-  padding: "24px",
+  padding: "30px 30px 42px",
+  background: "#f8fafc",
 };
 
 const sessionShell = {

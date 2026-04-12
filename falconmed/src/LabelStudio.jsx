@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { loadDrugMaster } from "./utils/drugMasterLoader";
+import { ActionButton, PageHeader, SectionCard } from "./ui";
 
 function formatToday() {
   const now = new Date();
@@ -52,34 +53,22 @@ function initialForm() {
 }
 
 function buildQrPayload(form) {
-  return {
-    patientName: form.patientName,
-    mrn: form.mrn,
-    age: form.age,
-    sex: form.sex,
-    rxNumber: form.rxNumber,
-    doctorName: form.doctorName,
-    brandName: form.brandName,
-    genericName: form.genericName,
-    strength: form.strength,
-    dosageForm: form.dosageForm,
-    directions: form.directions,
-    quantity: form.quantity,
-    duration: form.duration,
-    route: form.route,
-    frequency: form.frequency,
-    dispenseDate: form.dispenseDate,
-    pharmacist: form.pharmacist,
-    pharmacyName: form.pharmacyName,
-    pharmacyPhone: form.pharmacyPhone,
-    pharmacyAddress: form.pharmacyAddress,
-    keepOutOfReach: form.keepOutOfReach,
-    storageInstruction: form.storageInstruction,
-    auxiliaryWarning: form.auxiliaryWarning,
-  };
-}
+  const rx = text(form.rxNumber);
+  const patient = text(form.patientName);
+  const drug = text(form.brandName) || text(form.genericName);
+  const directions = text(form.directions);
+  const date = text(form.dispenseDate) || formatToday();
 
-const LABEL_SIZES = {
+  const lines = [
+    rx ? `RX:${rx}` : "",
+    patient ? `PT:${patient}` : "",
+    drug ? `DR:${drug}` : "",
+    directions ? `SIG:${directions.slice(0,40)}` : "",
+    `DT:${date}`,
+  ].filter(Boolean);
+
+  return lines.join("|");
+}const LABEL_SIZES = {
   "50x30": {
     key: "50x30",
     name: "Small Thermal 50 × 30 mm",
@@ -219,11 +208,14 @@ export default function LabelStudio() {
 
     async function generateQR() {
       try {
-        const payload = JSON.stringify(qrPayload);
-        const url = await QRCode.toDataURL(payload, {
-          width: Math.max(activeSize.qr * 2, 120),
-          margin: 1,
+        const url = await QRCode.toDataURL(qrPayload, {
+          width: Math.max(activeSize.qr * 4, 220),
+          margin: 4,
           errorCorrectionLevel: "M",
+          color: {
+            dark: "#000000",
+            light: "#FFFFFF",
+          },
         });
 
         if (active) {
@@ -236,7 +228,7 @@ export default function LabelStudio() {
       }
     }
 
-    if (form.showQr) {
+    if (form.showQr && text(qrPayload)) {
       void generateQR();
     } else {
       setQrDataUrl("");
@@ -406,8 +398,8 @@ export default function LabelStudio() {
     width: `${activeSize.widthPx}px`,
     maxWidth: `${activeSize.widthPx}px`,
     minHeight: `${activeSize.minHeightPx}px`,
-    padding: `${activeSize.padding}px`,
-    borderRadius: "8px",
+    padding: `${activeSize.padding + 1}px`,
+    borderRadius: "9px",
   };
 
   const pharmacyNameStyle = {
@@ -457,22 +449,26 @@ export default function LabelStudio() {
 
   const qrImageStyle = {
     ...qrImage,
-    width: `${activeSize.qr + 6}px`,
-    height: `${activeSize.qr + 6}px`,
+    width: `${Math.max(activeSize.qr + 28, 96)}px`,
+    height: `${Math.max(activeSize.qr + 28, 96)}px`,
   };
 
   return (
     <div style={pageWrap}>
       <div style={headerCard}>
-        <h2 style={title}>Pharmacy Label Generator</h2>
-        <p style={subtitle}>
-          Professional thermal label workflow for dispensing and patient safety.
-        </p>
+        <PageHeader
+          title="Pharmacy Label Generator"
+          subtitle="Professional thermal label workflow for dispensing and patient safety."
+          style={{ marginTop: 0, marginBottom: 0 }}
+        />
       </div>
 
       <div style={layoutGrid}>
-        <div style={formCard}>
-          <h3 style={sectionTitle}>Label Form</h3>
+        <SectionCard
+          title="Label Form"
+          style={formCard}
+          bodyStyle={{ display: "grid", gap: 0 }}
+        >
 
           <div style={groupBlock}>
             <div style={groupTitle}>Drug Search</div>
@@ -777,13 +773,22 @@ export default function LabelStudio() {
             </div>
           </div>
 
-          <button type="button" style={printButton} onClick={handlePrintLabel}>
+          <ActionButton
+            type="button"
+            variant="primary"
+            style={printButton}
+            className="fm-action-btn"
+            onClick={handlePrintLabel}
+          >
             Print Label
-          </button>
-        </div>
+          </ActionButton>
+        </SectionCard>
 
-        <div style={previewCard}>
-          <h3 style={sectionTitle}>Label Preview</h3>
+        <SectionCard
+          title="Label Preview"
+          style={previewCard}
+          bodyStyle={{ display: "grid", gap: 0 }}
+        >
           <p style={previewHint}>
             Thermal layout updates automatically based on selected size.
           </p>
@@ -909,7 +914,7 @@ export default function LabelStudio() {
               </div>
             ) : null}
           </div>
-        </div>
+        </SectionCard>
       </div>
     </div>
   );
@@ -917,15 +922,15 @@ export default function LabelStudio() {
 
 const pageWrap = {
   display: "grid",
-  gap: "16px",
+  gap: "18px",
 };
 
 const headerCard = {
   background: "#ffffff",
   border: "1px solid #e2e8f0",
-  borderRadius: "16px",
+  borderRadius: "18px",
   padding: "20px 22px",
-  boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)",
+  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)",
 };
 
 const title = {
@@ -953,8 +958,8 @@ const formCard = {
   background: "#ffffff",
   border: "1px solid #e2e8f0",
   borderRadius: "16px",
-  padding: "18px",
-  boxShadow: "0 10px 26px rgba(15, 23, 42, 0.07)",
+  padding: "17px",
+  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)",
 };
 
 const previewCard = {
@@ -962,7 +967,7 @@ const previewCard = {
   border: "1px solid #e2e8f0",
   borderRadius: "16px",
   padding: "18px",
-  boxShadow: "0 10px 26px rgba(15, 23, 42, 0.07)",
+  boxShadow: "0 12px 24px rgba(15, 23, 42, 0.06)",
 };
 
 const sectionTitle = {
@@ -983,7 +988,7 @@ const previewHint = {
 const groupBlock = {
   border: "1px solid #e9eef5",
   borderRadius: "12px",
-  padding: "12px",
+  padding: "13px",
   marginBottom: "12px",
   background: "#fcfdff",
 };
@@ -1051,12 +1056,12 @@ const printButton = {
   border: "1px solid #0f4c81",
   background: "linear-gradient(135deg, #0f4c81 0%, #166091 100%)",
   color: "#ffffff",
-  borderRadius: "10px",
-  padding: "10px 14px",
+  borderRadius: "11px",
+  padding: "10px 16px",
   fontWeight: 700,
   fontSize: "14px",
   cursor: "pointer",
-  boxShadow: "0 10px 20px rgba(15, 76, 129, 0.25)",
+  boxShadow: "0 10px 18px rgba(15, 76, 129, 0.24)",
 };
 
 const labelPaper = {
@@ -1064,7 +1069,7 @@ const labelPaper = {
   border: "1px solid #111827",
   background: "#ffffff",
   color: "#0f172a",
-  boxShadow: "0 8px 20px rgba(15, 23, 42, 0.08)",
+  boxShadow: "0 10px 22px rgba(15, 23, 42, 0.09)",
   overflow: "hidden",
   fontFamily: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
 };
@@ -1073,7 +1078,7 @@ const topRow = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "flex-start",
-  gap: "10px",
+  gap: "12px",
 };
 
 const pharmacyName = {
@@ -1097,19 +1102,19 @@ const rxBadge = {
 
 const compactBadge = {
   display: "inline-block",
-  border: "1px solid #bfdbfe",
-  background: "#eff6ff",
-  color: "#0f172a",
+  border: "1px solid #b8d3f3",
+  background: "#f1f7ff",
+  color: "#11253c",
   borderRadius: "999px",
-  padding: "4px 8px",
+  padding: "4px 9px",
   fontWeight: 700,
   whiteSpace: "nowrap",
 };
 
 const divider = {
   height: "1px",
-  background: "#d1dbe8",
-  margin: "8px 0",
+  background: "#d4deea",
+  margin: "9px 0",
 };
 
 const patientRow = {
@@ -1127,18 +1132,19 @@ const kvLine = {
 };
 
 const drugHeadline = {
-  margin: "2px 0 0",
-  lineHeight: 1.04,
+  margin: "3px 0 0",
+  lineHeight: 1.08,
   fontWeight: 900,
-  letterSpacing: "-0.012em",
-  color: "#0f172a",
+  letterSpacing: "-0.015em",
+  color: "#0b1628",
   wordBreak: "break-word",
+  textWrap: "balance",
 };
 
 const genericLine = {
-  margin: "4px 0 0",
-  color: "#334155",
-  lineHeight: 1.25,
+  margin: "5px 0 0",
+  color: "#3a4d65",
+  lineHeight: 1.28,
   wordBreak: "break-word",
 };
 
@@ -1151,56 +1157,58 @@ const drugMetaRow = {
 };
 
 const directionsBox = {
-  border: "1px solid #d4deea",
-  background: "#f8fafc",
-  borderRadius: "8px",
-  padding: "8px 9px",
+  border: "1px solid #d7e2ef",
+  background: "linear-gradient(180deg, #f9fbff 0%, #f4f8fd 100%)",
+  borderRadius: "9px",
+  padding: "9px 10px",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85)",
 };
 
 const directionsTitle = {
-  margin: "0 0 4px",
+  margin: "0 0 5px",
   fontSize: "8.5px",
   fontWeight: 800,
   textTransform: "uppercase",
-  letterSpacing: "0.06em",
-  color: "#334155",
+  letterSpacing: "0.07em",
+  color: "#2f455f",
 };
 
 const directionsText = {
   margin: 0,
   fontSize: "10.5px",
-  lineHeight: 1.4,
-  color: "#0f172a",
+  lineHeight: 1.42,
+  color: "#12243a",
   wordBreak: "break-word",
 };
 
 const infoGrid = {
   display: "grid",
   gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: "6px 9px",
-  marginTop: "8px",
+  gap: "7px 10px",
+  marginTop: "9px",
 };
 
 const warningBox = {
-  marginTop: "9px",
-  border: "1px solid #f8b4b4",
-  background: "#fff6f6",
-  borderRadius: "8px",
-  padding: "8px 9px",
+  marginTop: "10px",
+  border: "1px solid #f3b7b7",
+  background: "linear-gradient(180deg, #fff8f8 0%, #fff3f3 100%)",
+  borderRadius: "9px",
+  padding: "9px 10px",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.85)",
 };
 
 const warningTitle = {
-  margin: "0 0 5px",
+  margin: "0 0 6px",
   fontWeight: 800,
-  letterSpacing: "0.06em",
+  letterSpacing: "0.07em",
   textTransform: "uppercase",
-  color: "#991b1b",
+  color: "#8a1b1b",
 };
 
 const warningItem = {
-  margin: "0 0 3px",
+  margin: "0 0 4px",
   color: "#7f1d1d",
-  lineHeight: 1.3,
+  lineHeight: 1.34,
   wordBreak: "break-word",
 };
 
@@ -1208,8 +1216,9 @@ const qrAndFooter = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  gap: "10px",
-  marginTop: "9px",
+  gap: "12px",
+  marginTop: "11px",
+  paddingTop: "2px",
 };
 
 const qrWrap = {
@@ -1217,10 +1226,11 @@ const qrWrap = {
   alignItems: "center",
   justifyContent: "center",
   flexShrink: 0,
-  border: "1px solid #dbe3ee",
-  borderRadius: "6px",
-  padding: "3px",
+  border: "1px solid #d4deeb",
+  borderRadius: "7px",
+  padding: "4px",
   background: "#ffffff",
+  boxShadow: "0 2px 6px rgba(15, 23, 42, 0.06)",
 };
 
 const qrImage = {
@@ -1230,6 +1240,7 @@ const qrImage = {
 const scanHintWrap = {
   flex: 1,
   minWidth: 0,
+  paddingLeft: "1px",
 };
 
 const scanHintTitle = {
@@ -1242,10 +1253,10 @@ const scanHintTitle = {
 };
 
 const scanHintText = {
-  margin: "3px 0 0",
+  margin: "4px 0 0",
   fontSize: "8.75px",
-  lineHeight: 1.3,
-  color: "#334155",
+  lineHeight: 1.33,
+  color: "#3b4e66",
 };
 
 const qrFallback = {

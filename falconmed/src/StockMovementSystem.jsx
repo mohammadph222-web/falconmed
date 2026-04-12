@@ -56,22 +56,13 @@ const initialForm = {
   notes: "",
 };
 
-function buildUniquePharmacyOptions(rows = []) {
-  const map = new Map();
+function normalizeText(value) {
+  return String(value || "").trim();
+}
 
-  for (const row of rows) {
-    const id = String(row?.id || "").trim();
-    if (!id || map.has(id)) continue;
-    map.set(id, {
-      id,
-      name: String(row?.name || "").trim(),
-      location: String(row?.location || "").trim(),
-    });
-  }
-
-  return Array.from(map.values()).sort((a, b) =>
-    String(a?.name || "").localeCompare(String(b?.name || ""))
-  );
+function normalizeNullableText(value) {
+  const v = normalizeText(value);
+  return v || null;
 }
 
 function formatDate(value) {
@@ -81,14 +72,36 @@ function formatDate(value) {
   return d.toLocaleDateString();
 }
 
-function normalizeText(value) {
-  return String(value || "").trim();
+function formatPriceDisplay(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "-";
+  return `AED ${number.toFixed(2)}`;
+}
+
+function buildUniquePharmacyOptions(rows = []) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const id = normalizeText(row?.id);
+    if (!id || map.has(id)) continue;
+
+    map.set(id, {
+      id,
+      name: normalizeText(row?.name),
+      location: normalizeText(row?.location),
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) =>
+    String(a?.name || "").localeCompare(String(b?.name || ""))
+  );
 }
 
 function buildDrugDisplayLabel(drug) {
   const brandName = normalizeText(drug?.brand_name);
   const strength = normalizeText(drug?.strength);
   const dosageForm = normalizeText(drug?.dosage_form);
+
   return [brandName, strength, dosageForm].filter(Boolean).join(" ").trim();
 }
 
@@ -97,6 +110,7 @@ function buildDrugSearchIndex(drug) {
     normalizeText(drug?.brand_name),
     normalizeText(drug?.strength),
     normalizeText(drug?.dosage_form),
+    normalizeText(drug?.generic_name),
     normalizeText(drug?.drug_code),
     normalizeText(drug?.package_size),
   ]
@@ -105,44 +119,78 @@ function buildDrugSearchIndex(drug) {
     .toLowerCase();
 }
 
-function formatPriceDisplay(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "-";
-  return `AED ${number.toFixed(2)}`;
+function normalizeDateValue(value) {
+  const v = normalizeText(value);
+  return v || null;
+}
+
+function sameNullableText(a, b) {
+  return normalizeText(a) === normalizeText(b);
+}
+
+function sameNullableDate(a, b) {
+  return normalizeDateValue(a) === normalizeDateValue(b);
+}
+
+function buildMovementPayload({
+  movementType,
+  drugName,
+  quantity,
+  fromName,
+  toName,
+  batchNo,
+  expiryDate,
+  referenceNo,
+  notes,
+}) {
+  return {
+    movement_type: movementType,
+    drug_name: drugName,
+    quantity,
+    from_pharmacy: fromName || null,
+    to_pharmacy: toName || null,
+    batch_no: batchNo || null,
+    expiry_date: expiryDate || null,
+    reference_no: referenceNo || null,
+    notes: notes || null,
+    created_at: new Date().toISOString(),
+    created_by: "falconmed.demo@preview",
+  };
 }
 
 export default function StockMovementSystem() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
   const [formData, setFormData] = useState(initialForm);
   const [feedback, setFeedback] = useState({ type: "", text: "" });
   const [restoredDraftMessage, setRestoredDraftMessage] = useState("");
+
   const [drugOptions, setDrugOptions] = useState([]);
   const [pharmacyOptions, setPharmacyOptions] = useState([]);
+
   const [showDrugDropdown, setShowDrugDropdown] = useState(false);
   const [selectedDrugOption, setSelectedDrugOption] = useState(null);
-  const [isSelectingDrug, setIsSelectingDrug] = useState(false);
+
   const drugInputRef = useRef(null);
 
   const pharmacyMap = useMemo(() => {
     const map = new Map();
-    pharmacyOptions.forEach((row) => {
-      const id = String(row?.id || "").trim();
-      if (!id || map.has(id)) return;
+
+    for (const row of pharmacyOptions) {
+      const id = normalizeText(row?.id);
+      if (!id || map.has(id)) continue;
+
       map.set(id, {
         id,
-        name: String(row?.name || "").trim(),
-        location: String(row?.location || "").trim(),
+        name: normalizeText(row?.name),
+        location: normalizeText(row?.location),
       });
-    });
+    }
+
     return map;
   }, [pharmacyOptions]);
-
-  const getPharmacyNameById = (pharmacyId) => {
-    const id = String(pharmacyId || "").trim();
-    return pharmacyMap.get(id)?.name || "Unknown Pharmacy";
-  };
 
   const isTransferType =
     formData.movement_type === "Transfer Out" ||
@@ -161,7 +209,12 @@ export default function StockMovementSystem() {
         r.movement_type === "Adjustment+" || r.movement_type === "Adjustment-"
     ).length;
 
-    return { total, transferOuts, transferIns, adjustments };
+    return {
+      total,
+      transferOuts,
+      transferIns,
+      adjustments,
+    };
   }, [rows]);
 
   const hasUnsavedChanges = useMemo(() => {
@@ -171,6 +224,44 @@ export default function StockMovementSystem() {
       return current !== initial;
     });
   }, [formData]);
+
+  const getPharmacyNameById = (pharmacyId) => {
+    const id = normalizeText(pharmacyId);
+    return pharmacyMap.get(id)?.name || "Unknown Pharmacy";
+  };
+
+  const resolveSelectedDrugOptionFromInput = () => {
+    if (
+      selectedDrugOption &&
+      normalizeText(selectedDrugOption.display_name) ===
+        normalizeText(formData.drug_name)
+    ) {
+      return selectedDrugOption;
+    }
+
+    const typed = normalizeText(formData.drug_name).toLowerCase();
+    if (!typed) return null;
+
+    const exact = drugOptions.find(
+      (option) =>
+        normalizeText(option.display_name).toLowerCase() === typed ||
+        normalizeText(option.drug_code).toLowerCase() === typed
+    );
+
+    return exact || null;
+  };
+
+  const filteredDrugOptions = useMemo(() => {
+    const query = normalizeText(formData.drug_name).toLowerCase();
+
+    if (!query) {
+      return drugOptions.slice(0, 20);
+    }
+
+    return drugOptions
+      .filter((option) => option.searchIndex.includes(query))
+      .slice(0, 20);
+  }, [drugOptions, formData.drug_name]);
 
   useEffect(() => {
     const persisted = readStockMovementDraft();
@@ -240,7 +331,8 @@ export default function StockMovementSystem() {
         .limit(500);
 
       if (error) throw error;
-      setRows(data || []);
+
+      setRows(Array.isArray(data) ? data : []);
     } catch (err) {
       setRows([]);
       setFeedback({
@@ -263,12 +355,13 @@ export default function StockMovementSystem() {
       let allRows = [];
       let pageFrom = 0;
       const PAGE_SIZE = 1000;
+      const MAX_ROWS = 30000;
 
-      while (true) {
+      while (pageFrom < MAX_ROWS) {
         const { data, error } = await supabase
           .from("drug_master")
           .select(
-            "brand_name, strength, dosage_form, drug_code, package_size, price_to_pharmacy, price_to_public"
+            "brand_name, generic_name, strength, dosage_form, drug_code, package_size, price_to_pharmacy, price_to_public"
           )
           .range(pageFrom, pageFrom + PAGE_SIZE - 1);
 
@@ -276,21 +369,23 @@ export default function StockMovementSystem() {
         if (!Array.isArray(data) || data.length === 0) break;
 
         allRows = allRows.concat(data);
+
         if (data.length < PAGE_SIZE) break;
         pageFrom += PAGE_SIZE;
-        if (pageFrom >= 200000) break;
       }
 
       const byKey = new Map();
+
       for (const row of allRows) {
         const displayLabel = buildDrugDisplayLabel(row);
-        if (!displayLabel) continue;
-
         const drugCode = normalizeText(row?.drug_code);
+        if (!displayLabel || !drugCode) continue;
+
         const option = {
           displayLabel,
           display_name: displayLabel,
           brand_name: normalizeText(row?.brand_name),
+          generic_name: normalizeText(row?.generic_name),
           strength: normalizeText(row?.strength),
           dosage_form: normalizeText(row?.dosage_form),
           drug_code: drugCode,
@@ -300,7 +395,7 @@ export default function StockMovementSystem() {
           searchIndex: buildDrugSearchIndex(row),
         };
 
-        const key = `${option.displayLabel}::${drugCode}`;
+        const key = `${drugCode}::${displayLabel}`;
         if (!byKey.has(key)) {
           byKey.set(key, option);
         }
@@ -336,92 +431,217 @@ export default function StockMovementSystem() {
     void loadFormOptions();
   }, []);
 
-  const filteredDrugOptions = useMemo(() => {
-    const query = formData.drug_name.trim().toLowerCase();
-    if (!query) return drugOptions.slice(0, 20);
-    return drugOptions
-      .filter((option) => option.searchIndex.includes(query))
-      .slice(0, 20);
-  }, [drugOptions, formData.drug_name]);
+  const fetchInventoryRows = async (pharmacyId, drugCode) => {
+    const safePharmacyId = normalizeText(pharmacyId);
+    const safeDrugCode = normalizeText(drugCode);
 
-  const applyInventoryUpdate = async (
+    if (!safePharmacyId || !safeDrugCode) {
+      return [];
+    }
+
+    const { data, error } = await supabase
+      .from("pharmacy_inventory")
+      .select("id, pharmacy_id, drug_code, quantity, unit_type, batch_no, expiry_date")
+      .eq("pharmacy_id", safePharmacyId)
+      .eq("drug_code", safeDrugCode)
+      .limit(500);
+
+    if (error) {
+      throw new Error(`Inventory lookup failed: ${error.message}`);
+    }
+
+    const rows = Array.isArray(data) ? data : [];
+
+    return rows.sort((a, b) => {
+      const aDate = a?.expiry_date ? new Date(a.expiry_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const bDate = b?.expiry_date ? new Date(b.expiry_date).getTime() : Number.MAX_SAFE_INTEGER;
+      return aDate - bDate;
+    });
+  };
+
+  const getAvailableInventoryQuantity = async (pharmacyId, drugCode, batchNo) => {
+    const rows = await fetchInventoryRows(pharmacyId, drugCode);
+    const safeBatch = normalizeText(batchNo);
+
+    const relevantRows = safeBatch
+      ? rows.filter((row) => sameNullableText(row.batch_no, safeBatch))
+      : rows;
+
+    return relevantRows.reduce((sum, row) => {
+      const qty = Number(row?.quantity || 0);
+      return sum + (Number.isFinite(qty) ? qty : 0);
+    }, 0);
+  };
+
+  const addInventoryQuantity = async ({
     pharmacyId,
     pharmacyName,
-    drugName,
-    qty,
-    op,
+    drugCode,
+    quantity,
     batchNo,
-    expiryDate
-  ) => {
-    if (!pharmacyId) {
+    expiryDate,
+    unitType = "unit",
+  }) => {
+    const safePharmacyId = normalizeText(pharmacyId);
+    const safeDrugCode = normalizeText(drugCode);
+
+    if (!safePharmacyId || !safeDrugCode) {
       throw new Error(
-        `Pharmacy "${
-          pharmacyName || "Unknown Pharmacy"
-        }" was not found. Inventory sync cannot continue.`
+        `Inventory sync failed for "${pharmacyName || "Unknown Pharmacy"}": pharmacy or drug code is missing.`
       );
     }
 
-    const { data: invRows, error: fetchError } = await supabase
-      .from("pharmacy_inventory")
-      .select("id, quantity, batch_no, expiry_date, unit_cost")
-      .eq("pharmacy_id", pharmacyId)
-      .eq("drug_name", drugName)
-      .limit(1);
+    const rows = await fetchInventoryRows(safePharmacyId, safeDrugCode);
 
-    if (fetchError)
-      throw new Error(`Inventory lookup failed: ${fetchError.message}`);
+    const targetRow = rows.find(
+      (row) =>
+        sameNullableText(row.batch_no, batchNo) &&
+        sameNullableDate(row.expiry_date, expiryDate)
+    );
 
-    const existing = invRows?.[0] ?? null;
+    if (targetRow) {
+      const currentQty = Number(targetRow.quantity || 0);
+      const nextQty = currentQty + quantity;
 
-    if (op === "subtract") {
-      if (!existing) {
-        throw new Error(
-          `No inventory record found for "${
-            drugName
-          }" at "${
-            pharmacyName || "Unknown Pharmacy"
-          }". Cannot reduce stock that does not exist.`
-        );
-      }
-      const currentQty = Number(existing.quantity ?? 0);
-      if (currentQty - qty < 0) {
-        throw new Error(
-          `Insufficient stock: "${drugName}" at "${
-            pharmacyName || "Unknown Pharmacy"
-          }" has ${currentQty} unit(s). Cannot subtract ${qty}.`
-        );
-      }
-      const { error: updateError } = await supabase
+      const { error } = await supabase
         .from("pharmacy_inventory")
-        .update({ quantity: currentQty - qty })
-        .eq("id", existing.id);
-      if (updateError)
-        throw new Error(`Inventory update failed: ${updateError.message}`);
-    } else {
-      if (existing) {
-        const currentQty = Number(existing.quantity ?? 0);
-        const { error: updateError } = await supabase
+        .update({
+          quantity: nextQty,
+          unit_type: normalizeNullableText(targetRow.unit_type) || unitType,
+          batch_no: normalizeNullableText(targetRow.batch_no) || normalizeNullableText(batchNo),
+          expiry_date: normalizeDateValue(targetRow.expiry_date) || normalizeDateValue(expiryDate),
+        })
+        .eq("id", targetRow.id);
+
+      if (error) {
+        throw new Error(`Inventory update failed: ${error.message}`);
+      }
+
+      return;
+    }
+
+    const insertPayload = {
+      pharmacy_id: safePharmacyId,
+      drug_code: safeDrugCode,
+      quantity,
+      unit_type: unitType,
+      batch_no: normalizeNullableText(batchNo),
+      expiry_date: normalizeDateValue(expiryDate),
+    };
+
+    const { error } = await supabase
+      .from("pharmacy_inventory")
+      .insert([insertPayload]);
+
+    if (error) {
+      throw new Error(`Inventory insert failed: ${error.message}`);
+    }
+  };
+
+  const subtractInventoryQuantity = async ({
+    pharmacyId,
+    pharmacyName,
+    drugCode,
+    quantity,
+    batchNo,
+  }) => {
+    const safePharmacyId = normalizeText(pharmacyId);
+    const safeDrugCode = normalizeText(drugCode);
+
+    if (!safePharmacyId || !safeDrugCode) {
+      throw new Error(
+        `Inventory sync failed for "${pharmacyName || "Unknown Pharmacy"}": pharmacy or drug code is missing.`
+      );
+    }
+
+    let rows = await fetchInventoryRows(safePharmacyId, safeDrugCode);
+
+    const safeBatch = normalizeText(batchNo);
+    if (safeBatch) {
+      rows = rows.filter((row) => sameNullableText(row.batch_no, safeBatch));
+    }
+
+    const totalAvailable = rows.reduce((sum, row) => {
+      const qty = Number(row?.quantity || 0);
+      return sum + (Number.isFinite(qty) ? qty : 0);
+    }, 0);
+
+    if (totalAvailable < quantity) {
+      throw new Error(
+        `Insufficient stock: "${safeDrugCode}" at "${
+          pharmacyName || "Unknown Pharmacy"
+        }" has ${totalAvailable} unit(s). Cannot subtract ${quantity}.`
+      );
+    }
+
+    let remainingToSubtract = quantity;
+
+    for (const row of rows) {
+      if (remainingToSubtract <= 0) break;
+
+      const currentQty = Number(row.quantity || 0);
+      if (currentQty <= 0) continue;
+
+      const deduct = Math.min(currentQty, remainingToSubtract);
+      const nextQty = currentQty - deduct;
+
+      if (nextQty <= 0) {
+        const { error } = await supabase
           .from("pharmacy_inventory")
-          .update({ quantity: currentQty + qty })
-          .eq("id", existing.id);
-        if (updateError)
-          throw new Error(`Inventory update failed: ${updateError.message}`);
+          .delete()
+          .eq("id", row.id);
+
+        if (error) {
+          throw new Error(`Inventory delete failed: ${error.message}`);
+        }
       } else {
-        const newRow = {
-          pharmacy_id: pharmacyId,
-          drug_name: drugName,
-          quantity: qty,
-          batch_no: batchNo || null,
-          expiry_date: expiryDate || null,
-          unit_cost: 0,
-        };
-        const { error: insertError } = await supabase
+        const { error } = await supabase
           .from("pharmacy_inventory")
-          .insert([newRow]);
-        if (insertError)
-          throw new Error(`Inventory insert failed: ${insertError.message}`);
+          .update({ quantity: nextQty })
+          .eq("id", row.id);
+
+        if (error) {
+          throw new Error(`Inventory update failed: ${error.message}`);
+        }
+      }
+
+      remainingToSubtract -= deduct;
+    }
+  };
+
+  const insertMovementRows = async (movementPayloads) => {
+    if (!Array.isArray(movementPayloads) || movementPayloads.length === 0) {
+      return [];
+    }
+
+    let movementInsert = await supabase
+      .from("stock_movements")
+      .insert(movementPayloads)
+      .select("*");
+
+    if (movementInsert.error) {
+      const msg = String(movementInsert.error.message || "").toLowerCase();
+      const createdByMissing =
+        msg.includes("created_by") && msg.includes("column");
+
+      if (createdByMissing) {
+        const fallbackPayloads = movementPayloads.map((payload) => {
+          const { created_by, ...rest } = payload;
+          return rest;
+        });
+
+        movementInsert = await supabase
+          .from("stock_movements")
+          .insert(fallbackPayloads)
+          .select("*");
       }
     }
+
+    if (movementInsert.error) {
+      throw movementInsert.error;
+    }
+
+    return Array.isArray(movementInsert.data) ? movementInsert.data : [];
   };
 
   const onChange = (event) => {
@@ -431,8 +651,8 @@ export default function StockMovementSystem() {
       const next = { ...prev, [name]: value };
 
       if (name === "movement_type") {
-        const transfer =
-          value === "Transfer Out" || value === "Transfer In";
+        const transfer = value === "Transfer Out" || value === "Transfer In";
+
         if (
           transfer &&
           next.from_pharmacy &&
@@ -474,7 +694,9 @@ export default function StockMovementSystem() {
 
     setSelectedDrugOption((prev) => {
       if (!prev) return null;
-      return prev.display_name === value ? prev : null;
+      return normalizeText(prev.display_name) === normalizeText(value)
+        ? prev
+        : null;
     });
 
     setShowDrugDropdown(true);
@@ -482,7 +704,6 @@ export default function StockMovementSystem() {
 
   const handleDrugInputBlur = () => {
     window.setTimeout(() => {
-      setIsSelectingDrug(false);
       setShowDrugDropdown(false);
     }, 120);
   };
@@ -505,7 +726,6 @@ export default function StockMovementSystem() {
 
     setSelectedDrugOption(normalizedOption);
     setShowDrugDropdown(false);
-    setIsSelectingDrug(false);
 
     window.requestAnimationFrame(() => {
       drugInputRef.current?.blur();
@@ -514,10 +734,23 @@ export default function StockMovementSystem() {
 
   const onSubmit = async (event) => {
     event.preventDefault();
+
+    if (submitting) return;
+
     setFeedback({ type: "", text: "" });
 
     const qty = Number(formData.quantity);
-    if (!formData.drug_name.trim()) {
+    const movementType = normalizeText(formData.movement_type);
+    const drugName = normalizeText(formData.drug_name);
+    const batchNo = normalizeNullableText(formData.batch_no);
+    const expiryDate = normalizeDateValue(formData.expiry_date);
+    const referenceNo = normalizeNullableText(formData.reference_no);
+    const notes = normalizeNullableText(formData.notes);
+
+    const fromPharmacyId = normalizeText(formData.from_pharmacy);
+    const toPharmacyId = normalizeText(formData.to_pharmacy);
+
+    if (!drugName) {
       setFeedback({ type: "error", text: "Drug name is required." });
       return;
     }
@@ -530,23 +763,18 @@ export default function StockMovementSystem() {
       return;
     }
 
-    if (isTransferType) {
-      if (!formData.from_pharmacy.trim() || !formData.to_pharmacy.trim()) {
-        setFeedback({
-          type: "error",
-          text: "Both From Pharmacy and To Pharmacy are required for transfer movements.",
-        });
-        return;
-      }
+    const resolvedDrug = resolveSelectedDrugOptionFromInput();
 
-      if (formData.from_pharmacy.trim() === formData.to_pharmacy.trim()) {
-        setFeedback({
-          type: "error",
-          text: "From Pharmacy and To Pharmacy cannot be the same for transfer movements.",
-        });
-        return;
-      }
+    if (!resolvedDrug?.drug_code) {
+      setFeedback({
+        type: "error",
+        text: "Please select a valid drug from the dropdown so the system can use the correct drug code.",
+      });
+      return;
     }
+
+    const drugCode = normalizeText(resolvedDrug.drug_code);
+    const unitType = "unit";
 
     if (!supabase) {
       setFeedback({
@@ -556,230 +784,323 @@ export default function StockMovementSystem() {
       return;
     }
 
+    if (movementType === "Receive" && !toPharmacyId) {
+      setFeedback({
+        type: "error",
+        text: "To Pharmacy is required for Receive movements.",
+      });
+      return;
+    }
+
+    if (movementType === "Issue" && !fromPharmacyId) {
+      setFeedback({
+        type: "error",
+        text: "From Pharmacy is required for Issue movements.",
+      });
+      return;
+    }
+
+    if (isTransferType) {
+      if (!fromPharmacyId || !toPharmacyId) {
+        setFeedback({
+          type: "error",
+          text: "Both From Pharmacy and To Pharmacy are required for transfer movements.",
+        });
+        return;
+      }
+
+      if (fromPharmacyId === toPharmacyId) {
+        setFeedback({
+          type: "error",
+          text: "From Pharmacy and To Pharmacy cannot be the same for transfer movements.",
+        });
+        return;
+      }
+    }
+
+    if (movementType === "Adjustment-" && !fromPharmacyId && !toPharmacyId) {
+      setFeedback({
+        type: "error",
+        text: "Please choose a pharmacy for Adjustment- movement.",
+      });
+      return;
+    }
+
+    if (movementType === "Adjustment+" && !fromPharmacyId && !toPharmacyId) {
+      setFeedback({
+        type: "error",
+        text: "Please choose a pharmacy for Adjustment+ movement.",
+      });
+      return;
+    }
+
+    if (movementType === "Return" && !fromPharmacyId && !toPharmacyId) {
+      setFeedback({
+        type: "error",
+        text: "Please choose a pharmacy for Return movement.",
+      });
+      return;
+    }
+
     setSubmitting(true);
 
     try {
-      const drug = formData.drug_name.trim();
-      const from = String(formData.from_pharmacy || "").trim() || null;
-      const to = String(formData.to_pharmacy || "").trim() || null;
-      const fromName = from ? getPharmacyNameById(from) : null;
-      const toName = to ? getPharmacyNameById(to) : null;
-      const batchNo = formData.batch_no.trim() || null;
-      const expiryDate = formData.expiry_date || null;
-      const movType = formData.movement_type;
+      const fromName = fromPharmacyId ? getPharmacyNameById(fromPharmacyId) : null;
+      const toName = toPharmacyId ? getPharmacyNameById(toPharmacyId) : null;
 
-      let preCheckPharmacy = null;
-      if (movType === "Issue" || movType === "Transfer Out") {
-        preCheckPharmacy = from;
-      } else if (movType === "Adjustment-") {
-        preCheckPharmacy = from || to;
-      }
+      if (movementType === "Issue") {
+        const availableQty = await getAvailableInventoryQuantity(
+          fromPharmacyId,
+          drugCode,
+          batchNo
+        );
 
-      if (preCheckPharmacy) {
-        const pharmacyId = preCheckPharmacy;
-        if (!pharmacyMap.has(pharmacyId)) {
+        if (availableQty < qty) {
           setFeedback({
             type: "error",
-            text: "Selected pharmacy was not found. Please select a valid pharmacy before submitting.",
+            text: `Insufficient stock: "${drugName}" at "${fromName}" has ${availableQty} unit(s). Cannot subtract ${qty}.`,
           });
           setSubmitting(false);
           return;
         }
 
-        const { data: invRows, error: invFetchErr } = await supabase
-          .from("pharmacy_inventory")
-          .select("quantity")
-          .eq("pharmacy_id", pharmacyId)
-          .eq("drug_name", drug)
-          .limit(1);
+        await subtractInventoryQuantity({
+          pharmacyId: fromPharmacyId,
+          pharmacyName: fromName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+        });
 
-        if (invFetchErr) {
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Issue",
+            drugName,
+            quantity: qty,
+            fromName,
+            toName: null,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes,
+          }),
+        ]);
+
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else if (movementType === "Receive") {
+        await addInventoryQuantity({
+          pharmacyId: toPharmacyId,
+          pharmacyName: toName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+          expiryDate,
+          unitType,
+        });
+
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Receive",
+            drugName,
+            quantity: qty,
+            fromName: null,
+            toName,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes,
+          }),
+        ]);
+
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else if (isTransferType) {
+        const availableQty = await getAvailableInventoryQuantity(
+          fromPharmacyId,
+          drugCode,
+          batchNo
+        );
+
+        if (availableQty < qty) {
           setFeedback({
             type: "error",
-            text: `Unable to validate inventory before movement: ${invFetchErr.message}`,
+            text: `Insufficient stock: "${drugName}" at "${fromName}" has ${availableQty} unit(s). Cannot transfer ${qty}.`,
           });
           setSubmitting(false);
           return;
         }
 
-        const currentQty = Number(invRows?.[0]?.quantity ?? 0);
-        const pharmacyNameForCheck = getPharmacyNameById(pharmacyId);
-        if (!invRows?.[0]) {
+        await subtractInventoryQuantity({
+          pharmacyId: fromPharmacyId,
+          pharmacyName: fromName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+        });
+
+        await addInventoryQuantity({
+          pharmacyId: toPharmacyId,
+          pharmacyName: toName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+          expiryDate,
+          unitType,
+        });
+
+        const transferNoteBase = notes ? `${notes}` : "";
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Transfer Out",
+            drugName,
+            quantity: qty,
+            fromName,
+            toName,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes: transferNoteBase || "Auto-generated transfer out entry",
+          }),
+          buildMovementPayload({
+            movementType: "Transfer In",
+            drugName,
+            quantity: qty,
+            fromName,
+            toName,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes: transferNoteBase || "Auto-generated transfer in entry",
+          }),
+        ]);
+
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else if (movementType === "Adjustment+") {
+        const targetPharmacyId = toPharmacyId || fromPharmacyId;
+        const targetPharmacyName = targetPharmacyId
+          ? getPharmacyNameById(targetPharmacyId)
+          : null;
+
+        await addInventoryQuantity({
+          pharmacyId: targetPharmacyId,
+          pharmacyName: targetPharmacyName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+          expiryDate,
+          unitType,
+        });
+
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Adjustment+",
+            drugName,
+            quantity: qty,
+            fromName: fromPharmacyId ? getPharmacyNameById(fromPharmacyId) : null,
+            toName: toPharmacyId ? getPharmacyNameById(toPharmacyId) : null,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes,
+          }),
+        ]);
+
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else if (movementType === "Adjustment-") {
+        const targetPharmacyId = fromPharmacyId || toPharmacyId;
+        const targetPharmacyName = targetPharmacyId
+          ? getPharmacyNameById(targetPharmacyId)
+          : null;
+
+        const availableQty = await getAvailableInventoryQuantity(
+          targetPharmacyId,
+          drugCode,
+          batchNo
+        );
+
+        if (availableQty < qty) {
           setFeedback({
             type: "error",
-            text: `No inventory record found for "${drug}" at "${pharmacyNameForCheck}". Movement not recorded.`,
+            text: `Insufficient stock: "${drugName}" at "${targetPharmacyName}" has ${availableQty} unit(s). Cannot subtract ${qty}.`,
           });
           setSubmitting(false);
           return;
         }
-        if (currentQty - qty < 0) {
-          setFeedback({
-            type: "error",
-            text: `Insufficient stock: "${drug}" at "${pharmacyNameForCheck}" has ${currentQty} unit(s). Cannot subtract ${qty}. Movement not recorded.`,
-          });
-          setSubmitting(false);
-          return;
-        }
-      }
 
-      const payload = {
-        movement_type: movType,
-        drug_name: drug,
-        quantity: qty,
-        from_pharmacy: fromName,
-        to_pharmacy: toName,
-        batch_no: batchNo,
-        expiry_date: expiryDate,
-        reference_no: formData.reference_no.trim() || null,
-        notes: formData.notes.trim() || null,
-        created_at: new Date().toISOString(),
-        created_by: "falconmed.demo@preview",
-      };
+        await subtractInventoryQuantity({
+          pharmacyId: targetPharmacyId,
+          pharmacyName: targetPharmacyName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+        });
 
-      let movementInsert = await supabase
-        .from("stock_movements")
-        .insert([payload])
-        .select("*")
-        .single();
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Adjustment-",
+            drugName,
+            quantity: qty,
+            fromName: fromPharmacyId ? getPharmacyNameById(fromPharmacyId) : null,
+            toName: toPharmacyId ? getPharmacyNameById(toPharmacyId) : null,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes,
+          }),
+        ]);
 
-      if (movementInsert.error) {
-        const msg = String(movementInsert.error.message || "").toLowerCase();
-        const createdByMissing =
-          msg.includes("created_by") && msg.includes("column");
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else if (movementType === "Return") {
+        const targetPharmacyId = toPharmacyId || fromPharmacyId;
+        const targetPharmacyName = targetPharmacyId
+          ? getPharmacyNameById(targetPharmacyId)
+          : null;
 
-        if (createdByMissing) {
-          const { created_by, ...fallbackPayload } = payload;
-          movementInsert = await supabase
-            .from("stock_movements")
-            .insert([fallbackPayload])
-            .select("*")
-            .single();
-        }
-      }
+        await addInventoryQuantity({
+          pharmacyId: targetPharmacyId,
+          pharmacyName: targetPharmacyName,
+          drugCode,
+          quantity: qty,
+          batchNo,
+          expiryDate,
+          unitType,
+        });
 
-      const { data, error } = movementInsert;
-      if (error) throw error;
+        const insertedRows = await insertMovementRows([
+          buildMovementPayload({
+            movementType: "Return",
+            drugName,
+            quantity: qty,
+            fromName: fromPharmacyId ? getPharmacyNameById(fromPharmacyId) : null,
+            toName: toPharmacyId ? getPharmacyNameById(toPharmacyId) : null,
+            batchNo,
+            expiryDate,
+            referenceNo,
+            notes,
+          }),
+        ]);
 
-      try {
-        switch (movType) {
-          case "Issue":
-            if (from)
-              await applyInventoryUpdate(
-                from,
-                fromName,
-                drug,
-                qty,
-                "subtract",
-                batchNo,
-                expiryDate
-              );
-            break;
-          case "Receive":
-            if (to)
-              await applyInventoryUpdate(
-                to,
-                toName,
-                drug,
-                qty,
-                "add",
-                batchNo,
-                expiryDate
-              );
-            break;
-          case "Transfer Out":
-            if (from)
-              await applyInventoryUpdate(
-                from,
-                fromName,
-                drug,
-                qty,
-                "subtract",
-                batchNo,
-                expiryDate
-              );
-            break;
-          case "Transfer In":
-            if (to)
-              await applyInventoryUpdate(
-                to,
-                toName,
-                drug,
-                qty,
-                "add",
-                batchNo,
-                expiryDate
-              );
-            break;
-          case "Adjustment+": {
-            const p = to || from;
-            const pName = p ? getPharmacyNameById(p) : null;
-            if (p)
-              await applyInventoryUpdate(
-                p,
-                pName,
-                drug,
-                qty,
-                "add",
-                batchNo,
-                expiryDate
-              );
-            break;
-          }
-          case "Adjustment-": {
-            const p = from || to;
-            const pName = p ? getPharmacyNameById(p) : null;
-            if (p)
-              await applyInventoryUpdate(
-                p,
-                pName,
-                drug,
-                qty,
-                "subtract",
-                batchNo,
-                expiryDate
-              );
-            break;
-          }
-          case "Return": {
-            const p = to || from;
-            const pName = p ? getPharmacyNameById(p) : null;
-            if (p)
-              await applyInventoryUpdate(
-                p,
-                pName,
-                drug,
-                qty,
-                "add",
-                batchNo,
-                expiryDate
-              );
-            break;
-          }
-          default:
-            break;
-        }
-      } catch (invErr) {
-        setRows((prev) => [data, ...prev]);
-        setFormData(initialForm);
-        setSelectedDrugOption(null);
+        setRows((prev) => [...insertedRows, ...prev]);
+      } else {
         setFeedback({
           type: "error",
-          text: `Movement logged, but inventory update failed: ${invErr.message}`,
+          text: "Unsupported movement type.",
         });
         setSubmitting(false);
         return;
       }
 
-      setRows((prev) => [data, ...prev]);
       setFormData(initialForm);
       setSelectedDrugOption(null);
       setShowDrugDropdown(false);
       clearStockMovementDraft();
+
       setFeedback({
         type: "success",
         text: "Stock movement added and inventory updated successfully.",
       });
-      emitInventoryUpdated(to || from || "");
+
+      const refreshIds = [fromPharmacyId, toPharmacyId].filter(Boolean);
+      refreshIds.forEach((id) => emitInventoryUpdated(id));
     } catch (err) {
       setFeedback({
         type: "error",
@@ -859,6 +1180,7 @@ export default function StockMovementSystem() {
 
       <div style={contentCard}>
         <h3 style={sectionTitle}>Add Movement</h3>
+
         <form onSubmit={onSubmit}>
           <div style={formGrid}>
             <div style={fieldGroup}>
@@ -905,7 +1227,6 @@ export default function StockMovementSystem() {
                         style={drugDropdownItem}
                         onMouseDown={(event) => {
                           event.preventDefault();
-                          setIsSelectingDrug(true);
                           selectDrugName(option);
                         }}
                       >
@@ -927,6 +1248,7 @@ export default function StockMovementSystem() {
                   <div style={selectedDrugTitle}>
                     {selectedDrugOption.display_name}
                   </div>
+
                   <div style={selectedDrugMetaGrid}>
                     <div>
                       <div style={selectedDrugMetaLabel}>Drug Code</div>
@@ -934,18 +1256,21 @@ export default function StockMovementSystem() {
                         {selectedDrugOption.drug_code || "-"}
                       </div>
                     </div>
+
                     <div>
                       <div style={selectedDrugMetaLabel}>Package Size</div>
                       <div style={selectedDrugMetaValue}>
                         {selectedDrugOption.package_size || "-"}
                       </div>
                     </div>
+
                     <div>
                       <div style={selectedDrugMetaLabel}>Price to Pharmacy</div>
                       <div style={selectedDrugMetaValue}>
                         {formatPriceDisplay(selectedDrugOption.price_to_pharmacy)}
                       </div>
                     </div>
+
                     <div>
                       <div style={selectedDrugMetaLabel}>Price to Public</div>
                       <div style={selectedDrugMetaValue}>
@@ -962,6 +1287,7 @@ export default function StockMovementSystem() {
               <input
                 type="number"
                 min="1"
+                step="1"
                 name="quantity"
                 value={formData.quantity}
                 onChange={onChange}

@@ -14,6 +14,7 @@
   max-width: 1200px;
   margin: 0 auto;
   color: var(--billing-text);
+  padding: 4px;
 }
 
 .billing-header-card {
@@ -22,12 +23,32 @@
   justify-content: space-between;
   gap: 16px;
   background: white;
-  border-radius: 18px;
-  padding: 22px 28px;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.08);
+  border-radius: 22px;
+  padding: 24px 30px;
+  box-shadow: 0 22px 40px rgba(15, 23, 42, 0.1);
   margin-bottom: 22px;
   border: 1px solid #e8edf5;
   border-left: 5px solid #1e40af;
+  background-image: radial-gradient(circle at 100% 0%, rgba(29, 78, 216, 0.09), transparent 42%);
+}
+
+.billing-header-card .ui-page-header {
+  width: 100%;
+  margin-top: 0;
+  align-items: flex-start;
+}
+
+.billing-header-card .ui-page-header-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.billing-header-card .ui-page-header-subtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  color: #64748b;
+  line-height: 1.6;
 }
 
 .billing-page-title {
@@ -71,17 +92,23 @@
 
 .billing-controls {
   display: grid;
-  gap: 16px;
+  gap: 18px;
   grid-template-columns: repeat(2, minmax(320px, 1fr));
-  margin-bottom: 20px;
+  margin-bottom: 22px;
 }
 
 .billing-control-card {
   background: var(--billing-card);
   border: 1px solid var(--billing-border);
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 24px;
   box-shadow: var(--billing-shadow);
+  transition: box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.billing-control-card:hover {
+  border-color: #cfe0f4;
+  box-shadow: 0 20px 34px rgba(15, 23, 42, 0.095);
 }
 
 .billing-control-card h3 {
@@ -275,13 +302,13 @@
 
 .billing-print-area {
   background: var(--billing-card);
-  border-radius: 16px;
+  border-radius: 20px;
   border: 1px solid var(--billing-border);
-  box-shadow: var(--billing-shadow);
+  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.09);
 }
 
 .billing-document {
-  padding: 22px;
+  padding: 24px;
 }
 
 .billing-doc-header {
@@ -401,10 +428,10 @@
 
 .billing-doc-meta {
   border: 1px solid var(--billing-border);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 16px 18px;
   text-align: right;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
 }
 
 .billing-doc-meta h1 {
@@ -456,12 +483,16 @@
 .billing-table-wrap {
   width: 100%;
   overflow-x: auto;
+  border: 1px solid #e3ebf6;
+  border-radius: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .billing-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 860px;
+  background: #fff;
 }
 
 .billing-table th,
@@ -537,9 +568,9 @@
 
 .billing-totals-box {
   border: 1px solid var(--billing-border);
-  border-radius: 14px;
+  border-radius: 16px;
   padding: 16px 18px;
-  background: #f8fafc;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 
 .billing-total-line {
@@ -605,18 +636,40 @@
 .billing-clear-btn,
 .back-button {
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   cursor: pointer;
   font-size: 14px;
   font-weight: 700;
   padding: 11px 18px;
   letter-spacing: 0.01em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease, background 0.15s ease;
+}
+
+.billing-primary-btn:hover,
+.billing-secondary-btn:hover,
+.billing-danger-btn:hover,
+.billing-clear-btn:hover,
+.back-button:hover {
+  transform: translateY(-1px);
+}
+
+.billing-primary-btn:focus-visible,
+.billing-secondary-btn:focus-visible,
+.billing-danger-btn:focus-visible,
+.billing-clear-btn:focus-visible,
+.back-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
 }
 
 .billing-primary-btn {
   background: var(--billing-primary);
   color: #fff;
-  box-shadow: 0 10px 20px rgba(29, 78, 216, 0.25);
+  box-shadow: 0 12px 24px rgba(29, 78, 216, 0.28);
+}
+
+.billing-primary-btn:hover {
+  filter: brightness(1.04);
 }
 
 .billing-secondary-btn,
@@ -624,12 +677,20 @@
   background: white;
   color: #0f172a;
   border: 1px solid #d4dfef;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
+}
+
+.billing-secondary-btn:hover,
+.back-button:hover,
+.billing-clear-btn:hover {
+  background: #f8fbff;
 }
 
 .billing-clear-btn {
   background: #f8fbff;
   color: #334155;
   border: 1px solid #d4dfef;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.04);
 }
 
 .billing-danger-btn {

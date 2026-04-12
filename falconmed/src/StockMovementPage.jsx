@@ -1,2007 +1,971 @@
-import { useEffect, useMemo, useState } from "react";
-import { useAuthContext } from "./lib/authContext";
-import DrugMasterPicker from "./components/DrugMasterPicker";
-import InventoryRowPicker from "./components/InventoryRowPicker";
-import {
-  fetchRecentStockMovements,
-  fetchStockMovementOptions,
-  getStockMovementTypes,
-  postStockMovement,
-} from "./lib/stockMovementService";
+﻿import { useEffect, useMemo, useState } from "react";
 import { supabase } from "./lib/supabaseClient";
-import { emitInventoryUpdated } from "./utils/inventoryEvents";
-import { getDrugByCode } from "./utils/drugLookup";
+import { ActionButton, PageHeader, StatusPill } from "./ui";
 
-const STOCK_MOVEMENT_V1_DRAFT_KEY = "falconmed_stock_movement_v2_draft";
-const DRAFT_WRITE_DEBOUNCE_MS = 220;
+// ── Pure helpers ───────────────────────────────────────────────────────────
 
-const initialForm = {
-  movementType: "Receive",
-  sourcePharmacyId: "",
-  destinationPharmacyId: "",
-  drugName: "",
-  quantity: "",
-  quantityMode: "unit",
-  batchNo: "",
-  expiryDate: "",
-  barcode: "",
-  unitCost: "",
-  referenceNo: "",
-  notes: "",
-};
-
-function readDraft() {
-  try {
-    const raw = window.sessionStorage.getItem(STOCK_MOVEMENT_V1_DRAFT_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function writeDraft(value) {
-  try {
-    window.sessionStorage.setItem(
-      STOCK_MOVEMENT_V1_DRAFT_KEY,
-      JSON.stringify(value)
-    );
-  } catch {
-    // Ignore storage failures in demo environments.
-  }
-}
-
-function clearDraft() {
-  try {
-    window.sessionStorage.removeItem(STOCK_MOVEMENT_V1_DRAFT_KEY);
-  } catch {
-    // Ignore storage failures in demo environments.
-  }
-}
-
-function formatDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleString();
-}
-
-function formatExpiry(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString();
-}
-
-function getFeedbackStyle(type) {
-  if (type === "error") {
-    return {
-      color: "#991b1b",
-      background: "#fef2f2",
-      border: "1px solid #fecaca",
-      boxShadow: "inset 4px 0 0 #dc2626",
-    };
-  }
-
-  if (type === "success") {
-    return {
-      color: "#065f46",
-      background: "#ecfdf5",
-      border: "1px solid #a7f3d0",
-      boxShadow: "inset 4px 0 0 #10b981",
-    };
-  }
-
-  return {
-    color: "#9a3412",
-    background: "#fff7ed",
-    border: "1px solid #fed7aa",
-    boxShadow: "inset 4px 0 0 #ea580c",
-  };
-}
-
-function normalizeText(value) {
+function text(value) {
   return String(value || "").trim();
 }
 
-function safeNumber(value) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : 0;
+function displayDrug(row) {
+  return text(row?.drug_name) || text(row?.drug_code) || "Unnamed Drug";
 }
 
-function formatMoney(value) {
-  const number = Number(value || 0);
-  return Number.isFinite(number) ? number.toFixed(4) : "0.0000";
-}
-
-function buildDrugDisplayName(drug) {
-  const explicit = normalizeText(drug?.display_name);
-  if (explicit) return explicit;
-
-  const brandName = normalizeText(drug?.brand_name || drug?.drug_name);
-  const strength = normalizeText(drug?.strength);
-  const dosageForm = normalizeText(drug?.dosage_form);
-
-  return [brandName, strength, dosageForm].filter(Boolean).join(" ").trim();
-}
-
-function firstNonEmpty(...values) {
-  for (const value of values) {
-    const normalized = normalizeText(value);
-    if (normalized) return normalized;
+function parseBulkLines(rawText) {
+  const lines = rawText.split("\n");
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].trim();
+    if (!raw) continue;
+    const commaIdx = raw.lastIndexOf(",");
+    if (commaIdx === -1) {
+      result.push({ lineNo: i + 1, rawDrug: raw, rawQty: "", qty: 0, error: "Missing quantity — add comma then number" });
+      continue;
+    }
+    const rawDrug = text(raw.slice(0, commaIdx));
+    const rawQty = text(raw.slice(commaIdx + 1));
+    if (!rawDrug) {
+      result.push({ lineNo: i + 1, rawDrug: "", rawQty, qty: 0, error: "Missing drug name or code" });
+      continue;
+    }
+    const qty = Number(rawQty);
+    if (!rawQty || !Number.isFinite(qty) || qty <= 0) {
+      result.push({ lineNo: i + 1, rawDrug, rawQty, qty: 0, error: "Quantity must be a positive number" });
+      continue;
+    }
+    result.push({ lineNo: i + 1, rawDrug, rawQty, qty, error: null });
   }
-  return "";
+  return result;
 }
 
-function resolvePackLabel(source) {
-  return firstNonEmpty(
-    source?.normalized_pack_size,
-    source?.package_size,
-    source?.pack_size,
-    source?.pack_description,
-    source?.stock_unit,
-    source?.unit
+function matchDrug(inventory, rawDrug) {
+  const q = text(rawDrug).toLowerCase();
+  if (!q) return { row: null, confidence: "not_found" };
+
+  // 1. exact drug_code
+  let row = inventory.find(
+    (r) => text(r.drug_code).toLowerCase() === q && Number(r.quantity) > 0
   );
+  if (row) return { row, confidence: "exact" };
+
+  // 2. exact drug_name
+  row = inventory.find(
+    (r) => text(r.drug_name).toLowerCase() === q && Number(r.quantity) > 0
+  );
+  if (row) return { row, confidence: "exact" };
+
+  // 3. contains drug_code — only safe when single match
+  const codeHits = inventory.filter(
+    (r) => text(r.drug_code).toLowerCase().includes(q) && Number(r.quantity) > 0
+  );
+  if (codeHits.length === 1) return { row: codeHits[0], confidence: "contains" };
+  if (codeHits.length > 1) return { row: null, confidence: "ambiguous" };
+
+  // 4. contains drug_name — only safe when single match
+  const nameHits = inventory.filter(
+    (r) => text(r.drug_name).toLowerCase().includes(q) && Number(r.quantity) > 0
+  );
+  if (nameHits.length === 1) return { row: nameHits[0], confidence: "contains" };
+  if (nameHits.length > 1) return { row: null, confidence: "ambiguous" };
+
+  return { row: null, confidence: "not_found" };
 }
 
-function extractPackSizeValue(source) {
-  const directCandidates = [
-    source?.pack_size_value,
-    source?.pack_size,
-    source?.normalized_pack_size_value,
-    source?.normalized_pack_size,
-    source?.outer_pack_count,
-    source?.inner_pack_count,
-  ];
+// ── Style constants ────────────────────────────────────────────────────────
 
-  for (const candidate of directCandidates) {
-    const numeric = Number(candidate);
-    if (Number.isFinite(numeric) && numeric > 0) {
-      return Math.floor(numeric);
-    }
-  }
+const BADGE = {
+  OK:                   { background: "#dcfce7", color: "#15803d", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" },
+  "Insufficient Stock": { background: "#fef3c7", color: "#92400e", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" },
+  "Not Found":          { background: "#fee2e2", color: "#b91c1c", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" },
+  "Review Needed":      { background: "#fef9c3", color: "#713f12", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" },
+  "Parse Error":        { background: "#f3f4f6", color: "#4b5563", borderRadius: 4, padding: "2px 8px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" },
+};
 
-  const label = resolvePackLabel(source);
-  if (!label) return 1;
+const ROW_BG = {
+  OK:                   "transparent",
+  "Insufficient Stock": "#fffbeb",
+  "Not Found":          "#fef2f2",
+  "Review Needed":      "#fefce8",
+  "Parse Error":        "#f9fafb",
+};
 
-  const match = String(label).match(/(\d+(?:\.\d+)?)/);
-  if (!match) return 1;
+const S = {
+  page: {
+    maxWidth: 1240,
+    margin: "0 auto",
+    display: "grid",
+    gap: 14,
+  },
+  pageHeaderCard: {
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+    border: "1px solid #dbe7f5",
+    borderRadius: 15,
+    padding: "16px 18px",
+    boxShadow: "0 12px 24px rgba(15,23,42,0.05)",
+  },
+  tabs: { display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" },
+  tab: (active) => ({
+    padding: "8px 18px",
+    borderRadius: 10,
+    border: active ? "1px solid #1d4ed8" : "1px solid #cbd5e1",
+    cursor: "pointer",
+    fontWeight: 700,
+    background: active ? "#2563eb" : "#ffffff",
+    color: active ? "#ffffff" : "#334155",
+    boxShadow: active ? "0 8px 14px rgba(37,99,235,0.22)" : "0 4px 10px rgba(15,23,42,0.04)",
+    fontSize: 13,
+  }),
+  tabSm: (active) => ({
+    padding: "7px 14px",
+    borderRadius: 10,
+    border: active ? "1px solid #1e40af" : "1px solid #cbd5e1",
+    cursor: "pointer",
+    fontWeight: 700,
+    background: active ? "#1e3a8a" : "#ffffff",
+    color: active ? "#ffffff" : "#334155",
+    boxShadow: active ? "0 8px 14px rgba(30,58,138,0.22)" : "0 4px 10px rgba(15,23,42,0.04)",
+    fontSize: 13,
+  }),
+  card: {
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+    border: "1px solid #dbe7f5",
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 14,
+    boxShadow: "0 12px 24px rgba(15,23,42,0.05)",
+  },
+  label: { display: "block", fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6, marginTop: 14, textTransform: "uppercase", letterSpacing: "0.05em" },
+  labelFirst: { display: "block", fontSize: 11, fontWeight: 700, color: "#374151", marginBottom: 6, marginTop: 0, textTransform: "uppercase", letterSpacing: "0.05em" },
+  input: { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: 10, fontSize: 14, color: "#0f172a", background: "#fff" },
+  select: { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: 10, fontSize: 14, background: "#fff", color: "#0f172a" },
+  btn: { marginTop: 18, padding: "10px 18px", background: "linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%)", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer", fontSize: 14, boxShadow: "0 8px 16px rgba(37,99,235,0.24)" },
+  btnPurple: { marginTop: 0, padding: "10px 18px", background: "linear-gradient(135deg, #5b21b6 0%, #7c3aed 100%)", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, cursor: "pointer", fontSize: 14, boxShadow: "0 8px 16px rgba(91,33,182,0.24)" },
+  btnGhost: { padding: "10px 16px", background: "#fff", color: "#374151", border: "1px solid #cbd5e1", borderRadius: 10, fontWeight: 700, cursor: "pointer", fontSize: 13, boxShadow: "0 4px 10px rgba(15,23,42,0.05)" },
+  th: { background: "#f8fbff", padding: "11px 12px", textAlign: "left", fontWeight: 700, color: "#64748b", borderBottom: "1px solid #dbe7f5", fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.06em" },
+  td: { padding: "11px 12px", borderBottom: "1px solid #edf2fa", color: "#0f172a", fontSize: 13 },
+  summary: { background: "#f0f7ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "13px 16px", marginBottom: 14 },
+  summaryTitle: { fontWeight: 700, fontSize: 15, marginBottom: 6, color: "#1e40af" },
+  summaryMeta: { fontSize: 13, color: "#334155", marginBottom: 2 },
+  msgOk: { marginTop: 12, color: "#16a34a", fontWeight: 600, fontSize: 14 },
+  msgErr: { marginTop: 12, color: "#dc2626", fontWeight: 600, fontSize: 14 },
+  subhead: { marginTop: 0, marginBottom: 5, fontSize: 17, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.01em" },
+  hint: { margin: "0 0 16px", fontSize: 13, color: "#64748b", lineHeight: 1.5 },
+  textarea: { width: "100%", boxSizing: "border-box", padding: "10px 12px", border: "1px solid #cbd5e1", borderRadius: 10, fontSize: 13, fontFamily: "monospace", minHeight: 120, resize: "vertical" },
+  resultCard: { background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8, padding: "16px 20px", marginBottom: 16 },
+  resultTitle: { fontWeight: 700, fontSize: 15, color: "#15803d", marginBottom: 8 },
+  resultRow: { display: "flex", gap: 24, flexWrap: "wrap" },
+  resultStat: { fontSize: 14, color: "#374151" },
+};
 
-  const parsed = Number(match[1]);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 1;
-
-  return Math.floor(parsed);
-}
-
-function resolveUnitCostPerBaseUnit(source) {
-  const directUnitCost = [
-    source?.unit_cost,
-    source?.unit_price_pharmacy,
-    source?.price_to_pharmacy,
-    source?.pharmacy_price,
-  ];
-
-  for (const candidate of directUnitCost) {
-    const numeric = Number(candidate);
-    if (Number.isFinite(numeric) && numeric >= 0) {
-      return numeric;
-    }
-  }
-
-  return 0;
-}
-
-function resolvePublicPricePerBaseUnit(source) {
-  const candidates = [
-    source?.price_to_public,
-    source?.unit_price_public,
-    source?.public_price,
-  ];
-
-  for (const candidate of candidates) {
-    const numeric = Number(candidate);
-    if (Number.isFinite(numeric) && numeric >= 0) {
-      return numeric;
-    }
-  }
-
-  return 0;
-}
-
-function enrichDrug(source) {
-  const displayName = buildDrugDisplayName(source);
-  const packLabel = resolvePackLabel(source);
-  const packSize = extractPackSizeValue(source);
-  const unitCostPerBaseUnit = resolveUnitCostPerBaseUnit(source);
-  const publicPricePerBaseUnit = resolvePublicPricePerBaseUnit(source);
-
-  return {
-    ...source,
-    display_name: displayName,
-    pack_label: packLabel || `${packSize} units`,
-    pack_size_value: packSize,
-    unit_cost_per_base_unit: unitCostPerBaseUnit,
-    public_price_per_base_unit: publicPricePerBaseUnit,
-  };
-}
-
-function enrichInventoryRow(row) {
-  const packLabel = resolvePackLabel(row);
-  const packSize = extractPackSizeValue(row);
-  const unitCostPerBaseUnit = resolveUnitCostPerBaseUnit(row);
-
-  return {
-    ...row,
-    pack_label: packLabel || `${packSize} units`,
-    pack_size_value: packSize,
-    unit_cost_per_base_unit: unitCostPerBaseUnit,
-  };
-}
-
-function pluralizeUnit(count) {
-  return Number(count) === 1 ? "unit" : "units";
-}
+// ── Component ──────────────────────────────────────────────────────────────
 
 export default function StockMovementPage() {
-  const { user } = useAuthContext();
+  // Top section: "single" | "bulk"
+  const [section, setSection] = useState("single");
 
-  const [form, setForm] = useState(initialForm);
+  // ── Single movement state ──────────────────────────────────────────────
+  const [mode, setMode] = useState("receive"); // "receive" | "dispense"
   const [pharmacies, setPharmacies] = useState([]);
-  const [selectedDrug, setSelectedDrug] = useState(null);
-  const [selectedSourceRow, setSelectedSourceRow] = useState(null);
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState({ type: "", text: "" });
+  const [pharmacy, setPharmacy] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState({ text: "", ok: true });
 
-  const [quickBarcode, setQuickBarcode] = useState("");
-  const [quickQuantity, setQuickQuantity] = useState(1);
-  const [quickQuantityMode, setQuickQuantityMode] = useState("unit");
-  const [quickPharmacyId, setQuickPharmacyId] = useState("");
-  const [quickResolved, setQuickResolved] = useState(null);
-  const [quickSubmitting, setQuickSubmitting] = useState(false);
-  const [quickFeedback, setQuickFeedback] = useState({ type: "", text: "" });
+  // receive fields
+  const [drugName, setDrugName] = useState("");
+  const [batch, setBatch] = useState("");
+  const [expiry, setExpiry] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [qty, setQty] = useState("");
 
-  const [lookupDrugCode, setLookupDrugCode] = useState("");
-  const [debouncedLookupDrugCode, setDebouncedLookupDrugCode] = useState("");
-  const [lookupDrugMeta, setLookupDrugMeta] = useState(null);
-  const [lookupDrugMessage, setLookupDrugMessage] = useState("");
+  // dispense fields
+  const [inventory, setInventory] = useState([]);
+  const [search, setSearch] = useState("");
+  const [selectedRow, setSelectedRow] = useState(null);
+  const [dispenseQty, setDispenseQty] = useState("");
 
-  const movementTypes = useMemo(() => getStockMovementTypes(), []);
+  // ── Bulk state ─────────────────────────────────────────────────────────
+  const [bulkOp, setBulkOp] = useState("bulk_dispense");
+  const [bulkSrc, setBulkSrc] = useState("");
+  const [bulkDst, setBulkDst] = useState("");
+  const [bulkText, setBulkText] = useState("");
+  const [bulkPreview, setBulkPreview] = useState(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
 
-  const pharmacyMap = useMemo(() => {
-    const map = new Map();
-    for (const pharmacy of pharmacies) {
-      if (!pharmacy?.id || map.has(pharmacy.id)) continue;
-      map.set(pharmacy.id, pharmacy);
-    }
-    return map;
-  }, [pharmacies]);
-
-  const isReceive = form.movementType === "Receive";
-  const isInventoryFirst =
-    form.movementType === "Dispense" ||
-    form.movementType === "Adjustment Remove" ||
-    form.movementType === "Transfer Out";
-
-  const activePackSize = useMemo(() => {
-    if (isReceive && selectedDrug) return selectedDrug.pack_size_value || 1;
-    if (!isReceive && selectedSourceRow) return selectedSourceRow.pack_size_value || 1;
-    return 1;
-  }, [isReceive, selectedDrug, selectedSourceRow]);
-
-  const activePackLabel = useMemo(() => {
-    if (isReceive && selectedDrug) return selectedDrug.pack_label || `${activePackSize} units`;
-    if (!isReceive && selectedSourceRow) return selectedSourceRow.pack_label || `${activePackSize} units`;
-    return `${activePackSize} units`;
-  }, [isReceive, selectedDrug, selectedSourceRow, activePackSize]);
-
-  const enteredQuantity = useMemo(() => {
-    const value = Math.floor(safeNumber(form.quantity));
-    return value > 0 ? value : 0;
-  }, [form.quantity]);
-
-  const inventoryQuantity = useMemo(() => {
-    if (enteredQuantity <= 0) return 0;
-    if (form.quantityMode === "pack") {
-      return enteredQuantity * Math.max(1, activePackSize);
-    }
-    return enteredQuantity;
-  }, [enteredQuantity, form.quantityMode, activePackSize]);
-
-  const availableBaseUnits = useMemo(() => {
-    if (!selectedSourceRow) return 0;
-    return Math.max(0, Math.floor(safeNumber(selectedSourceRow.quantity)));
-  }, [selectedSourceRow]);
-
-  const availablePacks = useMemo(() => {
-    if (!selectedSourceRow) return 0;
-    return Math.floor(availableBaseUnits / Math.max(1, activePackSize));
-  }, [selectedSourceRow, availableBaseUnits, activePackSize]);
-
-  const effectiveUnitCost = useMemo(() => {
-    const numeric = Number(form.unitCost);
-    if (Number.isFinite(numeric) && numeric >= 0) return numeric;
-
-    if (isReceive && selectedDrug) return selectedDrug.unit_cost_per_base_unit || 0;
-    if (!isReceive && selectedSourceRow) return selectedSourceRow.unit_cost_per_base_unit || 0;
-
-    return 0;
-  }, [form.unitCost, isReceive, selectedDrug, selectedSourceRow]);
-
-  const estimatedLineCost = useMemo(() => {
-    if (inventoryQuantity <= 0) return 0;
-    return inventoryQuantity * effectiveUnitCost;
-  }, [inventoryQuantity, effectiveUnitCost]);
-
-  const quickPackSize = useMemo(() => {
-    if (!quickResolved) return 1;
-    return Math.max(1, quickResolved.pack_size_value || 1);
-  }, [quickResolved]);
-
-  const quickPackLabel = useMemo(() => {
-    if (!quickResolved) return "1 unit";
-    return quickResolved.pack_label || `${quickPackSize} ${pluralizeUnit(quickPackSize)}`;
-  }, [quickResolved, quickPackSize]);
-
-  const quickEnteredQuantity = useMemo(() => {
-    const n = Math.floor(safeNumber(quickQuantity));
-    return n > 0 ? n : 0;
-  }, [quickQuantity]);
-
-  const quickInventoryQuantity = useMemo(() => {
-    if (quickEnteredQuantity <= 0) return 0;
-    if (quickQuantityMode === "pack") {
-      return quickEnteredQuantity * Math.max(1, quickPackSize);
-    }
-    return quickEnteredQuantity;
-  }, [quickEnteredQuantity, quickQuantityMode, quickPackSize]);
-
-  const isQuantityOverAvailable =
-    isInventoryFirst && enteredQuantity > 0 && inventoryQuantity > availableBaseUnits;
+  // ── Effects ────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const draft = readDraft();
-    if (draft?.form && typeof draft.form === "object") {
-      setForm((prev) => ({ ...prev, ...draft.form }));
-    }
+    void loadPharmacies();
   }, []);
 
+  // Reset single form on mode change
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      writeDraft({ form });
-    }, DRAFT_WRITE_DEBOUNCE_MS);
+    setPharmacy("");
+    setMessage({ text: "", ok: true });
+    setSearch("");
+    setSelectedRow(null);
+    setInventory([]);
+    setQty("");
+    setDispenseQty("");
+    setDrugName("");
+    setBatch("");
+    setExpiry("");
+    setBarcode("");
+  }, [mode]);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [form]);
-
+  // Reset bulk when section or operation switches
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setDebouncedLookupDrugCode(normalizeText(lookupDrugCode));
-    }, 180);
+    setBulkSrc("");
+    setBulkDst("");
+    setBulkText("");
+    setBulkPreview(null);
+    setBulkResult(null);
+    setMessage({ text: "", ok: true });
+  }, [section, bulkOp]);
 
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [lookupDrugCode]);
-
+  // Load inventory for single dispense
   useEffect(() => {
-    let canceled = false;
-    const code = normalizeText(debouncedLookupDrugCode);
+    if (section === "single" && mode === "dispense" && pharmacy) {
+      void loadInventory(pharmacy);
+    } else if (section === "single" && mode === "dispense") {
+      setInventory([]);
+      setSelectedRow(null);
+    }
+  }, [section, mode, pharmacy]);
 
-    if (!code) {
-      setLookupDrugMeta(null);
-      setLookupDrugMessage("");
+  // ── Data loaders ───────────────────────────────────────────────────────
+
+  async function loadPharmacies() {
+    const { data, error } = await supabase.from("pharmacies").select("id, name").order("name");
+    if (!error && Array.isArray(data)) setPharmacies(data);
+  }
+
+  async function loadInventory(pharmacyId) {
+    const { data, error } = await supabase
+      .from("pharmacy_inventory")
+      .select("id, drug_name, drug_code, batch_no, barcode, expiry_date, quantity")
+      .eq("pharmacy_id", pharmacyId)
+      .gt("quantity", 0)
+      .order("expiry_date", { ascending: true });
+    if (!error && Array.isArray(data)) setInventory(data);
+    else setInventory([]);
+  }
+
+  async function fetchPharmacyInventory(pharmacyId) {
+    const { data, error } = await supabase
+      .from("pharmacy_inventory")
+      .select("id, drug_name, drug_code, batch_no, barcode, expiry_date, quantity")
+      .eq("pharmacy_id", pharmacyId)
+      .gt("quantity", 0)
+      .order("expiry_date", { ascending: true });
+    return error ? [] : (data || []);
+  }
+
+  // ── Derived ────────────────────────────────────────────────────────────
+
+  const pharmacyName = useMemo(
+    () => pharmacies.find((p) => String(p.id) === String(pharmacy))?.name || "",
+    [pharmacies, pharmacy]
+  );
+
+  const filteredInventory = useMemo(() => {
+    const q = text(search).toLowerCase();
+    if (!q) return inventory;
+    return inventory.filter((row) =>
+      [row.drug_name, row.drug_code, row.batch_no, row.barcode]
+        .map((v) => text(v).toLowerCase())
+        .some((v) => v.includes(q))
+    );
+  }, [inventory, search]);
+
+  // ── Single movement save ───────────────────────────────────────────────
+
+  function flash(msg, ok = true) {
+    setMessage({ text: msg, ok });
+  }
+
+  async function handleSave() {
+    setMessage({ text: "", ok: true });
+    if (!pharmacy) { flash("Select a pharmacy", false); return; }
+
+    if (mode === "receive") {
+      if (!text(drugName)) { flash("Enter drug name", false); return; }
+      const numQty = Number(qty);
+      if (!numQty || numQty <= 0) { flash("Enter a valid quantity", false); return; }
+      setBusy(true);
+      const { error } = await supabase.from("pharmacy_inventory").insert({
+        pharmacy_id: pharmacy,
+        drug_name: text(drugName),
+        quantity: numQty,
+        batch_no: text(batch) || null,
+        expiry_date: text(expiry) || null,
+        barcode: text(barcode) || null,
+      });
+      setBusy(false);
+      if (error) { flash(error.message, false); return; }
+      flash("Stock received successfully");
+      setDrugName(""); setBatch(""); setExpiry(""); setBarcode(""); setQty("");
       return;
     }
 
-    const run = async () => {
-      try {
-        const row = await getDrugByCode(code);
-        if (canceled) return;
-
-        if (!row) {
-          setLookupDrugMeta(null);
-          setLookupDrugMessage("Drug code not found");
-          if (isReceive) {
-            setSelectedDrug(null);
-          }
-          return;
-        }
-
-        const enrichedLookupDrug = enrichDrug({
-          ...row,
-          drug_name: row.display_name || buildDrugDisplayName(row),
-        });
-
-        setLookupDrugMeta(enrichedLookupDrug);
-        setLookupDrugMessage("");
-
-        setForm((prev) => ({
-          ...prev,
-          drugName: enrichedLookupDrug.display_name || prev.drugName,
-          unitCost:
-            enrichedLookupDrug.unit_cost_per_base_unit !== undefined &&
-            enrichedLookupDrug.unit_cost_per_base_unit !== null
-              ? String(enrichedLookupDrug.unit_cost_per_base_unit)
-              : prev.unitCost,
-        }));
-
-        if (isReceive) {
-          setSelectedDrug(enrichedLookupDrug);
-        }
-      } catch {
-        if (!canceled) {
-          setLookupDrugMeta(null);
-          setLookupDrugMessage("Drug code not found");
-          if (isReceive) {
-            setSelectedDrug(null);
-          }
-        }
-      }
-    };
-
-    void run();
-
-    return () => {
-      canceled = true;
-    };
-  }, [debouncedLookupDrugCode, isReceive]);
-
-  useEffect(() => {
-    if (!quickPharmacyId && pharmacies.length > 0) {
-      setQuickPharmacyId(pharmacies[0].id || "");
-    }
-  }, [pharmacies, quickPharmacyId]);
-
-  const loadPage = async () => {
-    setLoading(true);
-    setFeedback({ type: "", text: "" });
-
-    try {
-      const [options, recent] = await Promise.all([
-        fetchStockMovementOptions(),
-        fetchRecentStockMovements(100),
-      ]);
-
-      setPharmacies(options?.pharmacies || []);
-      setRows(recent || []);
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        text: error?.message || "Failed to load stock movement data.",
+    if (mode === "dispense") {
+      if (!selectedRow) { flash("Select an inventory row", false); return; }
+      const numQty = Number(dispenseQty);
+      if (!numQty || numQty <= 0) { flash("Enter a valid quantity", false); return; }
+      const available = Number(selectedRow.quantity || 0);
+      if (numQty > available) { flash(`Insufficient stock — available: ${available}`, false); return; }
+      setBusy(true);
+      const { error: upErr } = await supabase
+        .from("pharmacy_inventory")
+        .update({ quantity: available - numQty })
+        .eq("id", selectedRow.id);
+      if (upErr) { setBusy(false); flash(upErr.message, false); return; }
+      const { error: mvErr } = await supabase.from("stock_movements").insert({
+        movement_type: "Dispense",
+        drug_name: displayDrug(selectedRow),
+        quantity: numQty,
+        from_pharmacy: pharmacyName || String(pharmacy),
+        to_pharmacy: null,
+        batch_no: selectedRow.batch_no || null,
+        expiry_date: selectedRow.expiry_date || null,
+        reference_no: null,
+        notes: null,
+        created_at: new Date().toISOString(),
       });
+      setBusy(false);
+      if (mvErr) { flash(mvErr.message, false); return; }
+      flash("Dispensed successfully");
+      setSelectedRow(null); setDispenseQty("");
+      await loadInventory(pharmacy);
     }
+  }
 
-    setLoading(false);
-  };
+  // ── Bulk preview ───────────────────────────────────────────────────────
 
-  useEffect(() => {
-    void loadPage();
-  }, []);
+  async function handleBulkPreview() {
+    setMessage({ text: "", ok: true });
+    setBulkResult(null);
+    if (!bulkSrc) { flash("Select source pharmacy", false); return; }
+    if (bulkOp === "bulk_transfer") {
+      if (!bulkDst) { flash("Select destination pharmacy", false); return; }
+      if (String(bulkSrc) === String(bulkDst)) { flash("Source and destination must be different pharmacies", false); return; }
+    }
+    if (!text(bulkText)) { flash("Enter at least one item in the text area", false); return; }
 
-  const resetLookupState = () => {
-    setLookupDrugCode("");
-    setDebouncedLookupDrugCode("");
-    setLookupDrugMeta(null);
-    setLookupDrugMessage("");
-  };
+    setBulkBusy(true);
+    const inv = await fetchPharmacyInventory(bulkSrc);
+    const parsed = parseBulkLines(bulkText);
 
-  const handleChange = (event) => {
-    const { name, value } = event.target;
-
-    setForm((prev) => {
-      const next = { ...prev, [name]: value };
-
-      if (name === "movementType") {
-        next.sourcePharmacyId = "";
-        next.destinationPharmacyId = "";
-        next.drugName = "";
-        next.quantity = "";
-        next.quantityMode = "unit";
-        next.batchNo = "";
-        next.expiryDate = "";
-        next.barcode = "";
-        next.unitCost = "";
+    const preview = parsed.map((p) => {
+      if (p.error) {
+        return { ...p, matchedRow: null, status: "Parse Error", statusDetail: p.error };
       }
-
-      if (name === "sourcePharmacyId") {
-        next.drugName = "";
-        next.quantity = "";
-        next.quantityMode = "unit";
-        next.batchNo = "";
-        next.expiryDate = "";
-        next.barcode = "";
-        next.unitCost = "";
+      const { row, confidence } = matchDrug(inv, p.rawDrug);
+      if (confidence === "ambiguous") {
+        return { ...p, matchedRow: null, status: "Review Needed", statusDetail: "Multiple partial matches — be more specific" };
       }
-
-      return next;
+      if (confidence === "not_found" || !row) {
+        return { ...p, matchedRow: null, status: "Not Found", statusDetail: "" };
+      }
+      const available = Number(row.quantity);
+      if (p.qty > available) {
+        return { ...p, matchedRow: row, status: "Insufficient Stock", statusDetail: `Available: ${available}` };
+      }
+      const detail = confidence === "contains" ? "Partial match — verify drug" : "";
+      return { ...p, matchedRow: row, status: "OK", statusDetail: detail };
     });
 
-    if (name === "movementType" || name === "sourcePharmacyId") {
-      setSelectedSourceRow(null);
-      setSelectedDrug(null);
-      resetLookupState();
-    }
-  };
+    setBulkPreview(preview);
+    setBulkBusy(false);
+  }
 
-  const setFormQuantityMode = (mode) => {
-    setForm((prev) => ({
-      ...prev,
-      quantityMode: mode,
-      quantity: "",
-    }));
-  };
+  // ── Bulk dispense confirm ──────────────────────────────────────────────
 
-  const chooseMasterDrug = (drug) => {
-    const enrichedDrug = enrichDrug(drug);
+  async function confirmBulkDispense() {
+    if (!bulkPreview) return;
+    const valid = bulkPreview.filter((r) => r.status === "OK");
+    if (valid.length === 0) { flash("No valid rows to process", false); return; }
 
-    setSelectedDrug(enrichedDrug);
-    setSelectedSourceRow(null);
-    setLookupDrugCode(normalizeText(enrichedDrug.drug_code));
-    setLookupDrugMeta(enrichedDrug);
-    setLookupDrugMessage("");
+    setBulkBusy(true);
+    const srcName = pharmacies.find((p) => String(p.id) === String(bulkSrc))?.name || String(bulkSrc);
+    let ok = 0;
+    let failed = 0;
 
-    setForm((prev) => ({
-      ...prev,
-      drugName: enrichedDrug.display_name,
-      barcode: drug?.barcode || "",
-      unitCost:
-        enrichedDrug.unit_cost_per_base_unit > 0
-          ? String(enrichedDrug.unit_cost_per_base_unit)
-          : "",
-      quantityMode: enrichedDrug.pack_size_value > 1 ? "pack" : "unit",
-      quantity: "",
-    }));
-  };
-
-  const chooseSourceRow = (row) => {
-    const enrichedRow = enrichInventoryRow(row);
-
-    setSelectedSourceRow(enrichedRow);
-    setSelectedDrug(null);
-    resetLookupState();
-
-    setForm((prev) => ({
-      ...prev,
-      drugName: enrichedRow?.drug_name || "",
-      batchNo: enrichedRow?.batch_no || "",
-      expiryDate: enrichedRow?.expiry_date || "",
-      barcode: enrichedRow?.barcode || "",
-      unitCost:
-        enrichedRow.unit_cost_per_base_unit > 0
-          ? String(enrichedRow.unit_cost_per_base_unit)
-          : "",
-      quantityMode: enrichedRow.pack_size_value > 1 ? "pack" : "unit",
-      quantity: "",
-    }));
-  };
-
-  const resolveQuickBarcode = async (rawBarcode, preferredPharmacyId) => {
-    const barcode = normalizeText(rawBarcode);
-    if (!barcode) {
-      setQuickResolved(null);
-      return null;
-    }
-
-    if (!supabase) {
-      throw new Error("Supabase is not configured for barcode resolution.");
-    }
-
-    const { data: masterRows, error: masterError } = await supabase
-      .from("drug_master")
-      .select("*")
-      .eq("barcode", barcode)
-      .limit(1);
-
-    if (masterError) {
-      throw new Error(masterError.message || "Failed to search barcode in drug master.");
-    }
-
-    if (Array.isArray(masterRows) && masterRows.length > 0) {
-      const enriched = enrichDrug(masterRows[0]);
-      const resolved = {
-        source: "drug_master",
-        barcode,
-        drug_name: enriched.display_name || normalizeText(masterRows[0]?.drug_name),
-        drug_code: normalizeText(masterRows[0]?.drug_code),
-        pack_label: enriched.pack_label,
-        pack_size_value: enriched.pack_size_value,
-        unit_cost_per_base_unit: enriched.unit_cost_per_base_unit || 0,
-        public_price_per_base_unit: enriched.public_price_per_base_unit || 0,
-      };
-      setQuickResolved(resolved);
-      return resolved;
-    }
-
-    let inventoryQuery = supabase
-      .from("pharmacy_inventory")
-      .select("id,pharmacy_id,drug_name,quantity,batch_no,expiry_date,barcode,unit_cost")
-      .eq("barcode", barcode)
-      .order("quantity", { ascending: false })
-      .limit(1);
-
-    const preferredPharmacy = normalizeText(preferredPharmacyId);
-    if (preferredPharmacy) {
-      inventoryQuery = inventoryQuery.eq("pharmacy_id", preferredPharmacy);
-    }
-
-    const { data: inventoryRows, error: inventoryError } = await inventoryQuery;
-
-    if (inventoryError) {
-      throw new Error(inventoryError.message || "Failed to search barcode in inventory.");
-    }
-
-    if (Array.isArray(inventoryRows) && inventoryRows.length > 0) {
-      const row = enrichInventoryRow(inventoryRows[0]);
-      const resolved = {
-        source: "pharmacy_inventory",
-        barcode,
-        drug_name: normalizeText(row?.drug_name),
-        drug_code: "",
-        pack_label: row.pack_label,
-        pack_size_value: row.pack_size_value,
-        unit_cost_per_base_unit: row.unit_cost_per_base_unit || 0,
-        public_price_per_base_unit: 0,
-      };
-      setQuickResolved(resolved);
-      return resolved;
-    }
-
-    setQuickResolved(null);
-    throw new Error("Barcode not found in drug master or pharmacy inventory.");
-  };
-
-  const handleQuickReceive = async () => {
-    setQuickSubmitting(true);
-    setQuickFeedback({ type: "", text: "" });
-
-    try {
-      const pharmacyId = normalizeText(quickPharmacyId);
-      const barcode = normalizeText(quickBarcode);
-      if (!pharmacyId) throw new Error("Select a pharmacy for quick receive.");
-      if (!barcode) throw new Error("Enter a barcode first.");
-      if (!quickInventoryQuantity || quickInventoryQuantity <= 0) {
-        throw new Error("Quantity must be greater than zero.");
-      }
-
-      const resolved = await resolveQuickBarcode(barcode, pharmacyId);
-      const toPharmacy = pharmacyMap.get(pharmacyId);
-      if (!toPharmacy?.name) throw new Error("Selected pharmacy is not available.");
-
-      const result = await postStockMovement({
-        movementType: "Receive",
-        drugName: resolved?.drug_name || "",
-        quantity: quickInventoryQuantity,
-        toPharmacyId: pharmacyId,
-        toPharmacyName: toPharmacy.name,
-        barcode,
-        unitCost: resolved?.unit_cost_per_base_unit || 0,
-        createdBy: user?.email || "falconmed.v1@system",
-      });
-
-      const recent = await fetchRecentStockMovements(100);
-      setRows(recent || []);
-      emitInventoryUpdated(result.emittedPharmacyId || pharmacyId);
-
-      setQuickFeedback({
-        type: "success",
-        text: `Quick Receive posted: ${quickEnteredQuantity} ${quickQuantityMode}${quickEnteredQuantity === 1 ? "" : "s"} = ${quickInventoryQuantity} ${pluralizeUnit(quickInventoryQuantity)}.`,
-      });
-    } catch (error) {
-      setQuickFeedback({
-        type: "error",
-        text: error?.message || "Quick Receive failed.",
-      });
-    }
-
-    setQuickSubmitting(false);
-  };
-
-  const handleQuickDispense = async () => {
-    setQuickSubmitting(true);
-    setQuickFeedback({ type: "", text: "" });
-
-    try {
-      const pharmacyId = normalizeText(quickPharmacyId);
-      const barcode = normalizeText(quickBarcode);
-      if (!pharmacyId) throw new Error("Select a pharmacy for quick dispense.");
-      if (!barcode) throw new Error("Enter a barcode first.");
-      if (!quickInventoryQuantity || quickInventoryQuantity <= 0) {
-        throw new Error("Quantity must be greater than zero.");
-      }
-
-      await resolveQuickBarcode(barcode, pharmacyId);
-
-      if (!supabase) {
-        throw new Error("Supabase is not configured for quick dispense.");
-      }
-
-      const { data: sourceRows, error: sourceError } = await supabase
+    for (const item of valid) {
+      const available = Number(item.matchedRow.quantity);
+      const { error: upErr } = await supabase
         .from("pharmacy_inventory")
-        .select("id,pharmacy_id,drug_name,quantity,batch_no,expiry_date,barcode,unit_cost")
-        .eq("pharmacy_id", pharmacyId)
-        .eq("barcode", barcode)
-        .gt("quantity", 0)
-        .order("expiry_date", { ascending: true, nullsFirst: false })
-        .limit(1);
+        .update({ quantity: available - item.qty })
+        .eq("id", item.matchedRow.id);
+      if (upErr) { failed++; continue; }
 
-      if (sourceError) {
-        throw new Error(sourceError.message || "Failed to resolve inventory row for quick dispense.");
-      }
-
-      const sourceRow = sourceRows?.[0] || null;
-      if (!sourceRow?.id) {
-        throw new Error("No available inventory row found for this barcode in the selected pharmacy.");
-      }
-
-      const availableQty = Math.max(0, Math.floor(safeNumber(sourceRow.quantity)));
-      if (quickInventoryQuantity > availableQty) {
-        throw new Error(
-          `Insufficient stock. Available ${availableQty} ${pluralizeUnit(availableQty)}, attempted ${quickInventoryQuantity} ${pluralizeUnit(quickInventoryQuantity)}.`
-        );
-      }
-
-      const fromPharmacy = pharmacyMap.get(pharmacyId);
-      if (!fromPharmacy?.name) throw new Error("Selected pharmacy is not available.");
-
-      const result = await postStockMovement({
-        movementType: "Dispense",
-        drugName: normalizeText(sourceRow.drug_name),
-        quantity: quickInventoryQuantity,
-        fromPharmacyId: pharmacyId,
-        fromPharmacyName: fromPharmacy.name,
-        sourceInventoryRowId: String(sourceRow.id),
-        sourceInventoryRow: sourceRow,
-        batchNo: sourceRow.batch_no || "",
-        expiryDate: sourceRow.expiry_date || "",
-        barcode,
-        unitCost: sourceRow.unit_cost || 0,
-        createdBy: user?.email || "falconmed.v1@system",
+      const { error: mvErr } = await supabase.from("stock_movements").insert({
+        movement_type: "Dispense",
+        drug_name: displayDrug(item.matchedRow),
+        quantity: item.qty,
+        from_pharmacy: srcName,
+        to_pharmacy: null,
+        batch_no: item.matchedRow.batch_no || null,
+        expiry_date: item.matchedRow.expiry_date || null,
+        reference_no: null,
+        notes: "Bulk Dispense",
+        created_at: new Date().toISOString(),
       });
-
-      const recent = await fetchRecentStockMovements(100);
-      setRows(recent || []);
-      emitInventoryUpdated(result.emittedPharmacyId || pharmacyId);
-
-      setQuickFeedback({
-        type: "success",
-        text: `Quick Dispense posted: ${quickEnteredQuantity} ${quickQuantityMode}${quickEnteredQuantity === 1 ? "" : "s"} = ${quickInventoryQuantity} ${pluralizeUnit(quickInventoryQuantity)}.`,
-      });
-    } catch (error) {
-      setQuickFeedback({
-        type: "error",
-        text: error?.message || "Quick Dispense failed.",
-      });
+      if (mvErr) { failed++; continue; }
+      ok++;
     }
 
-    setQuickSubmitting(false);
-  };
+    setBulkBusy(false);
+    setBulkResult({ total: valid.length, ok, failed });
+    setBulkPreview(null);
+    setBulkText("");
+  }
 
-  const resetForm = () => {
-    setForm(initialForm);
-    setSelectedDrug(null);
-    setSelectedSourceRow(null);
-    resetLookupState();
-    clearDraft();
-  };
+  // ── Bulk transfer confirm ──────────────────────────────────────────────
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-    setSubmitting(true);
-    setFeedback({ type: "", text: "" });
+  async function confirmBulkTransfer() {
+    if (!bulkPreview) return;
+    const valid = bulkPreview.filter((r) => r.status === "OK");
+    if (valid.length === 0) { flash("No valid rows to process", false); return; }
 
-    try {
-      const fromPharmacy = pharmacyMap.get(form.sourcePharmacyId) || null;
-      const toPharmacy = pharmacyMap.get(form.destinationPharmacyId) || null;
+    setBulkBusy(true);
+    const srcName = pharmacies.find((p) => String(p.id) === String(bulkSrc))?.name || String(bulkSrc);
+    const dstName = pharmacies.find((p) => String(p.id) === String(bulkDst))?.name || String(bulkDst);
+    let ok = 0;
+    let failed = 0;
 
-      if (isReceive && !selectedDrug) {
-        throw new Error("Select a drug from Drug Master Search before recording Receive.");
+    for (const item of valid) {
+      const src = item.matchedRow;
+      const available = Number(src.quantity);
+
+      // 1. Subtract from source
+      const { error: srcUpErr } = await supabase
+        .from("pharmacy_inventory")
+        .update({ quantity: available - item.qty })
+        .eq("id", src.id);
+      if (srcUpErr) { failed++; continue; }
+
+      // 2. Add to destination — match by drug_name + batch_no + expiry_date
+      let dstQ = supabase
+        .from("pharmacy_inventory")
+        .select("id, quantity")
+        .eq("pharmacy_id", bulkDst)
+        .eq("drug_name", text(src.drug_name));
+      dstQ = src.batch_no ? dstQ.eq("batch_no", src.batch_no) : dstQ.is("batch_no", null);
+      dstQ = src.expiry_date ? dstQ.eq("expiry_date", src.expiry_date) : dstQ.is("expiry_date", null);
+      const { data: dstRows } = await dstQ.limit(1);
+      const dstExisting = dstRows?.[0] || null;
+
+      if (dstExisting) {
+        const { error: dstUpErr } = await supabase
+          .from("pharmacy_inventory")
+          .update({ quantity: Number(dstExisting.quantity) + item.qty })
+          .eq("id", dstExisting.id);
+        if (dstUpErr) { failed++; continue; }
+      } else {
+        const { error: dstInsErr } = await supabase.from("pharmacy_inventory").insert({
+          pharmacy_id: bulkDst,
+          drug_name: text(src.drug_name),
+          quantity: item.qty,
+          batch_no: src.batch_no || null,
+          expiry_date: src.expiry_date || null,
+          barcode: src.barcode || null,
+        });
+        if (dstInsErr) { failed++; continue; }
       }
 
-      if (isInventoryFirst && !selectedSourceRow?.id) {
-        throw new Error("Select a source inventory row before posting this movement.");
-      }
-
-      if (!inventoryQuantity || inventoryQuantity <= 0) {
-        throw new Error("Enter a valid quantity greater than zero.");
-      }
-
-      if (isInventoryFirst && inventoryQuantity > availableBaseUnits) {
-        throw new Error(
-          `Insufficient stock. Available ${availableBaseUnits} ${pluralizeUnit(
-            availableBaseUnits
-          )}, attempted ${inventoryQuantity} ${pluralizeUnit(inventoryQuantity)}.`
-        );
-      }
-
-      const result = await postStockMovement({
-        movementType: form.movementType,
-        drugName: form.drugName,
-        quantity: inventoryQuantity,
-        fromPharmacyId: form.sourcePharmacyId,
-        toPharmacyId: form.destinationPharmacyId,
-        fromPharmacyName: fromPharmacy?.name || "",
-        toPharmacyName: toPharmacy?.name || "",
-        batchNo: form.batchNo,
-        expiryDate: form.expiryDate,
-        barcode: form.barcode,
-        unitCost: effectiveUnitCost,
-        referenceNo: form.referenceNo,
-        notes: form.notes,
-        sourceInventoryRowId: selectedSourceRow?.id || "",
-        sourceInventoryRow: selectedSourceRow,
-        createdBy: user?.email || "falconmed.v1@system",
+      // 3. Transfer Out movement
+      const { error: outErr } = await supabase.from("stock_movements").insert({
+        movement_type: "Transfer Out",
+        drug_name: displayDrug(src),
+        quantity: item.qty,
+        from_pharmacy: srcName,
+        to_pharmacy: dstName,
+        batch_no: src.batch_no || null,
+        expiry_date: src.expiry_date || null,
+        reference_no: null,
+        notes: "Bulk Transfer",
+        created_at: new Date().toISOString(),
       });
+      if (outErr) { failed++; continue; }
 
-      const recent = await fetchRecentStockMovements(100);
-      setRows(recent || []);
-
-      setFeedback({
-        type: "success",
-        text: `Movement recorded successfully. Entered ${enteredQuantity} ${form.quantityMode}${
-          enteredQuantity === 1 ? "" : "s"
-        } = ${inventoryQuantity} ${pluralizeUnit(
-          inventoryQuantity
-        )} in inventory (${result.records.length} ledger entr${
-          result.records.length === 1 ? "y" : "ies"
-        }).`,
+      // 4. Transfer In movement
+      const { error: inErr } = await supabase.from("stock_movements").insert({
+        movement_type: "Transfer In",
+        drug_name: displayDrug(src),
+        quantity: item.qty,
+        from_pharmacy: srcName,
+        to_pharmacy: dstName,
+        batch_no: src.batch_no || null,
+        expiry_date: src.expiry_date || null,
+        reference_no: null,
+        notes: "Bulk Transfer",
+        created_at: new Date().toISOString(),
       });
+      if (inErr) { failed++; continue; }
 
-      emitInventoryUpdated(result.emittedPharmacyId || "");
-      resetForm();
-    } catch (error) {
-      setFeedback({
-        type: "error",
-        text: error?.message || "Failed to record movement.",
-      });
+      ok++;
     }
 
-    setSubmitting(false);
-  };
+    setBulkBusy(false);
+    setBulkResult({ total: valid.length, ok, failed });
+    setBulkPreview(null);
+    setBulkText("");
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────
+
+  const validBulkCount = bulkPreview ? bulkPreview.filter((r) => r.status === "OK").length : 0;
 
   return (
-    <div style={pageShell}>
-      <div style={pageWrap}>
-        <div style={heroCard}>
-          <div style={heroEyebrow}>Operations</div>
-          <h2 style={heroTitle}>Stock Movement</h2>
-          <p style={heroSubtitle}>Manage inventory movements safely and accurately</p>
-        </div>
+    <div style={S.page}>
+      <div style={S.pageHeaderCard}>
+        <PageHeader
+          title="Stock Movement"
+          subtitle="Execute receive, dispense, and bulk stock workflows with stronger operational clarity."
+        />
+      </div>
 
-        {feedback.text ? (
-          <div style={{ ...feedbackBox, ...getFeedbackStyle(feedback.type) }}>
-            {feedback.text}
+      {/* Top section tabs */}
+      <div style={S.tabs}>
+        <button style={S.tab(section === "single")} className="fm-action-btn" onClick={() => setSection("single")}>
+          Single Movement
+        </button>
+        <button style={S.tab(section === "bulk")} className="fm-action-btn" onClick={() => setSection("bulk")}>
+          Bulk Actions
+        </button>
+      </div>
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          SINGLE MOVEMENT
+      ═══════════════════════════════════════════════════════════════════ */}
+      {section === "single" && (
+        <>
+          <div style={{ ...S.tabs, marginBottom: 16 }}>
+            <button style={S.tabSm(mode === "receive")} className="fm-action-btn" onClick={() => setMode("receive")}>
+              Receive
+            </button>
+            <button style={S.tabSm(mode === "dispense")} className="fm-action-btn" onClick={() => setMode("dispense")}>
+              Dispense
+            </button>
           </div>
-        ) : null}
 
-        <div style={panel}>
-          <h3 style={panelTitle}>Quick Barcode Entry</h3>
+          {/* RECEIVE */}
+          {mode === "receive" && (
+            <div style={S.card}>
+              <h3 style={S.subhead}>Receive Stock</h3>
+              <p style={S.hint}>Add incoming stock to a pharmacy&apos;s inventory.</p>
 
-          <div style={quickGrid}>
-            <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-              <label style={fieldLabel}>Barcode Input</label>
-              <input
-                value={quickBarcode}
-                onChange={(event) => {
-                  setQuickBarcode(event.target.value);
-                  setQuickFeedback({ type: "", text: "" });
-                }}
-                onBlur={() => {
-                  if (normalizeText(quickBarcode)) {
-                    void resolveQuickBarcode(quickBarcode, quickPharmacyId).catch(() => {
-                      // Keep silent on blur; explicit actions surface feedback.
-                    });
-                  }
-                }}
-                style={inputStyle}
-                placeholder="Scan or type barcode"
-              />
-            </div>
-
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Pharmacy</label>
-              <select
-                value={quickPharmacyId}
-                onChange={(event) => setQuickPharmacyId(event.target.value)}
-                style={inputStyle}
-              >
-                <option value="">Select pharmacy</option>
-                {pharmacies.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
+              <label style={S.labelFirst}>Pharmacy *</label>
+              <select style={S.select} value={pharmacy} onChange={(e) => setPharmacy(e.target.value)}>
+                <option value="">Select pharmacy...</option>
+                {pharmacies.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
               </select>
-            </div>
 
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Quantity Input</label>
+              <label style={S.label}>Drug Name *</label>
               <input
+                style={S.input}
+                placeholder="e.g. Amoxicillin 500mg"
+                value={drugName}
+                onChange={(e) => setDrugName(e.target.value)}
+              />
+
+              <label style={S.label}>Batch No (optional)</label>
+              <input
+                style={S.input}
+                placeholder="e.g. BTC-2024-001"
+                value={batch}
+                onChange={(e) => setBatch(e.target.value)}
+              />
+
+              <label style={S.label}>Expiry Date (optional)</label>
+              <input
+                style={S.input}
+                type="date"
+                value={expiry}
+                onChange={(e) => setExpiry(e.target.value)}
+              />
+
+              <label style={S.label}>Barcode (optional)</label>
+              <input
+                style={S.input}
+                placeholder="Scan or type barcode"
+                value={barcode}
+                onChange={(e) => setBarcode(e.target.value)}
+              />
+
+              <label style={S.label}>Quantity *</label>
+              <input
+                style={{ ...S.input, maxWidth: 200 }}
                 type="number"
                 min="1"
-                step="1"
-                value={quickQuantity}
-                onChange={(event) => setQuickQuantity(event.target.value)}
-                style={inputStyle}
+                placeholder="0"
+                value={qty}
+                onChange={(e) => setQty(e.target.value)}
               />
-            </div>
 
-            <div style={fieldGroup}>
-              <label style={fieldLabel}>Quantity Entry Mode</label>
-              <div style={modeToggleWrap}>
-                <button
-                  type="button"
-                  style={
-                    quickQuantityMode === "unit"
-                      ? modeToggleActive
-                      : modeToggleButton
-                  }
-                  onClick={() => setQuickQuantityMode("unit")}
-                >
-                  Unit
-                </button>
-
-                <button
-                  type="button"
-                  style={
-                    quickPackSize <= 1
-                      ? modeToggleDisabled
-                      : quickQuantityMode === "pack"
-                      ? modeToggleActive
-                      : modeToggleButton
-                  }
-                  onClick={() => {
-                    if (quickPackSize <= 1) return;
-                    setQuickQuantityMode("pack");
-                  }}
-                  disabled={quickPackSize <= 1}
-                >
-                  Pack
-                </button>
-              </div>
-
-              <div style={modeHelperText}>
-                {quickPackSize > 1
-                  ? `1 pack = ${quickPackSize} ${pluralizeUnit(quickPackSize)}`
-                  : "Pack mode unavailable because current item resolves to 1 unit only."}
-              </div>
-            </div>
-          </div>
-
-          {quickResolved ? (
-            <div style={quickResolvedCard}>
-              <div style={selectedDrugTitle}>{quickResolved.drug_name || "-"}</div>
-              <div style={selectedDrugMetaGrid}>
-                <div>
-                  <div style={selectedDrugMetaLabel}>Found In</div>
-                  <div style={selectedDrugMetaValue}>
-                    {quickResolved.source === "drug_master"
-                      ? "Drug Master"
-                      : "Pharmacy Inventory"}
-                  </div>
-                </div>
-                <div>
-                  <div style={selectedDrugMetaLabel}>Drug Code</div>
-                  <div style={selectedDrugMetaValue}>{quickResolved.drug_code || "-"}</div>
-                </div>
-                <div>
-                  <div style={selectedDrugMetaLabel}>Pack Size</div>
-                  <div style={selectedDrugMetaValue}>{quickPackLabel}</div>
-                </div>
-                <div>
-                  <div style={selectedDrugMetaLabel}>Pharmacy Cost / Unit</div>
-                  <div style={selectedDrugMetaValue}>
-                    AED {formatMoney(quickResolved.unit_cost_per_base_unit || 0)}
-                  </div>
-                </div>
-                <div>
-                  <div style={selectedDrugMetaLabel}>Public Price / Unit</div>
-                  <div style={selectedDrugMetaValue}>
-                    AED {formatMoney(quickResolved.public_price_per_base_unit || 0)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          <div style={packIntelligenceCard}>
-            <div style={packIntelligenceLine}>
-              Pack Size: <strong>{quickPackLabel}</strong>
-            </div>
-            <div style={packIntelligenceLine}>
-              Entered:{" "}
-              <strong>
-                {quickEnteredQuantity > 0
-                  ? `${quickEnteredQuantity} ${quickQuantityMode}${quickEnteredQuantity === 1 ? "" : "s"}`
-                  : "-"}
-              </strong>
-            </div>
-            <div style={packIntelligenceLine}>
-              Inventory Preview:{" "}
-              <strong>
-                {quickInventoryQuantity > 0
-                  ? `${quickInventoryQuantity} ${pluralizeUnit(quickInventoryQuantity)}`
-                  : "-"}
-              </strong>
-            </div>
-          </div>
-
-          {quickFeedback.text ? (
-            <div
-              style={{
-                ...feedbackBox,
-                ...getFeedbackStyle(quickFeedback.type),
-                marginTop: "10px",
-              }}
-            >
-              {quickFeedback.text}
-            </div>
-          ) : null}
-
-          <div style={quickActionRow}>
-            <button
-              type="button"
-              onClick={() => {
-                void handleQuickReceive();
-              }}
-              disabled={quickSubmitting || loading}
-              style={primaryButton}
-            >
-              {quickSubmitting ? "Posting..." : "Quick Receive"}
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                void handleQuickDispense();
-              }}
-              disabled={quickSubmitting || loading}
-              style={ghostButton}
-            >
-              Quick Dispense
-            </button>
-          </div>
-        </div>
-
-        <div style={panel}>
-          <h3 style={panelTitle}>Record Movement</h3>
-
-          <form onSubmit={handleSubmit}>
-            <div style={formStack}>
-              <section style={sectionCard}>
-                <div style={sectionHeading}>Movement Details</div>
-                <div style={sectionGrid}>
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Movement Type</label>
-                    <select
-                      name="movementType"
-                      value={form.movementType}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    >
-                      {movementTypes.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {isInventoryFirst ? (
-                    <div style={fieldGroup}>
-                      <label style={fieldLabel}>Source Pharmacy</label>
-                      <select
-                        name="sourcePharmacyId"
-                        value={form.sourcePharmacyId}
-                        onChange={handleChange}
-                        style={inputStyle}
-                        required
-                      >
-                        <option value="">Select source pharmacy</option>
-                        {pharmacies
-                          .filter(
-                            (item) =>
-                              !(form.destinationPharmacyId && item.id === form.destinationPharmacyId)
-                          )
-                          .map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name}
-                            </option>
-                          ))}
-                      </select>
-                    </div>
-                  ) : (
-                    <div style={fieldGroup}>
-                      <label style={fieldLabel}>Pharmacy</label>
-                      <select
-                        name="destinationPharmacyId"
-                        value={form.destinationPharmacyId}
-                        onChange={handleChange}
-                        style={inputStyle}
-                        required
-                      >
-                        <option value="">Select pharmacy</option>
-                        {pharmacies.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </section>
-
-              {isReceive ? (
-                <section style={sectionCard}>
-                  <div style={sectionHeading}>Drug Selection</div>
-                  <div style={sectionGrid}>
-                    <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                      <label style={fieldLabel}>Drug Master Search</label>
-                      <DrugMasterPicker value={selectedDrug} onSelect={chooseMasterDrug} required />
-                    </div>
-
-                    {selectedDrug ? (
-                      <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                        <div style={selectedDrugCard}>
-                          <div style={selectedDrugTitle}>
-                            {selectedDrug.display_name || "-"}
-                          </div>
-
-                          <div style={selectedDrugMetaGrid}>
-                            <div>
-                              <div style={selectedDrugMetaLabel}>Drug Code</div>
-                              <div style={selectedDrugMetaValue}>
-                                {selectedDrug?.drug_code || "-"}
-                              </div>
-                            </div>
-
-                            <div>
-                              <div style={selectedDrugMetaLabel}>Pack Size</div>
-                              <div style={selectedDrugMetaValue}>
-                                {selectedDrug?.pack_label || "-"}{" "}
-                                <span style={mutedInline}>
-                                  ({selectedDrug?.pack_size_value || 1}{" "}
-                                  {pluralizeUnit(selectedDrug?.pack_size_value || 1)})
-                                </span>
-                              </div>
-                            </div>
-
-                            <div>
-                              <div style={selectedDrugMetaLabel}>Pharmacy Cost / Unit</div>
-                              <div style={selectedDrugMetaValue}>
-                                AED {formatMoney(selectedDrug?.unit_cost_per_base_unit || 0)}
-                              </div>
-                            </div>
-
-                            <div>
-                              <div style={selectedDrugMetaLabel}>Public Price / Unit</div>
-                              <div style={selectedDrugMetaValue}>
-                                AED {formatMoney(selectedDrug?.public_price_per_base_unit || 0)}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </section>
-              ) : null}
-
-              <section style={sectionCard}>
-                <div style={sectionHeading}>Drug Details</div>
-                <div style={sectionGrid}>
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Drug Code</label>
-                    <input
-                      value={lookupDrugCode}
-                      onChange={(event) => setLookupDrugCode(event.target.value)}
-                      style={inputStyle}
-                      placeholder="Enter drug code for lookup"
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Drug Name</label>
-                    <input
-                      name="drugName"
-                      value={form.drugName}
-                      onChange={handleChange}
-                      style={inputStyle}
-                      required
-                      placeholder={
-                        isReceive
-                          ? "Auto-filled from Drug Master Search"
-                          : "Select source row to auto-fill"
-                      }
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Batch No</label>
-                    <input
-                      name="batchNo"
-                      value={form.batchNo}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Expiry Date</label>
-                    <input
-                      type="date"
-                      name="expiryDate"
-                      value={form.expiryDate}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Barcode</label>
-                    <input
-                      name="barcode"
-                      value={form.barcode}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  {lookupDrugMessage ? (
-                    <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                      <div style={{ ...warningBanner, marginTop: 0 }}>
-                        {lookupDrugMessage}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {lookupDrugMeta ? (
-                    <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                      <div style={selectedDrugCard}>
-                        <div style={selectedDrugTitle}>
-                          {lookupDrugMeta.display_name ||
-                            lookupDrugMeta.brand_name ||
-                            lookupDrugMeta.generic_name ||
-                            "-"}
-                        </div>
-                        <div style={selectedDrugMetaGrid}>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Code</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.drug_code || "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Generic</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.generic_name || "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Strength</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.strength || "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Dosage Form</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.dosage_form || "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Package Size</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.package_size || lookupDrugMeta.pack_label || "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Pharmacy Price</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.pharmacy_price ?? "-"}
-                            </div>
-                          </div>
-                          <div>
-                            <div style={selectedDrugMetaLabel}>Public Price</div>
-                            <div style={selectedDrugMetaValue}>
-                              {lookupDrugMeta.public_price ?? "-"}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              <section style={sectionCard}>
-                <div style={sectionHeading}>Quantity and Pricing</div>
-                <div style={sectionGrid}>
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Quantity Entry Mode</label>
-
-                    <div style={modeToggleWrap}>
-                      <button
-                        type="button"
-                        style={
-                          form.quantityMode === "unit"
-                            ? modeToggleActive
-                            : modeToggleButton
-                        }
-                        onClick={() => setFormQuantityMode("unit")}
-                      >
-                        Unit
-                      </button>
-
-                      <button
-                        type="button"
-                        style={
-                          activePackSize <= 1
-                            ? modeToggleDisabled
-                            : form.quantityMode === "pack"
-                            ? modeToggleActive
-                            : modeToggleButton
-                        }
-                        onClick={() => {
-                          if (activePackSize <= 1) return;
-                          setFormQuantityMode("pack");
-                        }}
-                        disabled={activePackSize <= 1}
-                      >
-                        Pack
-                      </button>
-                    </div>
-
-                    <div style={modeHelperText}>
-                      {activePackSize > 1
-                        ? `1 pack = ${activePackSize} ${pluralizeUnit(activePackSize)}`
-                        : "Pack mode unavailable because this drug currently resolves to 1 unit only."}
-                    </div>
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>
-                      Entered Quantity ({form.quantityMode === "pack" ? "packs" : "units"})
-                    </label>
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      name="quantity"
-                      value={form.quantity}
-                      onChange={handleChange}
-                      style={inputStyle}
-                      required
-                      placeholder={
-                        form.quantityMode === "pack" ? "e.g. 2 packs" : "e.g. 20 units"
-                      }
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Inventory Quantity Preview</label>
-                    <input
-                      value={
-                        inventoryQuantity > 0
-                          ? `${inventoryQuantity} ${pluralizeUnit(inventoryQuantity)}`
-                          : "-"
-                      }
-                      readOnly
-                      style={readOnlyInputStyle}
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Pack Size</label>
-                    <input
-                      value={`${activePackSize} ${pluralizeUnit(activePackSize)}${
-                        activePackLabel ? ` • ${activePackLabel}` : ""
-                      }`}
-                      readOnly
-                      style={readOnlyInputStyle}
-                    />
-                  </div>
-
-                  <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                    <div style={packIntelligenceCard}>
-                      <div style={packIntelligenceLine}>
-                        Pack Size:{" "}
-                        <strong>
-                          {activePackLabel || `${activePackSize} ${pluralizeUnit(activePackSize)}`}
-                        </strong>
-                      </div>
-                      <div style={packIntelligenceLine}>
-                        Entered:{" "}
-                        <strong>
-                          {enteredQuantity > 0
-                            ? `${enteredQuantity} ${form.quantityMode}${enteredQuantity === 1 ? "" : "s"}`
-                            : "-"}
-                        </strong>
-                      </div>
-                      <div style={packIntelligenceLine}>
-                        Inventory preview:{" "}
-                        <strong>
-                          {inventoryQuantity > 0
-                            ? `${inventoryQuantity} ${pluralizeUnit(inventoryQuantity)}`
-                            : "-"}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Unit Cost</label>
-                    <input
-                      type="number"
-                      step="0.0001"
-                      min="0"
-                      name="unitCost"
-                      value={form.unitCost}
-                      onChange={handleChange}
-                      style={inputStyle}
-                      placeholder="Auto-filled per inventory unit"
-                    />
-                  </div>
-
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Estimated Line Cost</label>
-                    <input
-                      value={formatMoney(estimatedLineCost)}
-                      readOnly
-                      style={readOnlyInputStyle}
-                    />
-                  </div>
-                </div>
-              </section>
-
-              <section style={sectionCard}>
-                <div style={sectionHeading}>Notes and Reference</div>
-                <div style={sectionGrid}>
-                  <div style={fieldGroup}>
-                    <label style={fieldLabel}>Reference No</label>
-                    <input
-                      name="referenceNo"
-                      value={form.referenceNo}
-                      onChange={handleChange}
-                      style={inputStyle}
-                    />
-                  </div>
-
-                  <div style={{ ...fieldGroup, gridColumn: "1 / -1" }}>
-                    <label style={fieldLabel}>Notes</label>
-                    <textarea
-                      name="notes"
-                      value={form.notes}
-                      onChange={handleChange}
-                      style={textareaStyle}
-                      rows={3}
-                    />
-                  </div>
-                </div>
-              </section>
-            </div>
-
-            {isQuantityOverAvailable ? (
-              <div style={warningBanner}>
-                Quantity exceeds available inventory. Available{" "}
-                <strong>{availableBaseUnits}</strong> {pluralizeUnit(availableBaseUnits)}, preview is{" "}
-                <strong>{inventoryQuantity}</strong> {pluralizeUnit(inventoryQuantity)}.
-              </div>
-            ) : null}
-
-            {isInventoryFirst ? (
-              <div style={inventoryPickerWrap}>
-                <InventoryRowPicker
-                  pharmacyId={form.sourcePharmacyId}
-                  selectedRow={selectedSourceRow}
-                  onSelect={chooseSourceRow}
-                />
-              </div>
-            ) : null}
-
-            {selectedSourceRow ? (
-              <div style={balanceBanner}>
-                <div style={balanceLine}>
-                  Selected row: <strong>{selectedSourceRow.drug_name || "-"}</strong>
-                </div>
-                <div style={balanceLine}>
-                  Available stock: <strong>{availableBaseUnits}</strong>{" "}
-                  {pluralizeUnit(availableBaseUnits)}
-                  {activePackSize > 1 ? (
-                    <>
-                      {" "}
-                      • Approx packs: <strong>{availablePacks}</strong>
-                    </>
-                  ) : null}
-                </div>
-                <div style={balanceLine}>
-                  Batch: <strong>{selectedSourceRow.batch_no || "-"}</strong> • Expiry:{" "}
-                  <strong>{formatExpiry(selectedSourceRow.expiry_date)}</strong> • Barcode:{" "}
-                  <strong>{selectedSourceRow.barcode || "-"}</strong>
-                </div>
-                <div style={balanceLine}>
-                  Pack intelligence: <strong>{activePackLabel}</strong> • Posting preview:{" "}
-                  <strong>
-                    {enteredQuantity > 0
-                      ? `${enteredQuantity} ${form.quantityMode}${enteredQuantity === 1 ? "" : "s"} = ${inventoryQuantity} ${pluralizeUnit(inventoryQuantity)}`
-                      : "-"}
-                  </strong>
-                </div>
-              </div>
-            ) : null}
-
-            <div style={actionRow}>
-              <button type="submit" disabled={submitting || loading} style={primaryButton}>
-                {submitting ? "Recording..." : "Record Movement"}
+              <button style={S.btn} className="fm-action-btn" onClick={handleSave} disabled={busy}>
+                {busy ? "Saving..." : "Save Receipt"}
               </button>
+            </div>
+          )}
 
-              <button type="button" onClick={resetForm} style={ghostButton}>
+          {/* DISPENSE */}
+          {mode === "dispense" && (
+            <>
+              <div style={S.card}>
+                <h3 style={S.subhead}>Dispense From Inventory</h3>
+                <p style={S.hint}>Select source pharmacy, search for the drug, then confirm quantity.</p>
+
+                <label style={S.labelFirst}>Source Pharmacy *</label>
+                <select
+                  style={S.select}
+                  value={pharmacy}
+                  onChange={(e) => {
+                    setPharmacy(e.target.value);
+                    setSelectedRow(null);
+                    setSearch("");
+                    setDispenseQty("");
+                  }}
+                >
+                  <option value="">Select pharmacy...</option>
+                  {pharmacies.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {pharmacy && (
+                <div style={S.card}>
+                  <label style={S.labelFirst}>Search Stock</label>
+                  <input
+                    style={S.input}
+                    placeholder="Drug name, drug code, batch no, or barcode..."
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setSelectedRow(null);
+                      setDispenseQty("");
+                    }}
+                  />
+
+                  <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, marginTop: 12 }}>
+                    <thead>
+                      <tr>
+                        <th style={S.th}>Drug</th>
+                        <th style={S.th}>Code</th>
+                        <th style={S.th}>Batch</th>
+                        <th style={S.th}>Expiry</th>
+                        <th style={S.th}>Available</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredInventory.length === 0 ? (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            style={{ ...S.td, color: "#9ca3af", textAlign: "center", padding: "20px 0" }}
+                          >
+                            {search ? "No matching stock found." : "No stock available at this pharmacy."}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredInventory.map((row) => (
+                          <tr
+                            key={row.id}
+                            onClick={() => { setSelectedRow(row); setDispenseQty(""); }}
+                            className="fm-table-row"
+                            style={{
+                              background: selectedRow?.id === row.id ? "#eff6ff" : "transparent",
+                              cursor: "pointer",
+                              outline: selectedRow?.id === row.id ? "2px solid #3b82f6" : "none",
+                              outlineOffset: -2,
+                            }}
+                          >
+                            <td style={S.td}>{displayDrug(row)}</td>
+                            <td style={S.td}>{text(row.drug_code) || "-"}</td>
+                            <td style={S.td}>{text(row.batch_no) || "-"}</td>
+                            <td style={S.td}>{text(row.expiry_date) || "-"}</td>
+                            <td style={{ ...S.td, fontWeight: 600 }}>{row.quantity}</td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {selectedRow && (
+                <div style={S.card}>
+                  <div style={S.summary}>
+                    <div style={S.summaryTitle}>{displayDrug(selectedRow)}</div>
+                    <div style={S.summaryMeta}>
+                      Available stock: <strong>{selectedRow.quantity}</strong>
+                    </div>
+                    {selectedRow.batch_no && (
+                      <div style={S.summaryMeta}>Batch: {selectedRow.batch_no}</div>
+                    )}
+                    {selectedRow.expiry_date && (
+                      <div style={S.summaryMeta}>Expiry: {selectedRow.expiry_date}</div>
+                    )}
+                    {selectedRow.barcode && (
+                      <div style={S.summaryMeta}>Barcode: {selectedRow.barcode}</div>
+                    )}
+                  </div>
+
+                  <label style={S.labelFirst}>Quantity to Dispense *</label>
+                  <input
+                    style={{ ...S.input, maxWidth: 200 }}
+                    type="number"
+                    min="1"
+                    max={selectedRow.quantity}
+                    placeholder="0"
+                    value={dispenseQty}
+                    onChange={(e) => setDispenseQty(e.target.value)}
+                  />
+
+                  <button style={S.btn} className="fm-action-btn" onClick={handleSave} disabled={busy}>
+                    {busy ? "Saving..." : "Confirm Dispense"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+
+          {message.text && (
+            <p style={message.ok ? S.msgOk : S.msgErr}>{message.text}</p>
+          )}
+        </>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════
+          BULK ACTIONS
+      ═══════════════════════════════════════════════════════════════════ */}
+      {section === "bulk" && (
+        <>
+          {/* Bulk operation sub-tabs */}
+          <div style={{ ...S.tabs, marginBottom: 16 }}>
+            <button style={S.tabSm(bulkOp === "bulk_dispense")} className="fm-action-btn" onClick={() => setBulkOp("bulk_dispense")}>
+              Bulk Dispense
+            </button>
+            <button style={S.tabSm(bulkOp === "bulk_transfer")} className="fm-action-btn" onClick={() => setBulkOp("bulk_transfer")}>
+              Bulk Transfer
+            </button>
+          </div>
+
+          {/* Config card */}
+          <div style={S.card}>
+            <h3 style={S.subhead}>
+              {bulkOp === "bulk_dispense" ? "Bulk Dispense" : "Bulk Transfer"}
+            </h3>
+            <p style={S.hint}>
+              {bulkOp === "bulk_dispense"
+                ? "Dispense multiple drugs from one pharmacy in a single batch."
+                : "Transfer multiple drugs between two pharmacies in a single batch."}
+            </p>
+
+            <label style={S.labelFirst}>Source Pharmacy *</label>
+            <select
+              style={S.select}
+              value={bulkSrc}
+              onChange={(e) => {
+                setBulkSrc(e.target.value);
+                setBulkPreview(null);
+                setBulkResult(null);
+              }}
+            >
+              <option value="">Select source pharmacy...</option>
+              {pharmacies.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+
+            {bulkOp === "bulk_transfer" && (
+              <>
+                <label style={S.label}>Destination Pharmacy *</label>
+                <select
+                  style={S.select}
+                  value={bulkDst}
+                  onChange={(e) => {
+                    setBulkDst(e.target.value);
+                    setBulkPreview(null);
+                    setBulkResult(null);
+                  }}
+                >
+                  <option value="">Select destination pharmacy...</option>
+                  {pharmacies
+                    .filter((p) => String(p.id) !== String(bulkSrc))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                </select>
+              </>
+            )}
+
+            <label style={S.label}>Items *</label>
+            <p style={{ margin: "0 0 6px", fontSize: 12, color: "#6b7280" }}>
+              One line per item: drug name or drug code, then comma, then quantity
+            </p>
+            <textarea
+              style={S.textarea}
+              placeholder={"WEGOVY, 2\n123456, 5\nAmoxicillin 500mg, 10"}
+              value={bulkText}
+              onChange={(e) => {
+                setBulkText(e.target.value);
+                setBulkPreview(null);
+                setBulkResult(null);
+              }}
+            />
+
+            <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+              <button
+                style={{ ...S.btn, marginTop: 0 }}
+                className="fm-action-btn"
+                onClick={handleBulkPreview}
+                disabled={bulkBusy}
+              >
+                {bulkBusy ? "Loading..." : "Preview"}
+              </button>
+              <button
+                style={S.btnGhost}
+                className="fm-action-btn"
+                onClick={() => {
+                  setBulkText("");
+                  setBulkPreview(null);
+                  setBulkResult(null);
+                  setMessage({ text: "", ok: true });
+                }}
+              >
                 Reset
               </button>
             </div>
-          </form>
-        </div>
-
-        <div style={panel}>
-          <div style={tableHeaderRow}>
-            <h3 style={panelTitle}>Recent Ledger Entries</h3>
-            {loading ? (
-              <span style={tableMeta}>Loading...</span>
-            ) : (
-              <span style={tableMeta}>{rows.length} rows</span>
-            )}
           </div>
 
-          <div style={tableWrap}>
-            <table style={table}>
-              <thead>
-                <tr>
-                  <th style={th}>Date</th>
-                  <th style={th}>Type</th>
-                  <th style={th}>Drug</th>
-                  <th style={th}>Qty</th>
-                  <th style={th}>From</th>
-                  <th style={th}>To</th>
-                  <th style={th}>Reference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
+          {/* Preview table */}
+          {bulkPreview && (
+            <div style={S.card}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                  flexWrap: "wrap",
+                  gap: 8,
+                }}
+              >
+                <h4 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: "#374151" }}>
+                  Preview &mdash; {bulkPreview.length} line{bulkPreview.length !== 1 ? "s" : ""} parsed,{" "}
+                  <span style={{ color: validBulkCount > 0 ? "#15803d" : "#dc2626" }}>
+                    {validBulkCount} valid
+                  </span>
+                </h4>
+              </div>
+
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
                   <tr>
-                    <td style={emptyCell} colSpan={7}>
-                      No stock movement records found.
-                    </td>
+                    <th style={S.th}>#</th>
+                    <th style={S.th}>Drug Input</th>
+                    <th style={S.th}>Matched Drug</th>
+                    <th style={S.th}>Code</th>
+                    <th style={S.th}>Available</th>
+                    <th style={S.th}>Requested</th>
+                    <th style={S.th}>Status</th>
                   </tr>
-                ) : (
-                  rows.map((row) => (
-                    <tr
-                      key={row.id || `${row.movement_type}-${row.created_at}-${row.reference_no || "na"}`}
-                      className="stock-ledger-row"
-                    >
-                      <td style={td}>{formatDate(row.created_at)}</td>
-                      <td style={td}>{row.movement_type || "-"}</td>
-                      <td style={tdDrug}>{row.drug_name || "-"}</td>
-                      <td style={td}>{row.quantity ?? "-"}</td>
-                      <td style={td}>{row.from_pharmacy || "-"}</td>
-                      <td style={td}>{row.to_pharmacy || "-"}</td>
-                      <td style={td}>{row.reference_no || "-"}</td>
+                </thead>
+                <tbody>
+                  {bulkPreview.map((row, idx) => (
+                    <tr key={idx} style={{ background: ROW_BG[row.status] || "transparent" }}>
+                      <td style={{ ...S.td, color: "#9ca3af" }}>{row.lineNo}</td>
+                      <td style={S.td}>
+                        {row.rawDrug || <em style={{ color: "#9ca3af" }}>empty</em>}
+                      </td>
+                      <td style={S.td}>
+                        {row.matchedRow
+                          ? displayDrug(row.matchedRow)
+                          : <span style={{ color: "#9ca3af" }}>—</span>}
+                      </td>
+                      <td style={S.td}>
+                        {row.matchedRow ? (text(row.matchedRow.drug_code) || "—") : "—"}
+                      </td>
+                      <td style={S.td}>
+                        {row.matchedRow ? row.matchedRow.quantity : "—"}
+                      </td>
+                      <td style={{ ...S.td, fontWeight: row.status === "OK" ? 600 : 400 }}>
+                        {row.qty > 0 ? row.qty : (row.rawQty || "—")}
+                      </td>
+                      <td style={{ ...S.td, whiteSpace: "nowrap" }}>
+                        <StatusPill
+                          variant={
+                            row.status === "OK"
+                              ? "success"
+                              : row.status === "Insufficient Stock"
+                              ? "warning"
+                              : row.status === "Not Found"
+                              ? "danger"
+                              : "neutral"
+                          }
+                          style={BADGE[row.status] || {}}
+                        >
+                          {row.status}
+                        </StatusPill>
+                        {row.statusDetail
+                          ? <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 6 }}>{row.statusDetail}</span>
+                          : null}
+                      </td>
                     </tr>
-                  ))
+                  ))}
+                </tbody>
+              </table>
+
+              {validBulkCount > 0 && (
+                <button
+                  style={bulkOp === "bulk_transfer" ? S.btnPurple : { ...S.btn, marginTop: 18 }}
+                  className="fm-action-btn"
+                  onClick={bulkOp === "bulk_dispense" ? confirmBulkDispense : confirmBulkTransfer}
+                  disabled={bulkBusy}
+                >
+                  {bulkBusy
+                    ? "Processing..."
+                    : bulkOp === "bulk_dispense"
+                    ? `Confirm Bulk Dispense (${validBulkCount} item${validBulkCount !== 1 ? "s" : ""})`
+                    : `Confirm Bulk Transfer (${validBulkCount} item${validBulkCount !== 1 ? "s" : ""})`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Result summary */}
+          {bulkResult && (
+            <div style={S.resultCard}>
+              <div style={S.resultTitle}>
+                {bulkOp === "bulk_dispense" ? "Bulk Dispense Complete" : "Bulk Transfer Complete"}
+              </div>
+              <div style={S.resultRow}>
+                <span style={S.resultStat}>
+                  Total processed: <strong>{bulkResult.total}</strong>
+                </span>
+                <span style={{ ...S.resultStat, color: "#15803d" }}>
+                  Successful: <strong>{bulkResult.ok}</strong>
+                </span>
+                {bulkResult.failed > 0 && (
+                  <span style={{ ...S.resultStat, color: "#dc2626" }}>
+                    Failed: <strong>{bulkResult.failed}</strong>
+                  </span>
                 )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+              </div>
+            </div>
+          )}
+
+          {message.text && (
+            <p style={message.ok ? S.msgOk : S.msgErr}>{message.text}</p>
+          )}
+        </>
+      )}
     </div>
   );
 }
-
-const pageShell = {
-  background: "#f5f7fb",
-  padding: "8px 2px 20px",
-};
-
-const pageWrap = {
-  display: "grid",
-  gap: "20px",
-  maxWidth: "1220px",
-  margin: "0 auto",
-};
-
-const heroCard = {
-  background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
-  borderRadius: "16px",
-  padding: "22px 24px 20px",
-  color: "#0f172a",
-  border: "1px solid #e6edf6",
-  boxShadow: "0 10px 20px rgba(15, 23, 42, 0.055)",
-};
-
-const heroEyebrow = {
-  fontSize: "10.5px",
-  textTransform: "uppercase",
-  letterSpacing: "0.11em",
-  color: "#52637a",
-  marginBottom: "8px",
-  fontWeight: 700,
-};
-
-const heroTitle = {
-  margin: 0,
-  fontSize: "32px",
-  letterSpacing: "-0.02em",
-  color: "#0b1220",
-  lineHeight: 1.16,
-};
-
-const heroSubtitle = {
-  marginTop: "10px",
-  marginBottom: 0,
-  fontSize: "14px",
-  color: "#4a5a70",
-  lineHeight: 1.6,
-  maxWidth: "800px",
-};
-
-const feedbackBox = {
-  borderRadius: "12px",
-  padding: "12px 14px 12px 16px",
-  fontSize: "13px",
-  fontWeight: 600,
-};
-
-const panel = {
-  background: "#ffffff",
-  border: "1px solid #e3eaf3",
-  borderRadius: "16px",
-  padding: "20px 20px 18px",
-  boxShadow: "0 8px 22px rgba(15, 23, 42, 0.05)",
-};
-
-const panelTitle = {
-  marginTop: 0,
-  marginBottom: "16px",
-  fontSize: "19px",
-  color: "#0b1220",
-  letterSpacing: "-0.01em",
-  fontWeight: 700,
-};
-
-const formStack = {
-  display: "grid",
-  gap: "16px",
-};
-
-const quickGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "14px",
-};
-
-const quickResolvedCard = {
-  marginTop: "14px",
-  border: "1px solid #dbe6f3",
-  borderRadius: "14px",
-  padding: "14px 15px",
-  background: "#fcfdff",
-  boxShadow: "0 3px 10px rgba(15, 23, 42, 0.03)",
-};
-
-const quickActionRow = {
-  marginTop: "14px",
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "12px",
-};
-
-const sectionCard = {
-  border: "1px solid #e3ebf5",
-  borderRadius: "14px",
-  background: "#fcfdff",
-  padding: "15px",
-  display: "grid",
-  gap: "13px",
-  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.7)",
-};
-
-const sectionGrid = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "14px",
-};
-
-const sectionHeading = {
-  fontSize: "11px",
-  textTransform: "uppercase",
-  letterSpacing: "0.09em",
-  color: "#516079",
-  fontWeight: 700,
-  marginTop: "0",
-  paddingTop: "0",
-  paddingBottom: "10px",
-  borderBottom: "1px solid #e7eef8",
-};
-
-const fieldGroup = {
-  display: "grid",
-  gap: "8px",
-};
-
-const fieldLabel = {
-  fontSize: "11px",
-  fontWeight: 700,
-  color: "#4d5d74",
-  letterSpacing: "0.03em",
-  textTransform: "uppercase",
-};
-
-const inputStyle = {
-  width: "100%",
-  borderRadius: "10px",
-  border: "1px solid #d6e0ee",
-  background: "#ffffff",
-  color: "#0f172a",
-  padding: "10px 12px",
-  minHeight: "42px",
-  fontSize: "13px",
-  boxSizing: "border-box",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
-  transition: "border-color 140ms ease, box-shadow 140ms ease",
-};
-
-const readOnlyInputStyle = {
-  ...inputStyle,
-  background: "#f7fafe",
-  color: "#122034",
-  fontWeight: 600,
-};
-
-const textareaStyle = {
-  ...inputStyle,
-  minHeight: "96px",
-  resize: "vertical",
-  paddingTop: "11px",
-};
-
-const packIntelligenceCard = {
-  border: "1px solid #d9e6f5",
-  borderRadius: "12px",
-  background: "linear-gradient(180deg, #f8fbff 0%, #f3f8ff 100%)",
-  padding: "13px 14px",
-  display: "grid",
-  gap: "7px",
-  color: "#2a3e5b",
-  fontSize: "13px",
-  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.8)",
-};
-
-const packIntelligenceLine = {
-  lineHeight: 1.5,
-};
-
-const balanceBanner = {
-  marginTop: "14px",
-  borderRadius: "12px",
-  background: "#f4f8ff",
-  border: "1px solid #d5e4fb",
-  color: "#1e40af",
-  padding: "13px 14px",
-  fontSize: "13px",
-};
-
-const warningBanner = {
-  marginTop: "14px",
-  borderRadius: "12px",
-  background: "#fff7ed",
-  border: "1px solid #fed7aa",
-  color: "#9a3412",
-  boxShadow: "inset 3px 0 0 #ea580c",
-  padding: "12px 13px",
-  fontSize: "13px",
-  lineHeight: 1.45,
-};
-
-const balanceLine = {
-  marginBottom: "5px",
-  lineHeight: 1.45,
-};
-
-const inventoryPickerWrap = {
-  marginTop: "16px",
-  display: "grid",
-  gap: "10px",
-};
-
-const actionRow = {
-  marginTop: "18px",
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "12px",
-};
-
-const primaryButton = {
-  border: "none",
-  borderRadius: "11px",
-  padding: "11px 18px",
-  minHeight: "42px",
-  background: "linear-gradient(135deg, #1e4fcf 0%, #255ccf 100%)",
-  color: "#ffffff",
-  fontWeight: 700,
-  fontSize: "13px",
-  letterSpacing: "0.01em",
-  cursor: "pointer",
-  boxShadow: "0 8px 16px rgba(37, 92, 207, 0.22)",
-  transition: "transform 140ms ease, box-shadow 140ms ease",
-};
-
-const ghostButton = {
-  border: "1px solid #ccd8ea",
-  borderRadius: "11px",
-  padding: "11px 18px",
-  minHeight: "42px",
-  background: "#ffffff",
-  color: "#233246",
-  fontWeight: 700,
-  fontSize: "13px",
-  cursor: "pointer",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
-};
-
-const modeToggleWrap = {
-  display: "flex",
-  gap: "8px",
-};
-
-const modeToggleButton = {
-  flex: 1,
-  minHeight: "42px",
-  borderRadius: "10px",
-  border: "1px solid #d6e0ee",
-  background: "#ffffff",
-  color: "#233246",
-  fontSize: "13px",
-  fontWeight: 700,
-  cursor: "pointer",
-  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
-};
-
-const modeToggleActive = {
-  ...modeToggleButton,
-  border: "1px solid #255ccf",
-  background: "linear-gradient(135deg, #1e4fcf 0%, #255ccf 100%)",
-  color: "#ffffff",
-  boxShadow: "0 8px 16px rgba(37, 92, 207, 0.18)",
-};
-
-const modeToggleDisabled = {
-  ...modeToggleButton,
-  background: "#f8fafc",
-  color: "#94a3b8",
-  border: "1px solid #e2e8f0",
-  cursor: "not-allowed",
-  boxShadow: "none",
-};
-
-const modeHelperText = {
-  fontSize: "12px",
-  color: "#64748b",
-  lineHeight: 1.45,
-};
-
-const tableHeaderRow = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: "14px",
-};
-
-const tableMeta = {
-  fontSize: "12px",
-  color: "#5b6678",
-  fontWeight: 600,
-};
-
-const tableWrap = {
-  border: "1px solid #e4ebf4",
-  borderRadius: "14px",
-  overflow: "hidden",
-  overflowX: "auto",
-  background: "#ffffff",
-  boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.8)",
-};
-
-const table = {
-  width: "100%",
-  borderCollapse: "separate",
-  borderSpacing: 0,
-  minWidth: "960px",
-};
-
-const th = {
-  borderBottom: "1px solid #dde6f2",
-  padding: "12px 12px",
-  textAlign: "left",
-  fontSize: "11px",
-  color: "#566880",
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  fontWeight: 700,
-  background: "#f7fafe",
-  whiteSpace: "nowrap",
-};
-
-const td = {
-  borderBottom: "1px solid #ebf0f7",
-  padding: "12px 12px",
-  fontSize: "12.75px",
-  color: "#0f172a",
-  whiteSpace: "normal",
-  lineHeight: 1.5,
-  background: "#ffffff",
-};
-
-const tdDrug = {
-  ...td,
-  whiteSpace: "normal",
-  wordBreak: "break-word",
-  minWidth: "280px",
-};
-
-const emptyCell = {
-  ...td,
-  textAlign: "center",
-  color: "#64748b",
-};
-
-const selectedDrugCard = {
-  border: "1px solid #dbe5f2",
-  borderRadius: "14px",
-  padding: "15px 16px",
-  background: "linear-gradient(180deg, #fcfdff 0%, #f8fbff 100%)",
-  boxShadow: "0 6px 14px rgba(15, 23, 42, 0.04)",
-};
-
-const selectedDrugTitle = {
-  fontSize: "17px",
-  fontWeight: 700,
-  color: "#0c1525",
-  whiteSpace: "normal",
-  wordBreak: "break-word",
-  lineHeight: 1.4,
-};
-
-const selectedDrugMetaGrid = {
-  marginTop: "13px",
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "12px",
-};
-
-const selectedDrugMetaLabel = {
-  fontSize: "10.5px",
-  fontWeight: 700,
-  color: "#5c6777",
-  textTransform: "uppercase",
-  letterSpacing: "0.07em",
-  marginBottom: "5px",
-};
-
-const selectedDrugMetaValue = {
-  fontSize: "13px",
-  color: "#0f1c2f",
-  fontWeight: 700,
-  whiteSpace: "normal",
-  wordBreak: "break-word",
-  lineHeight: 1.45,
-};
-
-const mutedInline = {
-  color: "#64748b",
-  fontWeight: 500,
-};
